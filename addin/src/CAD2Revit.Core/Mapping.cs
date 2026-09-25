@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace CAD2Revit.Core
 {
-    public enum HostMode { None, Ceiling, Face, Wall }
+    public enum HostMode { None, Ceiling, Face, Wall, Vertical }
 
     /// <summary>One row of the mapping table: CAD block -> Revit family type.</summary>
     public class MapRow
@@ -61,6 +61,9 @@ namespace CAD2Revit.Core
             ["ceiling"] = HostMode.Ceiling,
             ["face"] = HostMode.Face,
             ["wall"] = HostMode.Wall,
+            ["vertical"] = HostMode.Vertical,
+            ["verticalplane"] = HostMode.Vertical,
+            ["vplane"] = HostMode.Vertical,
         };
 
         /// <summary>Host_Type cell text -> HostMode (null if not recognised).</summary>
@@ -161,7 +164,7 @@ namespace CAD2Revit.Core
                 var rawHost = Get(r, "host");
                 if (!HostValues.TryGetValue(Norm(rawHost), out var host))
                 {
-                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall) - using none");
+                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall/vertical) - using none");
                     host = HostMode.None;
                 }
                 result.SkippedBlocks.Remove(block);

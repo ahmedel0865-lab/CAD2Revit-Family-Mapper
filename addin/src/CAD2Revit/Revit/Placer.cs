@@ -90,6 +90,8 @@ namespace CAD2Revit.Revit
                     view = HostFinder.CreateTempView(_doc);
                     finder = new HostFinder(_doc, view, _settings.SearchRevitLinks);
                 }
+                var planes = mapped.Any(m => m.Item2.Host == HostMode.Vertical || m.Item2.Host == HostMode.Wall)
+                    ? new VerticalPlanes(_doc, level) : null;
                 var dups = new DuplicateIndex(_doc, Ft(_settings.DuplicateToleranceMm),
                                               levelZ - Ft(300), bandTop, _settings.DuplicateSameTypeOnly);
 
@@ -108,7 +110,7 @@ namespace CAD2Revit.Revit
                         st.Start();
                         try
                         {
-                            res = PlaceOne(b, row, sym, level, finder, dups, maxUp);
+                            res = PlaceOne(b, row, sym, level, finder, planes, dups, maxUp);
                             if (res.Status == Status.Placed) st.Commit();
                             else st.RollBack();
                         }
@@ -153,7 +155,7 @@ namespace CAD2Revit.Revit
         }
 
         PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level,
-                                 HostFinder finder, DuplicateIndex dups, double maxUp)
+                                 HostFinder finder, VerticalPlanes planes, DuplicateIndex dups, double maxUp)
         {
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
@@ -169,7 +171,17 @@ namespace CAD2Revit.Revit
 
             // 1. Find a host if the row asks for one.
             HostHit hit = null;
-            if (row.Host != HostMode.None)
+            bool onVertical = false;   // face-based family on a vertical work plane (no wall)
+            if (row.Host == HostMode.Vertical)
+            {
+                if (ptype == FamilyPlacementType.WorkPlaneBased) onVertical = true;
+                else if (ptype == FamilyPlacementType.OneLevelBased)
+                    notes.Add("family is not face-based - placed level-based");
+                else if (ptype == FamilyPlacementType.OneLevelBasedHosted)
+                    return Result(b, row, Status.Failed, Notes("legacy wall-hosted family needs a real wall - use Host Type " +
+                                                                "'wall' or a face-based family"), b.Point, angle);
+            }
+            else if (row.Host != HostMode.None)
             {
                 string hostWord = row.Host.ToString().ToLowerInvariant();
                 if (ptype == FamilyPlacementType.OneLevelBased)
@@ -199,7 +211,12 @@ namespace CAD2Revit.Revit
                         var msg = $"no {hostWord} found {where}";
                         if (!_settings.FallbackToUnhosted || ptype == FamilyPlacementType.OneLevelBasedHosted)
                             return Result(b, row, Status.Failed, Notes(msg), b.Point, angle);
-                        notes.Add(msg + " - placed unhosted");
+                        if (row.Host == HostMode.Wall && ptype == FamilyPlacementType.WorkPlaneBased)
+                        {
+                            onVertical = true;   // stand it up on a vertical plane instead of lying flat
+                            notes.Add(msg + " - placed on a vertical plane");
+                        }
+                        else notes.Add(msg + " - placed unhosted");
                     }
                 }
             }
@@ -216,9 +233,20 @@ namespace CAD2Revit.Revit
             }
             var cadDir = new XYZ(Math.Cos(angle), Math.Sin(angle), 0);
             FamilyInstance inst;
+            string hostText = hit?.Describe() ?? "";
 
             // 3. Create the instance according to the family's placement type.
-            if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
+            if (onVertical)
+            {
+                // Device faces the CAD block's local +Y axis (turned by the row's Rotation):
+                // blocks drawn with the wall along X and the room on +Y face into the room.
+                var facing = new XYZ(-Math.Sin(angle), Math.Cos(angle), 0);
+                var planeRef = planes.Get(target, facing, out var onPlane);
+                inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, XYZ.BasisZ.CrossProduct(facing).Normalize(), sym);
+                target = onPlane;
+                hostText = "Vertical plane";
+            }
+            else if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
             {
                 var n = hit.FaceNormal;
                 XYZ refDir = row.Host == HostMode.Wall
@@ -270,7 +298,7 @@ namespace CAD2Revit.Revit
                 SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "CAD: " + b.Name);
 
             dups.Add(sym, target);
-            return Result(b, row, Status.Placed, Notes(), target, angle, inst.Id, hit?.Describe() ?? "");
+            return Result(b, row, Status.Placed, Notes(), target, angle, inst.Id, hostText);
         }
 
         /// <summary>'Elevation from Level' (level-based / wall-hosted) or 'Offset from Host'

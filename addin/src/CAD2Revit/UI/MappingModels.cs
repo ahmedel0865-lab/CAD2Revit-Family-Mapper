@@ -26,7 +26,7 @@ namespace CAD2Revit.UI
     public class BlockRow : INotifyPropertyChanged, IDataErrorInfo
     {
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        public static readonly string[] HostChoices = { "non-hosted", "ceiling", "face", "wall" };
+        public static readonly string[] HostChoices = { "non-hosted", "ceiling", "face", "wall", "vertical" };
 
         FamilyOption _family = FamilyOption.Skip;
         string _elevation = "0", _rotation = "0", _host = "non-hosted";

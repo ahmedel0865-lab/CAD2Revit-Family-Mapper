@@ -104,6 +104,9 @@ namespace CAD2Revit.Core.Tests
             foreach (HostMode h in Enum.GetValues(typeof(HostMode)))
                 Assert.Equal(h, Mapping.ParseHost(Mapping.HostText(h)));
             Assert.Null(Mapping.ParseHost("roof"));
+            Assert.Equal(HostMode.Vertical, Mapping.ParseHost("Vertical"));
+            Assert.Equal(HostMode.Vertical, Mapping.ParseHost("vertical plane"));
+            Assert.Equal("vertical", Mapping.HostText(HostMode.Vertical));
         }
     }
 }

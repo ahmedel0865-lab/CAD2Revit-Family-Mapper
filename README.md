@@ -12,7 +12,7 @@ Instead of manually placing hundreds of light fixtures, sockets and detectors ov
 - Load / Save mappings as **.xlsx or .csv** (no Excel installation needed); List Blocks exports a ready-to-fill template
 - Places families at block insertion points, keeping the CAD rotation (+ per-row adjustment)
 - Handles DWG units, link position, rotation and shared coordinates automatically
-- Hosting per row: **ceiling**, **face** (ceilings/slabs/roofs/beams), **wall**, or **non-hosted**, including hosts in linked Revit models
+- Hosting per row: **ceiling**, **face** (ceilings/slabs/roofs/beams), **wall**, **vertical** (upright on a vertical plane, no wall needed), or **non-hosted**, including hosts in linked Revit models
 - Falls back to unhosted placement (or reports a failure) when no host is found
 - **Preview** does the full placement and then undoes it, so its counts match a real run, then returns to the mapping window
 - Duplicate protection per level, so re-running only adds new blocks

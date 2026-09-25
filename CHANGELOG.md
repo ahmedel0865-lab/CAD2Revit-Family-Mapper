@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-09-25
+### Added
+- **Vertical placement for wall devices** (standalone add-in).
+  - New Host Type **`vertical`**: face-based families stand upright on a vertical work plane through the CAD point, at the elevation, facing the block's local +Y (turned by Rotation). No Revit wall is needed, which suits MEP models that only have the DWG background.
+  - Planes are named `CAD2Revit vertical <id>`. Devices on the same wall line share one plane, and later runs reuse them.
+### Changed
+- Host Type **`wall`**: when no wall is found, face-based devices are now placed on a vertical plane instead of lying flat on the level.
+
 ## [0.4.1] - 2026-09-25
 ### Fixed
 - **Mapping window now groups instances by block name.** Revit reports block names as `<file>.dwg.<block>`, and DWGs exported from Revit name every block `<Family> - <Type>-<element id>-<view>`, so each instance appeared as its own `(1)` row. Names are now simplified before grouping: the file prefix is removed, and for Revit-exported DWGs the view suffix and element id are removed. For example, `EL101-...PLAN.dwg.MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`, so all instances share one row, sorted by name, and it auto-matches the `MAAP_Ceiling Mounted Luminaire : F1` family. Normal AutoCAD names are left alone. Can be turned off with `SimplifyBlockNames = false` in settings.ini.
