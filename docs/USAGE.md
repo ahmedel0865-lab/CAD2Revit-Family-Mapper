@@ -2,17 +2,20 @@
 
 ## 0. Install (once)
 
-1. Install [pyRevit](https://github.com/pyrevitlabs/pyRevit/releases) 4.8 or newer and start Revit once so the pyRevit tab appears.
-2. Install the extension, either:
-   - **pyRevit CLI** (Windows command prompt):
-     ```
-     pyrevit extend ui CAD2Revit https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper.git
-     ```
-   - **Manual:** download/clone this repository to e.g. `C:\pyRevit-ext\CAD2Revit-Family-Mapper`, then in Revit go to
-     *pyRevit tab > Settings > Custom Extension Directories > Add folder*, pick the repository folder, *Save Settings and Reload*.
-3. A **CAD2Revit** tab with a **Mapper** panel (List Blocks, Place Families) appears.
+CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any other add-in.
 
-To update later: `pyrevit extensions update CAD2Revit` (CLI) or `git pull` in the folder, then *pyRevit > Reload*.
+1. Download `CAD2Revit-<version>.zip`: from the repository's **Releases** page, from the **Actions** tab (latest build > *Artifacts*), or from whoever sent it to you.
+2. **Close Revit**, unzip the file anywhere, and double-click **`Install.bat`**.
+   - It installs the add-in for every Revit **2022 / 2023 / 2024 / 2025 / 2026** found on the PC.
+   - Per Windows user, so no administrator rights are needed. Files go to `%AppData%\Autodesk\Revit\Addins\<version>\`.
+3. Start Revit. When Revit asks about loading the unsigned add-in *CAD2Revit Family Mapper*, click **Always Load**.
+4. A **CAD2Revit** tab appears with a **Mapper** panel containing **List Blocks** and **Place Families**.
+
+- **Manual install** (if IT policy blocks `Install.bat`): copy `<version>\CAD2Revit.addin` and the folder `<version>\CAD2Revit` into `%AppData%\Autodesk\Revit\Addins\<version>\`. Then right-click `CAD2Revit\CAD2Revit.dll` > *Properties* > tick **Unblock**.
+- **Update:** close Revit and run `Install.bat` from the new zip.
+- **Uninstall:** close Revit and run `Uninstall.bat`.
+
+> A pyRevit version of the same tool is also kept in this repository (`CAD2Revit.extension/`). It is optional; see the README.
 
 ## 1. Prepare the drawing (AutoCAD)
 
@@ -38,8 +41,8 @@ To update later: `pyrevit extensions update CAD2Revit` (CLI) or `git pull` in th
 
 ## 3. List the blocks and build the mapping
 
-1. Click **CAD2Revit > List Blocks** and pick the DWG. The output window lists every block name, how many times it appears, and how many of those are mirrored.
-2. Answer *Yes* to export the template as **.xlsx** (or .csv).
+1. Click **CAD2Revit > List Blocks** and pick the DWG. A window lists every block name, how many times it appears, and how many of those are mirrored.
+2. Click **Export template...** and save it as **.xlsx** (or .csv).
 3. Fill in the template in Excel:
 
 | Column | Example | Notes |
@@ -71,13 +74,13 @@ A full example is in [`templates/mapping_template.xlsx`](../templates/mapping_te
    - the mapping file (the last one used is remembered),
    - the target level (defaults to the level of the active plan view),
    - whether to include nested blocks.
-2. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The output window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. A `cad2revit_preview_<date>.csv` is written next to the mapping file.
+2. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The result window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. A `cad2revit_preview_<date>.csv` is written next to the mapping file.
 3. Fix the mapping and repeat until the preview looks right.
 4. Click **Place Families > Run**. Everything is placed in **one transaction** named *CAD2Revit: Place families*. A single **Ctrl+Z** removes all of it.
 
 ## 5. Check the results
 
-- The output window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason.
+- The result window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason. Use **Open log** / **Log folder** to jump to the CSV log.
 - A `cad2revit_log_<date>.csv` is saved next to the mapping file (or in *Documents* if that folder is read-only). It has one row per block with:
   `Status, CAD_Block, Family, Type, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
@@ -96,15 +99,18 @@ Statuses in the log:
 
 ## 6. Settings
 
-Edit `CAD2Revit.extension/lib/cad2revit/config.py`, then *pyRevit > Reload*:
+Settings are stored in **`%AppData%\CAD2Revit\settings.ini`**, which is created on the first run. Open it in Notepad and change the values; the next command you run uses them. There is no need to restart Revit.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `DUPLICATE_TOLERANCE_MM` | 50 | Plan distance within which an existing instance counts as a duplicate. |
-| `DUPLICATE_SCOPE` | `"family"` | `"family"`: any type of the same family is a duplicate. `"type"`: only the same type. |
-| `INCLUDE_NESTED_BLOCKS` | False | Default for the "nested blocks" checkbox. |
-| `HOST_SEARCH_DISTANCE_MM` | 6000 | Max search distance up to a ceiling/soffit (never past the next level). |
-| `WALL_SEARCH_DISTANCE_MM` | 500 | Max distance from the CAD point to a wall face. |
-| `SEARCH_REVIT_LINKS` | True | Also host on faces in linked Revit models. |
-| `FALLBACK_TO_UNHOSTED` | True | If no host is found, place unhosted at the row offset (True), or report as failed (False). |
-| `WRITE_BLOCK_NAME_TO_COMMENTS` | True | Write `CAD: <block>` into Comments. |
+| `DuplicateToleranceMm` | 50 | Plan distance within which an existing instance counts as a duplicate. |
+| `DuplicateSameTypeOnly` | false | `false`: any type of the same family is a duplicate. `true`: only the same type. |
+| `IncludeNestedBlocks` | false | Default for the "nested blocks" checkbox. |
+| `HostSearchDistanceMm` | 6000 | Max search distance up to a ceiling/soffit (never past the next level). |
+| `WallSearchDistanceMm` | 500 | Max distance from the CAD point to a wall face. |
+| `SearchRevitLinks` | true | Also host on faces in linked Revit models. |
+| `FallbackToUnhosted` | true | If no host is found, place unhosted at the row offset (`true`), or report as failed (`false`). |
+| `WriteBlockNameToComments` | true | Write `CAD: <block>` into Comments. |
+| `LastMappingPath` | | Remembered automatically. |
+
+(The pyRevit version uses the same settings in `CAD2Revit.extension/lib/cad2revit/config.py`.)

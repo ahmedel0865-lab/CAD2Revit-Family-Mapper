@@ -12,7 +12,7 @@ A dynamic block whose parameters were changed (stretched, flipped, visibility st
 Fix in AutoCAD: use plain blocks for devices, or convert each variant to a named block (`BCONVERT`, or `EXPLODE` once and re-`BLOCK` under a real name). Unmodified dynamic blocks usually keep their name.
 
 ## Nested blocks
-Only top-level blocks are read by default. Tick *Include nested blocks* (or set `INCLUDE_NESTED_BLOCKS = True`) to also read blocks inside blocks. Then **both** the parent and the children are listed, so map only the level you want and leave the other empty.
+Only top-level blocks are read by default. Tick *Include nested blocks* (or set `IncludeNestedBlocks = true` in settings.ini) to also read blocks inside blocks. Then **both** the parent and the children are listed, so map only the level you want and leave the other empty.
 
 ## Mirrored blocks
 Revit families are placed with the CAD rotation only; mirroring is not applied. Mirrored blocks are flagged in the log ("CAD block is mirrored") so you can check them. For symmetric devices (most lights, detectors) this does not matter.
@@ -23,10 +23,10 @@ Block scale is recorded in the log (`Block_Scale`) but not applied. Family size 
 ## Hosting
 - **Face-based families** host on ceilings, walls, slabs and beams in this model **and in linked Revit models**.
 - **Legacy wall-/ceiling-based families** (non face-based) can only host on elements in the **same** model. If their host is in a link, they are reported as failed. Use face-based families where possible.
-- Wall search looks up to 500 mm from the CAD point (`WALL_SEARCH_DISTANCE_MM`). If the block's insertion point is inside the wall thickness, the device goes on the nearest face.
+- Wall search looks up to 500 mm from the CAD point (`WallSearchDistanceMm` in settings.ini). If the block's insertion point is inside the wall thickness, the device goes on the nearest face.
 - Curtain walls and in-place families are searched like any other wall/ceiling, but results can vary.
 - The `wall` host ignores `Rotation_Adjustment_deg`: the device faces out of the wall.
-- If no host is found and `FALLBACK_TO_UNHOSTED = True`, the element is placed unhosted at the row's offset. A face-based family placed this way lies on the level's work plane (facing up), so check wall devices placed like this.
+- If no host is found and `FallbackToUnhosted = true`, the element is placed unhosted at the row's offset. A face-based family placed this way lies on the level's work plane (facing up), so check wall devices placed like this.
 
 ## Duplicate check
 An existing instance of the **same family** within 50 mm in plan, between the target level and the next level up, counts as a duplicate. Instances in linked models are not checked. If you change the mapping to a *different family* for a block, the old instances are not detected: delete them first (filter by Comments = `CAD: ...`).

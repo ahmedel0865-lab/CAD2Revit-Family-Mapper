@@ -61,8 +61,14 @@ If everything passes, run it on one real floor, check a few devices of each type
 
 ## 5. Automated tests (developers)
 
-The pure-Python parts (CSV/XLSX reading, mapping validation, report/log), plus the placement control flow against a fake Revit API, have unit tests that run without Revit:
+These run without Revit:
 
 ```
+# Revit add-in (C#): CSV/XLSX, mapping, report, settings
+cd addin && dotnet test tests/CAD2Revit.Core.Tests
+
+# pyRevit version (Python), including placement control flow against a fake Revit API
 python -m unittest discover -s tests -v
 ```
+
+CI (`.github/workflows/build.yml`) runs both, builds the add-in for Revit 2022–2026, and uploads the installable zip.

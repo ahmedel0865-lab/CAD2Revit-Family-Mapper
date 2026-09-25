@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0] - 2026-09-25
+### Added
+- **Standalone Revit add-in (C#)** in `addin/`, so pyRevit is no longer required. Builds for Revit 2022, 2023 and 2024 (.NET Framework 4.8) and Revit 2025 and 2026 (.NET 8), with its own CAD2Revit ribbon tab (List Blocks, Place Families).
+- Same features as 0.2.0: XLSX/CSV mapping, ceiling/face/wall/non-hosted placement (incl. linked hosts), one-dialog workflow, real preview, per-level duplicate check, one-transaction undo, summary window and CSV log.
+- Settings in `%AppData%\CAD2Revit\settings.ini` (created on first run; also remembers the last mapping file).
+- `Install.bat` / `Uninstall.bat`: per-user install for every Revit version found, no admin rights; unblocks downloaded DLLs.
+- `tools/package.sh` builds every version into one zip; GitHub Actions builds it on every push/PR and publishes it as a Release for `v*` tags.
+- C# unit tests for CSV/XLSX, mapping, report and settings.
+
+### Changed
+- The pyRevit extension is kept as an optional alternative.
+
 ## [0.2.0] - 2026-09-25
 ### Added
 - Excel (.xlsx) mapping files (built-in reader, no Excel needed); List Blocks exports .xlsx or .csv.

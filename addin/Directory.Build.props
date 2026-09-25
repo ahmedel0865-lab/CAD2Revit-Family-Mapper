@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <Version>0.3.0</Version>
+    <Company>CAD2Revit</Company>
+    <Product>CAD2Revit Family Mapper</Product>
+    <Copyright>MIT License</Copyright>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Allows building the Windows-only targets (WinForms/WPF) on Linux CI. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
