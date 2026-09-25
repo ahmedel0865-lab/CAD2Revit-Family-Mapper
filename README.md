@@ -23,7 +23,7 @@ Instead of manually placing hundreds of light fixtures, sockets, and detectors o
 ## Installation
 **Option A (pyRevit CLI):**
 ```
-pyrevit extend ui CAD2Revit https://github.com/<your-username>/CAD2Revit-Family-Mapper.git
+pyrevit extend ui CAD2Revit https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper.git
 ```
 
 **Option B (manual):**
