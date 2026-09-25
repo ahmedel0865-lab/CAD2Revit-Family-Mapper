@@ -1,0 +1,4 @@
+CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Offset_From_Level_mm,Rotation_Adjustment_deg,Host_Type
+LIGHT-600x600,Recessed Panel Light,600x600 40W,2800,0,face
+SOCKET-DOUBLE,Duplex Receptacle,Standard,300,0,none
+SMOKE-DET,Smoke Detector,Ceiling,2800,0,face
