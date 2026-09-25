@@ -45,6 +45,7 @@ namespace CAD2Revit.Commands
 
                 // 2. Blocks from the DWG.
                 var blocks = DwgReader.Read(doc, opts.Import, opts.IncludeNested);
+                if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
                 if (blocks.Count == 0)
                 {
                     TaskDialog.Show("CAD2Revit", "No blocks found in the selected DWG.\n\n" +

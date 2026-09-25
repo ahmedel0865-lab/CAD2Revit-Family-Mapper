@@ -5,7 +5,8 @@ A **standalone Revit add-in** that converts AutoCAD blocks in a linked DWG into 
 Instead of manually placing hundreds of light fixtures, sockets and detectors over a CAD background, you map each CAD block to a Revit family type once in an Excel/CSV file. The tool then places them all at the correct location, rotation and level, hosted on ceilings or walls where required.
 
 ## Features
-- **Mapping window**: one row per unique CAD block (e.g. `SMOKE-DET (42)`), a **searchable** family dropdown (electrical categories), elevation, rotation and host type, all in Revit
+- **Mapping window**: one row per unique CAD block (e.g. `SMOKE-DET (42)`), sorted by name, with a Find box, a **searchable** family dropdown (electrical categories), elevation, rotation and host type, all in Revit
+- Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type
 - **Auto-selects** families whose names closely match the block name (`SMOKE-DET` → *Smoke Detector*)
 - **Remembers the last mapping per project**, so the grid is pre-filled next time
 - Load / Save mappings as **.xlsx or .csv** (no Excel installation needed); List Blocks exports a ready-to-fill template

@@ -33,6 +33,7 @@ namespace CAD2Revit.Commands
                 if (imp == null) return Result.Cancelled;
 
                 var blocks = DwgReader.Read(doc, imp.Element, settings.IncludeNestedBlocks);
+                if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
                 var counts = DwgReader.CountByName(blocks);
                 if (counts.Count == 0)
                 {

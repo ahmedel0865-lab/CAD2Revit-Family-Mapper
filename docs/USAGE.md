@@ -43,7 +43,8 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 
 1. Click **CAD2Revit > Place Families**.
 2. **Step 1:** pick the **DWG link/import** and the **target level** (defaults to the level of the active plan view), and optionally *include nested blocks*. Click **Next >**.
-3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance).
+3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance), sorted by name. Use **Find** to filter the rows.
+   - Block names are simplified so instances group correctly. The `<file>.dwg.` prefix Revit adds is removed. For DWGs **exported from Revit**, the `-<element id>-<view name>` suffix is removed too, so `MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`. Turn this off with `SimplifyBlockNames = false` in settings.ini.
 
 | Column | What to do |
 |---|---|
@@ -115,6 +116,7 @@ Settings are stored in **`%AppData%\CAD2Revit\settings.ini`**, which is created 
 | `DuplicateToleranceMm` | 50 | Plan distance within which an existing instance counts as a duplicate. |
 | `DuplicateSameTypeOnly` | false | `false`: any type of the same family is a duplicate. `true`: only the same type. |
 | `IncludeNestedBlocks` | false | Default for the "nested blocks" checkbox. |
+| `SimplifyBlockNames` | true | Group block names: remove the `.dwg.` file prefix and, for Revit-exported DWGs, the `-<id>-<view>` suffix. |
 | `HostSearchDistanceMm` | 6000 | Max search distance up to a ceiling/soffit (never past the next level). |
 | `WallSearchDistanceMm` | 500 | Max distance from the CAD point to a wall face. |
 | `SearchRevitLinks` | true | Also host on faces in linked Revit models. |

@@ -18,6 +18,7 @@ namespace CAD2Revit.Core
         public bool DuplicateSameTypeOnly = false;     // false: any type of the same family counts
         // DWG reading
         public bool IncludeNestedBlocks = false;
+        public bool SimplifyBlockNames = true;         // group Revit-exported / file-prefixed names
         // Hosting
         public double HostSearchDistanceMm = 6000.0;   // never searches past the next level
         public double WallSearchDistanceMm = 500.0;
@@ -64,6 +65,7 @@ namespace CAD2Revit.Core
                 case "duplicatetolerancemm": DuplicateToleranceMm = D(DuplicateToleranceMm); break;
                 case "duplicatesametypeonly": DuplicateSameTypeOnly = B(DuplicateSameTypeOnly); break;
                 case "includenestedblocks": IncludeNestedBlocks = B(IncludeNestedBlocks); break;
+                case "simplifyblocknames": SimplifyBlockNames = B(SimplifyBlockNames); break;
                 case "hostsearchdistancemm": HostSearchDistanceMm = D(HostSearchDistanceMm); break;
                 case "wallsearchdistancemm": WallSearchDistanceMm = D(WallSearchDistanceMm); break;
                 case "searchrevitlinks": SearchRevitLinks = B(SearchRevitLinks); break;
@@ -86,6 +88,9 @@ namespace CAD2Revit.Core
             sb.AppendLine("DuplicateSameTypeOnly = " + Bo(DuplicateSameTypeOnly));
             sb.AppendLine("# Default for the 'include nested blocks' checkbox.");
             sb.AppendLine("IncludeNestedBlocks = " + Bo(IncludeNestedBlocks));
+            sb.AppendLine("# Group block names: remove the '<file>.dwg.' prefix and, for DWGs exported from Revit,");
+            sb.AppendLine("# the '-<element id>-<view name>' suffix, so all instances of a block share one row.");
+            sb.AppendLine("SimplifyBlockNames = " + Bo(SimplifyBlockNames));
             sb.AppendLine("# Max distance (mm) above the level to look for a ceiling/slab (never past the next level).");
             sb.AppendLine("HostSearchDistanceMm = " + F(HostSearchDistanceMm));
             sb.AppendLine("# Max distance (mm) from the CAD point to a wall face for Host_Type = wall.");

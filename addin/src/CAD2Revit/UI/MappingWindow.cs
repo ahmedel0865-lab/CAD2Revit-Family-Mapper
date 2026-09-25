@@ -30,7 +30,7 @@ namespace CAD2Revit.UI
         {
             _s = session;
             Title = "CAD2Revit - Map CAD blocks to Revit families";
-            Width = 1100;
+            Width = 1250;
             Height = 680;
             MinWidth = 800;
             MinHeight = 400;
@@ -47,12 +47,22 @@ namespace CAD2Revit.UI
                 Margin = new Thickness(0, 0, 0, 8),
                 TextWrapping = TextWrapping.Wrap,
                 Text = $"DWG: {_s.DwgName}     Level: {_s.LevelName}     " +
-                       $"{_s.Rows.Count} block names, {_s.InstanceCount} instances.\n" +
+                       $"{_s.Rows.Count} unique blocks, {_s.InstanceCount} instances (sorted by block name).\n" +
                        "Pick a family for each block (type in the box to search). (Skip) = do not place. " +
                        "Elevation is from the target level, in mm.",
             };
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
+
+            // Find box: filters the rows by block name or chosen family.
+            var findBar = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            DockPanel.SetDock(findBar, Dock.Top);
+            findBar.Children.Add(new TextBlock { Text = "Find:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            var find = new TextBox { Width = 320, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Show only rows whose block or family contains this text" };
+            find.TextChanged += (o, e) => ApplyFind(find.Text);
+            findBar.Children.Add(find);
+            findBar.Children.Add(new TextBlock());
+            root.Children.Add(findBar);
 
             // Buttons
             var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0), LastChildFill = false };
@@ -76,7 +86,8 @@ namespace CAD2Revit.UI
             bottom.Children.Add(right);
             root.Children.Add(bottom);
 
-            // Grid
+            // Grid (the row view is shared between Preview round-trips: start unfiltered)
+            CollectionViewSource.GetDefaultView(_s.Rows).Filter = null;
             BuildGrid();
             root.Children.Add(_grid);
             Content = root;
@@ -114,7 +125,10 @@ namespace CAD2Revit.UI
                 Binding = new Binding(nameof(BlockRow.Display)) { Mode = BindingMode.OneWay },
                 IsReadOnly = true,
                 SortMemberPath = nameof(BlockRow.BlockName),
-                Width = new DataGridLength(1.2, DataGridLengthUnitType.Star),
+                // Takes the remaining width; long names end in "..." (full name in the tooltip).
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+                MinWidth = 200,
+                ElementStyle = TrimmedTextStyle(),
             });
 
             // 2. Revit Family (searchable dropdown, always editable in the cell)
@@ -132,20 +146,44 @@ namespace CAD2Revit.UI
                 Header = "Revit Family  (Family : Type)",
                 CellTemplate = new DataTemplate { VisualTree = combo },
                 SortMemberPath = nameof(BlockRow.FamilyLabel),
-                Width = new DataGridLength(2.2, DataGridLengthUnitType.Star),
+                // Fixed width so long block names can never squeeze the dropdown.
+                Width = new DataGridLength(400),
+                MinWidth = 250,
             });
 
             // 3. Elevation From Level (mm), validated
-            _grid.Columns.Add(NumberColumn("Elevation From Level (mm)", nameof(BlockRow.Elevation), 170));
+            _grid.Columns.Add(NumberColumn("Elevation From Level (mm)", nameof(BlockRow.Elevation), 160));
 
             // Optional extras at the end
-            _grid.Columns.Add(NumberColumn("Rotation (deg)", nameof(BlockRow.Rotation), 100));
+            _grid.Columns.Add(NumberColumn("Rotation (deg)", nameof(BlockRow.Rotation), 95));
             _grid.Columns.Add(new DataGridComboBoxColumn
             {
                 Header = "Host Type",
                 ItemsSource = BlockRow.HostChoices,
                 SelectedItemBinding = new Binding(nameof(BlockRow.Host)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
                 Width = new DataGridLength(110),
+            });
+        }
+
+        static Style TrimmedTextStyle()
+        {
+            var style = new Style(typeof(TextBlock));
+            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.Display))));
+            return style;
+        }
+
+        void ApplyFind(string text)
+        {
+            CommitEdits();   // changing the filter during a cell edit throws
+            var view = CollectionViewSource.GetDefaultView(_s.Rows);
+            var terms = (text ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            view.Filter = terms.Length == 0 ? null : (Predicate<object>)(o =>
+            {
+                var r = (BlockRow)o;
+                var hay = r.BlockName + " " + r.FamilyLabel;
+                return terms.All(t => hay.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
             });
         }
 

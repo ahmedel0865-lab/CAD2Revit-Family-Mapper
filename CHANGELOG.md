@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] - 2026-09-25
+### Fixed
+- **Mapping window now groups instances by block name.** Revit reports block names as `<file>.dwg.<block>`, and DWGs exported from Revit name every block `<Family> - <Type>-<element id>-<view>`, so each instance appeared as its own `(1)` row. Names are now simplified before grouping: the file prefix is removed, and for Revit-exported DWGs the view suffix and element id are removed. For example, `EL101-...PLAN.dwg.MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`, so all instances share one row, sorted by name, and it auto-matches the `MAAP_Ceiling Mounted Luminaire : F1` family. Normal AutoCAD names are left alone. Can be turned off with `SimplifyBlockNames = false` in settings.ini.
+- The *Revit Family* column could be squeezed to a few pixels by long block names. It now has a fixed 400 px width; long block names end in "..." with the full name in a tooltip.
+
+### Added
+- **Find** box in the mapping window to filter rows by block or family name.
+
 ## [0.4.0] - 2026-09-25
 ### Added
 - **Mapping window (WPF)**, opened by Place Families after picking the DWG and level. It shows one row per unique CAD block (`SMOKE-DET (42)`) with:

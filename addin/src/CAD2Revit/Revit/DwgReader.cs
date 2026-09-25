@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autodesk.Revit.DB;
 
 namespace CAD2Revit.Revit
@@ -95,6 +96,14 @@ namespace CAD2Revit.Revit
             {
                 return "";
             }
+        }
+
+        /// <summary>Replace each block's Revit symbol name with its simplified name
+        /// (see Core.BlockNames), so every instance of a block shares one name.</summary>
+        public static void SimplifyNames(List<BlockRef> blocks)
+        {
+            var map = Core.BlockNames.Simplify(blocks.Select(b => b.Name));
+            foreach (var b in blocks) b.Name = map[b.Name];
         }
 
         public static Dictionary<string, int> CountByName(IEnumerable<BlockRef> blocks)
