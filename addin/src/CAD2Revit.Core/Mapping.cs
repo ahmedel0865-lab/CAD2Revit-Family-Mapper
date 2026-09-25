@@ -26,6 +26,8 @@ namespace CAD2Revit.Core
     {
         /// <summary>Case-insensitive: block name -> row.</summary>
         public Dictionary<string, MapRow> Rows = new Dictionary<string, MapRow>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Blocks listed in the file with an empty family ("do not place" / Skip).</summary>
+        public HashSet<string> SkippedBlocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public List<string> Errors = new List<string>();
     }
 
@@ -60,6 +62,24 @@ namespace CAD2Revit.Core
             ["face"] = HostMode.Face,
             ["wall"] = HostMode.Wall,
         };
+
+        /// <summary>Host_Type cell text -> HostMode (null if not recognised).</summary>
+        public static HostMode? ParseHost(string text) =>
+            HostValues.TryGetValue(Norm(text), out var h) ? h : (HostMode?)null;
+
+        /// <summary>HostMode -> the text written in mapping files.</summary>
+        public static string HostText(HostMode host) =>
+            host == HostMode.None ? "non-hosted" : host.ToString().ToLowerInvariant();
+
+        /// <summary>Writes rows in the standard mapping format (.xlsx or .csv).
+        /// Rows with an empty Family are written as "do not place" (Skip).</summary>
+        public static void Save(string path, IEnumerable<MapRow> rows)
+        {
+            Tables.WriteTable(path, TemplateHeader, rows.Select(r => (IList<object>)new object[]
+            {
+                r.Block, r.Family ?? "", r.TypeName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
+            }).ToList());
+        }
 
         public static string Norm(string s) => Regex.Replace((s ?? "").ToLowerInvariant(), "[^a-z0-9]", "");
 
@@ -119,7 +139,12 @@ namespace CAD2Revit.Core
                 line++;
                 var block = Get(r, "block");
                 var family = Get(r, "family");
-                if (block.Length == 0 || family.Length == 0) continue; // empty family = "do not place"
+                if (block.Length == 0) continue;
+                if (family.Length == 0)                 // empty family = "do not place" (Skip)
+                {
+                    if (!result.Rows.ContainsKey(block)) result.SkippedBlocks.Add(block);
+                    continue;
+                }
                 var type = Get(r, "type");
                 if (type.Length == 0)
                 {
@@ -139,6 +164,7 @@ namespace CAD2Revit.Core
                     result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall) - using none");
                     host = HostMode.None;
                 }
+                result.SkippedBlocks.Remove(block);
                 if (result.Rows.ContainsKey(block))
                     result.Errors.Add($"Row {line}: block '{block}' is mapped twice - last row wins");
                 result.Rows[block] = new MapRow

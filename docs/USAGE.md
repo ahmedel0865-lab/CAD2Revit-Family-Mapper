@@ -39,49 +39,58 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 4. If you want hosting, link the architectural model (ceilings/walls) too.
 5. **Work on a copy of the model** for your first runs.
 
-## 3. List the blocks and build the mapping
+## 3. Map the blocks and place (mapping window)
 
-1. Click **CAD2Revit > List Blocks** and pick the DWG. A window lists every block name, how many times it appears, and how many of those are mirrored.
-2. Click **Export template...** and save it as **.xlsx** (or .csv).
-3. Fill in the template in Excel:
+1. Click **CAD2Revit > Place Families**.
+2. **Step 1:** pick the **DWG link/import** and the **target level** (defaults to the level of the active plan view), and optionally *include nested blocks*. Click **Next >**.
+3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance).
 
-| Column | Example | Notes |
-|---|---|---|
-| CAD_Block_Name | `SMOKE-DET` | Exact name from List Blocks (case-insensitive). |
-| Revit_Family_Name | `Smoke Detector` | Family name exactly as loaded in the project. **Leave empty to ignore this block.** |
-| Revit_Type_Name | `Ceiling` | Type name exactly as in the project. |
-| Offset_From_Level_mm | `2800` | Height above the target level. Used for non-hosted and wall-hosted placement, and as the fallback height if a ceiling is not found. |
-| Rotation_Adjustment_deg | `90` | Added to the CAD block rotation (counter-clockwise). Use it when the family and the CAD symbol are drawn facing different directions. |
-| Host_Type | `ceiling` | `ceiling`, `face`, `wall` or `non-hosted` (see below). |
+| Column | What to do |
+|---|---|
+| **CAD Block** | Block name and number of instances, e.g. `SMOKE-DET (42)`. Read-only. |
+| **Revit Family** | Pick the family type (`Family : Type`). **Type in the box to search**: every word you type must appear, so `smo cei` finds *Smoke Detector : Ceiling*. Press **Enter** to take the first match, **Esc** to cancel. `(Skip)` = do not place (the default). |
+| **Elevation From Level (mm)** | Height above the target level. Must be a number; invalid cells turn red and block Preview/Run. |
+| Rotation (deg) | Optional. Added to the CAD block rotation (counter-clockwise). |
+| Host Type | Optional. `non-hosted`, `ceiling`, `face` or `wall` (see below). |
+
+- The dropdown lists loaded family types in the electrical categories: Lighting Fixtures, Lighting Devices (switches), Electrical Fixtures, Electrical Equipment, Fire Alarm Devices, Communication Devices, Data Devices, Security Devices, Nurse Call Devices and Telephone Devices. A family from another category is added to the list automatically when a loaded mapping file uses it.
+- **Auto-select:** when a block name closely matches a family type, that family is pre-selected (e.g. `SMOKE-DET` → *Smoke Detector*, `SKT-DOUBLE` → *Duplex Receptacle*, `MCP` → *Manual Call Point*). Always check the pre-selections. **Auto-match** re-runs the matching for rows that are still `(Skip)`.
+- **Remembered per project:** the grid is saved automatically when you click Preview or Run. The next time you open the mapping window in the same project, it is pre-filled. The file is `%AppData%\CAD2Revit\projects\<project>_<id>.xlsx`, in the normal mapping format.
+- **Load Mapping... / Save Mapping...** read and write the normal mapping file (XLSX or CSV, format below), e.g. to reuse one mapping across projects or share it with the team. Loading only changes the rows whose block names are in the file.
+
+4. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The result window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. **Close the result window to return to the mapping window** with your choices kept, adjust, and preview again.
+5. Click **Run**. Everything is placed in **one transaction** named *CAD2Revit: Place families*. A single **Ctrl+Z** removes all of it.
 
 Host types:
 
 | Host_Type | What it does |
 |---|---|
-| `non-hosted` (or `none`, blank) | Placed on the level at `Offset_From_Level_mm`, rotated like the CAD block. |
+| `non-hosted` (or `none`, blank) | Placed on the level at the elevation, rotated like the CAD block. |
 | `ceiling` | Casts a ray straight up from the block and hosts on the first **ceiling** face (this model or linked models), up to the next level or 6 m. |
 | `face` | Same, but also hosts on floor/roof undersides and beams (useful where there is no ceiling, e.g. car parks, plant rooms). |
-| `wall` | Looks for the nearest **wall** face within 500 mm of the block, at `Offset_From_Level_mm` height, and places the device on that face facing into the room. |
+| `wall` | Looks for the nearest **wall** face within 500 mm of the block, at the elevation height, and places the device on that face facing into the room. |
 
-Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, ... all work). CSV files saved with `;` as separator (European/Middle-East Excel locale) are also accepted. In an .xlsx file, the sheet named **Mapping** is used, or the first sheet if there is none with that name.
+The elevation is also the fallback height if a ceiling is not found.
 
-A full example is in [`templates/mapping_template.xlsx`](../templates/mapping_template.xlsx) / [`.csv`](../templates/mapping_template.csv).
+## 4. Mapping file format (Load / Save, List Blocks template)
 
-## 4. Preview, then run
+**List Blocks** lists every block name with counts (and mirrored counts), and **Export template...** saves a mapping file you can fill in Excel. The mapping window reads and writes the same format:
 
-1. Click **CAD2Revit > Place Families**. One dialog asks for:
-   - the DWG link/import,
-   - the mapping file (the last one used is remembered),
-   - the target level (defaults to the level of the active plan view),
-   - whether to include nested blocks.
-2. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The result window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. A `cad2revit_preview_<date>.csv` is written next to the mapping file.
-3. Fix the mapping and repeat until the preview looks right.
-4. Click **Place Families > Run**. Everything is placed in **one transaction** named *CAD2Revit: Place families*. A single **Ctrl+Z** removes all of it.
+| Column | Example | Notes |
+|---|---|---|
+| CAD_Block_Name | `SMOKE-DET` | Block name (case-insensitive). |
+| Revit_Family_Name | `Smoke Detector` | Family name exactly as loaded in the project. **Empty = (Skip).** |
+| Revit_Type_Name | `Ceiling` | Type name exactly as in the project. |
+| Offset_From_Level_mm | `2800` | Elevation from level. |
+| Rotation_Adjustment_deg | `90` | Rotation adjustment. |
+| Host_Type | `ceiling` | `ceiling`, `face`, `wall` or `non-hosted`. |
+
+Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, ... all work). CSV files saved with `;` as separator (European/Middle-East Excel locale) are also accepted. In an .xlsx file, the sheet named **Mapping** is used, or the first sheet if there is none with that name. A full example is in [`templates/mapping_template.xlsx`](../templates/mapping_template.xlsx).
 
 ## 5. Check the results
 
 - The result window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason. Use **Open log** / **Log folder** to jump to the CSV log.
-- A `cad2revit_log_<date>.csv` is saved next to the mapping file (or in *Documents* if that folder is read-only). It has one row per block with:
+- A `cad2revit_log_<date>.csv` (or `cad2revit_preview_<date>.csv`) is saved in `Documents\\CAD2Revit\\Logs\\<project>\\`. It has one row per block with:
   `Status, CAD_Block, Family, Type, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
 - Each placed element's **Comments** parameter contains `CAD: <block name>`. You can use it in schedules and filters, e.g. to select everything the tool placed.
@@ -93,7 +102,7 @@ Statuses in the log:
 |---|---|
 | `placed` | Created (in a preview: would be created). |
 | `duplicate` | An instance of the same family already exists there, so the block was skipped. |
-| `unmapped` | The block name is not in the mapping file (or its family cell is empty). |
+| `unmapped` | The block is set to **(Skip)** in the mapping window (empty family in a mapping file). |
 | `skipped` | Mapped, but the family/type is not loaded in the project. |
 | `failed` | Revit refused the placement, or no host was found and fallback is off. The message says why. |
 

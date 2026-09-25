@@ -22,15 +22,16 @@ UNINSTALL
 USE
   1. Load your families (face-based for ceiling/wall devices) and link the DWG
      in the floor plan of the target level.
-  2. CAD2Revit > List Blocks > Export template...  (xlsx)
-  3. Fill in Revit_Family_Name, Revit_Type_Name, Offset_From_Level_mm,
-     Rotation_Adjustment_deg and Host_Type (ceiling / face / wall / non-hosted).
-     Leave the family empty for blocks you do not want placed.
-     Example: templates\mapping_template.xlsx
-  4. CAD2Revit > Place Families > choose DWG, mapping file and level > Preview.
-     When the preview looks right: Place Families > Run.
-     One Ctrl+Z undoes the whole run.
-  5. A log (cad2revit_log_<date>.csv) is saved next to the mapping file.
+  2. CAD2Revit > Place Families > choose the DWG and level > Next.
+  3. Mapping window: one row per CAD block name. Pick the Revit family for
+     each block (type in the box to search; close matches are pre-selected),
+     set Elevation From Level (mm), optionally Rotation and Host Type.
+     (Skip) = do not place.
+  4. Preview (nothing is changed; closing the result returns to the grid),
+     then Run. One Ctrl+Z undoes the whole run.
+  5. The grid is remembered per project. Load/Save Mapping reads and writes
+     xlsx/csv files (example: templates\mapping_template.xlsx).
+  6. Logs: Documents\CAD2Revit\Logs\<project>\
 
 SETTINGS
   %AppData%\CAD2Revit\settings.ini  (created on first run; open in Notepad)

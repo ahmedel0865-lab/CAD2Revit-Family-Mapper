@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0] - 2026-09-25
+### Added
+- **Mapping window (WPF)**, opened by Place Families after picking the DWG and level. It shows one row per unique CAD block (`SMOKE-DET (42)`) with:
+  - a **searchable** "Revit Family" dropdown (`Family : Type`, filtered to electrical categories, "(Skip)" by default);
+  - **Elevation From Level (mm)**, validated as a number;
+  - optional **Rotation** and **Host Type** columns.
+- **Auto-select** of families whose names closely match the block name, including common CAD abbreviations (DET, SKT, SW, MCP, DB, 1G...). An *Auto-match* button re-runs it.
+- **Per-project memory**: the grid is saved when you click Preview/Run and pre-fills the window next time (`%AppData%\CAD2Revit\projects\`).
+- **Load Mapping / Save Mapping** (XLSX or CSV, same format as before).
+- Preview returns to the mapping window with your choices kept.
+- Unit tests for name matching, project keys, and saving mappings with Skip rows.
+
+### Changed
+- Place Families step 1 now only asks for the DWG, level and nested-blocks option; the mapping file is optional (Load Mapping).
+- Blocks set to (Skip) are logged as `unmapped` ("not mapped (Skip)").
+- Logs are written to `Documents\CAD2Revit\Logs\<project>\`.
+
 ## [0.3.0] - 2026-09-25
 ### Added
 - **Standalone Revit add-in (C#)** in `addin/`, so pyRevit is no longer required. Builds for Revit 2022, 2023 and 2024 (.NET Framework 4.8) and Revit 2025 and 2026 (.NET 8), with its own CAD2Revit ribbon tab (List Blocks, Place Families).

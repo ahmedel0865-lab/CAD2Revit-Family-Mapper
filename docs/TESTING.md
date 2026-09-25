@@ -30,6 +30,8 @@ In a new drawing (units: millimetres):
 
 ## 3. Mapping
 
+In the mapping window (Place Families > Next), set the rows as below (or save this table as an .xlsx and use **Load Mapping...**):
+
 | CAD_Block_Name | Revit_Family_Name | Revit_Type_Name | Offset_From_Level_mm | Rotation_Adjustment_deg | Host_Type |
 |---|---|---|---|---|---|
 | T-LIGHT | *your light family* | *type* | 2800 | 0 | ceiling |
@@ -39,19 +41,20 @@ In a new drawing (units: millimetres):
 
 ## 4. Checklist
 
-Run **List Blocks** first, then **Place Families > Preview**, then **Run**.
+Run **List Blocks** first, then **Place Families** > pick DWG and level > mapping window > **Preview**, then **Run**.
 
 | # | Check | Expected |
 |---|---|---|
 | 1 | List Blocks | 5 names; T-SMOKE shows 1 mirrored |
-| 2 | Preview | 10 would be placed, 1 unmapped (`T-TEXT`), nothing changed in the model |
+| 2 | Mapping window | 5 rows (one per block name) with counts, e.g. `T-LIGHT (4)`; `T-TEXT` stays (Skip). Typing part of a family name filters the dropdown; a non-numeric elevation turns red and blocks Preview |
+| 2b | Preview | 10 would be placed, 1 unmapped (`T-TEXT`), nothing changed in the model; closing the result returns to the mapping window |
 | 3 | Run: position | Each family's origin sits on its CAD insertion point in plan (zoom in, turn on the DWG) |
 | 4 | Run: rotation | The 45° light and the 90° panel match the CAD symbols. If a family is 90°/180° off, fix it with `Rotation_Adjustment_deg`, not in the family |
 | 5 | Ceiling hosting | Lights and detectors report host `Ceilings`, and their elevation = ceiling height |
 | 6 | Wall hosting | Sockets sit on the wall face at 300 mm, facing into the room, host `Walls` |
 | 7 | Mirrored | The mirrored detector has "CAD block is mirrored" in the log |
 | 8 | Log | `cad2revit_log_*.csv` has 11 rows with ElementIds for the 10 placed elements |
-| 9 | Duplicate check | Run again: 0 placed, 10 duplicates |
+| 9 | Duplicate check + memory | Run again: the grid is pre-filled with your last mapping; 0 placed, 10 duplicates |
 | 10 | Undo | Ctrl+Z once removes everything the tool placed in that run |
 | 11 | Rotated link | Rotate/move the DWG link, delete the placed families, run again: everything follows the link |
 | 12 | No host | Delete the ceiling and run: lights are placed at 2800 mm unhosted, with "no ceiling found... placed unhosted" in the log |

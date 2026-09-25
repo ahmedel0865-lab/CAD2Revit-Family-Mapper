@@ -65,7 +65,7 @@ namespace CAD2Revit.Revit
             foreach (var kv in unmapped)
                 results.Add(new PlacementResult
                 {
-                    BlockName = kv.Key, Status = Status.Unmapped, Message = "not in mapping file",
+                    BlockName = kv.Key, Status = Status.Unmapped, Message = "not mapped (Skip)",
                     Count = kv.Value, HasBlock = false,
                 });
 
