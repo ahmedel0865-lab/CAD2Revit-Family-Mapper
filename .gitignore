@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+cad2revit_log_*.csv
+cad2revit_preview_*.csv

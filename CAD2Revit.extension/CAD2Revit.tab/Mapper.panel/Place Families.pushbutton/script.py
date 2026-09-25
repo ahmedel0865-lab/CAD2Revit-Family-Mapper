@@ -1,73 +1,77 @@
 # -*- coding: utf-8 -*-
 __title__ = "Place\nFamilies"
-__doc__ = "Replace DWG blocks with Revit families using a CSV mapping file."
+__doc__ = "Replace DWG blocks with Revit families using a CSV/XLSX mapping file."
 
 import os
 import datetime
 from pyrevit import revit, forms, script
-from cad2revit import ui, dwg_reader, mapping as mapping_mod, placer, config
-from cad2revit.utils import write_csv
+from cad2revit import ui, dwg_reader, mapping as mapping_mod, placer, report
+from cad2revit.tables import write_csv
 
 doc = revit.doc
 output = script.get_output()
 
-imp = ui.pick_import_instance(doc)
-if imp is None:
+# 1. Dialog: DWG, mapping file, level, Preview/Run.
+opts = ui.ask_place_options(doc)
+if opts is None:
     script.exit()
+preview = (opts.mode == "Preview")
 
-map_path = forms.pick_file(file_ext="csv", title="Select mapping CSV")
-if not map_path:
-    script.exit()
-
-mapping, errors = mapping_mod.load_mapping(doc, map_path)
+# 2. Mapping file.
+mapping, errors = mapping_mod.load_mapping(doc, opts.mapping_path)
 if errors:
     output.print_md("### Mapping warnings")
     for e in errors:
-        output.print_md("- " + e)
+        output.print_md(u"- " + e)
 if not mapping:
     forms.alert("No valid rows in the mapping file.", exitscript=True)
 
-level = ui.pick_level(doc)
-if level is None:
-    script.exit()
+# 3. Blocks from the DWG.
+blocks = dwg_reader.read_blocks(doc, opts.import_inst, opts.include_nested)
+if not blocks:
+    forms.alert("No blocks found in the selected DWG.", exitscript=True)
 
-mode = forms.CommandSwitchWindow.show(["Preview", "Run"], message="Preview counts or place families?")
-if not mode:
-    script.exit()
+# 4. Place (Preview = same work, rolled back at the end).
+with forms.ProgressBar(title="CAD2Revit: {} ({{value}} of {{max_value}})".format(opts.mode)) as pb:
+    def progress(i, n):
+        if i % 25 == 0:
+            pb.update_progress(i, n)
+    results = placer.place_all(doc, blocks, mapping, opts.level,
+                               dry_run=preview, progress=progress)
 
-blocks = dwg_reader.read_blocks(doc, imp, config.INCLUDE_NESTED_BLOCKS)
-mapped, unmapped = placer.plan(blocks, mapping)
+# 5. Summary.
+s = report.summarize(results)
+st = s["status"]
+title = "Preview - nothing was changed" if preview else "Done"
+output.print_md(u"## {}".format(title))
+output.print_md(u"**{}** {} placed, **{}** duplicates skipped, **{}** failed, **{}** not loaded, "
+                u"**{}** unmapped instances".format(
+                    st.get(report.PLACED, 0), "would be" if preview else "",
+                    st.get(report.DUPLICATE, 0), st.get(report.FAILED, 0),
+                    st.get(report.SKIPPED, 0), st.get(report.UNMAPPED, 0)))
+if s["by_type"]:
+    output.print_table(s["by_type"], columns=["Family : Type",
+                                               "Would place" if preview else "Placed"])
+if s["unmapped"]:
+    output.print_md("### Unmapped blocks (add them to the mapping file to place them)")
+    output.print_table(s["unmapped"], columns=["CAD block", "Instances"])
+if s["problems"]:
+    output.print_md("### Failed / skipped")
+    output.print_table([[g[0], g[1], g[3], g[2]] for g in report.group_problems(s["problems"])],
+                       columns=["Status", "CAD block", "Count", "Reason"])
 
-if mode == "Preview":
-    per_type = {}
-    for b, row in mapped:
-        k = u"{} : {}".format(row.family, row.type_name)
-        per_type[k] = per_type.get(k, 0) + 1
-    output.print_md("## Preview - nothing was changed")
-    output.print_table(sorted(per_type.items()), columns=["Family : Type", "Will place"])
-    if unmapped:
-        output.print_table(sorted(unmapped.items()), columns=["Unmapped block", "Count"])
-    script.exit()
-
-results = placer.place_all(doc, blocks, mapping, level)
-
-summary = {}
-for r in results:
-    summary[r.status] = summary.get(r.status, 0) + 1
-output.print_md("## Done")
-output.print_table(sorted(summary.items()), columns=["Status", "Count"])
-
-problems = [r for r in results if r.status in ("failed", "unmapped", "skipped")]
-if problems:
-    output.print_table([[r.status, r.block, r.message] for r in problems],
-                       columns=["Status", "Block", "Message"])
-
+# 6. CSV log next to the mapping file (Documents if that folder is read-only).
 stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-log_path = os.path.join(os.path.dirname(map_path), "cad2revit_log_{}.csv".format(stamp))
-rows = []
-for r in results:
-    rows.append([r.status, r.block,
-                 r.row.family if r.row else "", r.row.type_name if r.row else "",
-                 r.element_id or "", r.message])
-write_csv(log_path, ["Status", "CAD_Block", "Family", "Type", "ElementId", "Message"], rows)
-output.print_md("Log saved: `{}`".format(log_path))
+name = "cad2revit_{}_{}.csv".format("preview" if preview else "log", stamp)
+rows = report.log_rows(results)
+for folder in (os.path.dirname(opts.mapping_path), os.path.expanduser("~\\Documents")):
+    try:
+        log_path = os.path.join(folder, name)
+        write_csv(log_path, report.LOG_HEADER, rows)
+        output.print_md(u"Log saved: `{}`".format(log_path))
+        break
+    except Exception:
+        continue
+if not preview and st.get(report.PLACED, 0):
+    output.print_md("Undo the whole run with a single **Ctrl+Z** "
+                    "(\"CAD2Revit: Place families\").")
