@@ -64,7 +64,8 @@ namespace CAD2Revit.Revit
         {
             facing = new XYZ(facing.X, facing.Y, 0).Normalize();
             var key = Key(facing, point);
-            if (!_planes.TryGetValue(key, out var rp))
+            // A plane created for a block whose sub-transaction was rolled back no longer exists.
+            if (!_planes.TryGetValue(key, out var rp) || !rp.IsValidObject)
             {
                 if (_view == null) throw new InvalidOperationException("no floor plan view found to create a vertical work plane");
                 var along = new XYZ(-facing.Y, facing.X, 0);

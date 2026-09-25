@@ -52,7 +52,8 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 | **Revit Family** | Pick the family type (`Family : Type`). **Type in the box to search**: every word you type must appear, so `smo cei` finds *Smoke Detector : Ceiling*. Press **Enter** to take the first match, **Esc** to cancel. `(Skip)` = do not place (the default). |
 | **Elevation From Level (mm)** | Height above the target level. Must be a number; invalid cells turn red and block Preview/Run. |
 | Rotation (deg) | Optional. Added to the CAD block rotation (counter-clockwise). |
-| Host Type | Optional. `non-hosted`, `ceiling`, `face`, `wall` or `vertical` (see below). |
+| Host Type | None (level-based), Ceiling, Wall, Reference Plane (auto-create), Face (ceiling/slab/roof) or Vertical plane (no wall). See below. |
+| Facing | Down (default) or Up. Which side a family on a **Reference Plane** faces: Down for ceiling devices (lights, detectors), Up for floor devices (floor boxes). |
 
 - The dropdown lists loaded family types in the electrical categories: Lighting Fixtures, Lighting Devices (switches), Electrical Fixtures, Electrical Equipment, Fire Alarm Devices, Communication Devices, Data Devices, Security Devices, Nurse Call Devices and Telephone Devices. A family from another category is added to the list automatically when a loaded mapping file uses it.
 - **Auto-select:** when a block name closely matches a family type, that family is pre-selected (e.g. `SMOKE-DET` → *Smoke Detector*, `SKT-DOUBLE` → *Duplex Receptacle*, `MCP` → *Manual Call Point*). Always check the pre-selections. **Auto-match** re-runs the matching for rows that are still `(Skip)`.
@@ -66,13 +67,17 @@ Host types:
 
 | Host_Type | What it does |
 |---|---|
-| `non-hosted` (or `none`, blank) | Placed on the level at the elevation, rotated like the CAD block. |
+| `non-hosted` = **None (level-based)** | Placed on the level at the elevation, rotated like the CAD block. |
 | `ceiling` | Casts a ray straight up from the block and hosts on the first **ceiling** face (this model or linked models), up to the next level or 6 m. |
 | `face` | Same, but also hosts on floor/roof undersides and beams (useful where there is no ceiling, e.g. car parks, plant rooms). |
 | `wall` | Looks for the nearest **wall** face within 500 mm of the block, at the elevation height, and places the device on that face facing into the room. **If no wall is found**, a face-based device is stood upright on a vertical plane instead (as `vertical` below). |
-| `vertical` | **No wall needed.** Places a face-based device upright on a vertical work plane through the CAD point, at the elevation height. Use it for sockets, switches, call points and so on when the model has no Revit walls (only the DWG background). The device faces the CAD block's local **+Y** direction (a block drawn with the wall along X and the room on +Y faces into the room). If devices face the wrong way, set **Rotation** to 180 (or ±90). |
+| `reference plane` = **Reference Plane (auto-create)** | Creates (or reuses) a **horizontal reference plane** at *level elevation + Elevation From Level*, named `CAD2Revit_<Level>_+<elevation>mm` (e.g. `CAD2Revit_Level 1_+2800mm`; up-facing planes end in `_Up`). The plane covers the DWG link's extents plus 1 m. The family is hosted on it, with the CAD block rotation as its direction and facing Down or Up (the **Facing** column). All rows with the same elevation and facing share one plane, and later runs reuse it. Only face-based / work-plane-based families can be hosted this way; others are placed level-based with a warning. |
+| `vertical` = **Vertical plane (no wall)** | **No wall needed.** Places a face-based device upright on a vertical work plane through the CAD point, at the elevation height. Use it for sockets, switches, call points and so on when the model has no Revit walls (only the DWG background). The device faces the CAD block's local **+Y** direction (a block drawn with the wall along X and the room on +Y faces into the room). If devices face the wrong way, set **Rotation** to 180 (or ±90). |
 
 The elevation is also the fallback height if a ceiling is not found.
+
+- **Use reference planes for all rows** (checkbox above the grid) sets every row's Host Type to *Reference Plane (auto-create)* in one click. Untick it to restore the previous Host Types.
+- For choosing between **Ceiling** and **Reference Plane**, see the table in the [README](../README.md#ceiling-vs-reference-plane-which-host-to-use).
 
 ## 4. Mapping file format (Load / Save, List Blocks template)
 
@@ -85,7 +90,8 @@ The elevation is also the fallback height if a ceiling is not found.
 | Revit_Type_Name | `Ceiling` | Type name exactly as in the project. |
 | Offset_From_Level_mm | `2800` | Elevation from level. |
 | Rotation_Adjustment_deg | `90` | Rotation adjustment. |
-| Host_Type | `ceiling` | `ceiling`, `face`, `wall`, `vertical` or `non-hosted`. |
+| Host_Type | `ceiling` | `non-hosted`, `ceiling`, `wall`, `reference plane`, `face` or `vertical` (the window's labels are accepted too). |
+| Facing | `Down` | Optional. `Down` (default) or `Up`, for reference-plane rows. |
 
 Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, ... all work). CSV files saved with `;` as separator (European/Middle-East Excel locale) are also accepted. In an .xlsx file, the sheet named **Mapping** is used, or the first sheet if there is none with that name. A full example is in [`templates/mapping_template.xlsx`](../templates/mapping_template.xlsx).
 

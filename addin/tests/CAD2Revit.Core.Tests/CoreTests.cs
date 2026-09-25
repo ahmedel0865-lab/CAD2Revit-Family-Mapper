@@ -188,6 +188,12 @@ namespace CAD2Revit.Core.Tests
             Assert.Equal(2, g.Item4);
             var text = Report.SummaryText(s, true);
             Assert.Contains("2 would be placed", text);
+            Assert.Empty(s.Warnings);
+            var warned = Sample();
+            warned[1].Message = "WARNING: family is not face-based - placed level-based";
+            var s2 = Report.Summarize(warned);
+            Assert.Single(s2.Warnings);
+            Assert.Contains("with warnings", Report.SummaryText(s2, false));
             Assert.Contains("no ceiling found", text);
         }
 

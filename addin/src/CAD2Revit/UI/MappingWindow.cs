@@ -30,9 +30,9 @@ namespace CAD2Revit.UI
         {
             _s = session;
             Title = "CAD2Revit - Map CAD blocks to Revit families";
-            Width = 1250;
+            Width = 1450;
             Height = 680;
-            MinWidth = 800;
+            MinWidth = 1000;
             MinHeight = 400;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ShowInTaskbar = false;
@@ -49,7 +49,8 @@ namespace CAD2Revit.UI
                 Text = $"DWG: {_s.DwgName}     Level: {_s.LevelName}     " +
                        $"{_s.Rows.Count} unique blocks, {_s.InstanceCount} instances (sorted by block name).\n" +
                        "Pick a family for each block (type in the box to search). (Skip) = do not place. " +
-                       "Elevation is from the target level, in mm.",
+                       "Elevation is from the target level, in mm. " +
+                       "Facing (Down/Up) applies to Reference Plane hosting.",
             };
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
@@ -61,6 +62,19 @@ namespace CAD2Revit.UI
             var find = new TextBox { Width = 320, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Show only rows whose block or family contains this text" };
             find.TextChanged += (o, e) => ApplyFind(find.Text);
             findBar.Children.Add(find);
+            // Global switch: every row -> Reference Plane (unticking restores each row's previous host).
+            var allPlanes = new CheckBox
+            {
+                Content = "Use reference planes for all rows",
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(24, 0, 0, 0),
+                ToolTip = "Sets Host Type to 'Reference Plane (auto-create)' for every row. " +
+                          "Untick to restore the previous Host Types.",
+                IsChecked = _s.Rows.Count > 0 && _s.Rows.All(r => r.Host == BlockRow.RefPlaneLabel),
+            };
+            allPlanes.Checked += (o, e) => SetAllReferencePlanes(true);
+            allPlanes.Unchecked += (o, e) => SetAllReferencePlanes(false);
+            findBar.Children.Add(allPlanes);
             findBar.Children.Add(new TextBlock());
             root.Children.Add(findBar);
 
@@ -161,7 +175,14 @@ namespace CAD2Revit.UI
                 Header = "Host Type",
                 ItemsSource = BlockRow.HostChoices,
                 SelectedItemBinding = new Binding(nameof(BlockRow.Host)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                Width = new DataGridLength(110),
+                Width = new DataGridLength(200),
+            });
+            _grid.Columns.Add(new DataGridComboBoxColumn
+            {
+                Header = "Facing",
+                ItemsSource = BlockRow.FacingChoices,
+                SelectedItemBinding = new Binding(nameof(BlockRow.Facing)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = new DataGridLength(70),
             });
         }
 
@@ -172,6 +193,24 @@ namespace CAD2Revit.UI
             style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
             style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.Display))));
             return style;
+        }
+
+        void SetAllReferencePlanes(bool on)
+        {
+            CommitEdits();
+            foreach (var r in _s.Rows)
+            {
+                if (on)
+                {
+                    if (r.Host != BlockRow.RefPlaneLabel) r.HostBeforeAll = r.Host;
+                    r.Host = BlockRow.RefPlaneLabel;
+                }
+                else if (r.HostBeforeAll != null)
+                {
+                    r.Host = r.HostBeforeAll;
+                    r.HostBeforeAll = null;
+                }
+            }
         }
 
         void ApplyFind(string text)

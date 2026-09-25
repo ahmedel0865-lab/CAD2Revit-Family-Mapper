@@ -26,10 +26,21 @@ namespace CAD2Revit.UI
     public class BlockRow : INotifyPropertyChanged, IDataErrorInfo
     {
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        public static readonly string[] HostChoices = { "non-hosted", "ceiling", "face", "wall", "vertical" };
+        /// <summary>Host Type dropdown, in this order.</summary>
+        public static readonly string[] HostChoices =
+        {
+            Mapping.HostDisplay[HostMode.None],
+            Mapping.HostDisplay[HostMode.Ceiling],
+            Mapping.HostDisplay[HostMode.Wall],
+            Mapping.HostDisplay[HostMode.RefPlane],
+            Mapping.HostDisplay[HostMode.Face],
+            Mapping.HostDisplay[HostMode.Vertical],
+        };
+        public static readonly string[] FacingChoices = { "Down", "Up" };
+        public static readonly string RefPlaneLabel = Mapping.HostDisplay[HostMode.RefPlane];
 
         FamilyOption _family = FamilyOption.Skip;
-        string _elevation = "0", _rotation = "0", _host = "non-hosted";
+        string _elevation = "0", _rotation = "0", _host = Mapping.HostDisplay[HostMode.None], _facing = "Down";
 
         public BlockRow(string name, int count, ObservableCollection<FamilyOption> options)
         {
@@ -63,6 +74,10 @@ namespace CAD2Revit.UI
         public string Elevation { get => _elevation; set { _elevation = value; Changed(nameof(Elevation)); } }
         public string Rotation { get => _rotation; set { _rotation = value; Changed(nameof(Rotation)); } }
         public string Host { get => _host; set { _host = value; Changed(nameof(Host)); } }
+        /// <summary>Down (ceiling devices) or Up (floor devices); used by Reference Plane hosting.</summary>
+        public string Facing { get => _facing; set { _facing = value; Changed(nameof(Facing)); } }
+        /// <summary>Host Type before "Use reference planes for all rows" was ticked.</summary>
+        public string HostBeforeAll { get; set; }
 
         public double? ElevationMm => Mapping.ParseNumber(_elevation);
         public double? RotationDeg => Mapping.ParseNumber(_rotation);
@@ -88,6 +103,7 @@ namespace CAD2Revit.UI
             OffsetMm = ElevationMm ?? 0,
             RotationDeg = RotationDeg ?? 0,
             Host = Mapping.ParseHost(_host) ?? HostMode.None,
+            Facing = Mapping.ParseFacing(_facing) ?? Core.Facing.Down,
         };
 
         /// <summary>Apply a mapping-file row to this grid row.</summary>
@@ -96,7 +112,8 @@ namespace CAD2Revit.UI
             Family = option ?? FamilyOption.Skip;
             Elevation = row.OffsetMm.ToString("0.###", Inv);
             Rotation = row.RotationDeg.ToString("0.###", Inv);
-            Host = Mapping.HostText(row.Host);
+            Host = Mapping.HostDisplay[row.Host];
+            Facing = row.Facing.ToString();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

@@ -52,7 +52,7 @@ namespace CAD2Revit.Revit
         /// <summary>Places every mapped block. dryRun = true rolls everything back (preview).</summary>
         public List<PlacementResult> PlaceAll(List<BlockRef> blocks, MappingResult mapping,
                                               Dictionary<MapRow, FamilySymbol> symbols, Level level,
-                                              bool dryRun, Action<int, int> progress = null)
+                                              bool dryRun, Action<int, int> progress = null, double[] dwgExtents = null)
         {
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
@@ -84,11 +84,16 @@ namespace CAD2Revit.Revit
                 t.Start();
 
                 View3D view = null;
+                View3D TempView() => view ?? (view = HostFinder.CreateTempView(_doc));
                 HostFinder finder = null;
-                if (mapped.Any(m => m.Item2.Host != HostMode.None))
+                if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall))
+                    finder = new HostFinder(_doc, TempView(), _settings.SearchRevitLinks);
+                LevelPlanes levelPlanes = null;
+                if (mapped.Any(m => m.Item2.Host == HostMode.RefPlane))
                 {
-                    view = HostFinder.CreateTempView(_doc);
-                    finder = new HostFinder(_doc, view, _settings.SearchRevitLinks);
+                    var section = LevelPlanes.SectionView(_doc);
+                    levelPlanes = new LevelPlanes(_doc, level, dwgExtents ?? BlockExtents(blocks),
+                                                  () => section ?? (View)TempView());
                 }
                 var planes = mapped.Any(m => m.Item2.Host == HostMode.Vertical || m.Item2.Host == HostMode.Wall)
                     ? new VerticalPlanes(_doc, level) : null;
@@ -110,7 +115,7 @@ namespace CAD2Revit.Revit
                         st.Start();
                         try
                         {
-                            res = PlaceOne(b, row, sym, level, finder, planes, dups, maxUp);
+                            res = PlaceOne(b, row, sym, level, finder, planes, levelPlanes, dups, maxUp);
                             if (res.Status == Status.Placed) st.Commit();
                             else st.RollBack();
                         }
@@ -123,7 +128,14 @@ namespace CAD2Revit.Revit
                     results.Add(res);
                 }
 
-                if (view != null) _doc.Delete(view.Id);
+                if (view != null)
+                {
+                    // Keep the temporary view only if a reference plane was created in it
+                    // (deleting a view could take view-owned elements with it).
+                    bool owned = levelPlanes != null && new FilteredElementCollector(_doc).OfClass(typeof(ReferencePlane))
+                        .Any(e => e.OwnerViewId == view.Id);
+                    if (!owned) _doc.Delete(view.Id);
+                }
                 if (dryRun)
                 {
                     t.RollBack();
@@ -138,6 +150,13 @@ namespace CAD2Revit.Revit
             }
             return results;
         }
+
+        static double[] BlockExtents(List<BlockRef> blocks) =>
+            blocks.Count == 0 ? new[] { 0.0, 0, 0, 0 } : new[]
+            {
+                blocks.Min(b => b.Point.X), blocks.Min(b => b.Point.Y),
+                blocks.Max(b => b.Point.X), blocks.Max(b => b.Point.Y),
+            };
 
         static PlacementResult Result(BlockRef b, MapRow row, Status status, string message, XYZ point, double? rotation,
                                       ElementId id = null, string host = "")
@@ -155,7 +174,8 @@ namespace CAD2Revit.Revit
         }
 
         PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level,
-                                 HostFinder finder, VerticalPlanes planes, DuplicateIndex dups, double maxUp)
+                                 HostFinder finder, VerticalPlanes planes, LevelPlanes levelPlanes,
+                                 DuplicateIndex dups, double maxUp)
         {
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
@@ -172,7 +192,18 @@ namespace CAD2Revit.Revit
             // 1. Find a host if the row asks for one.
             HostHit hit = null;
             bool onVertical = false;   // face-based family on a vertical work plane (no wall)
-            if (row.Host == HostMode.Vertical)
+            bool onLevelPlane = false; // face/work-plane based family on a horizontal reference plane
+            if (row.Host == HostMode.RefPlane)
+            {
+                if (ptype == FamilyPlacementType.WorkPlaneBased) onLevelPlane = true;
+                else if (ptype == FamilyPlacementType.OneLevelBased)
+                    notes.Add("WARNING: family is not face-based/work-plane-based, so it cannot be hosted on a " +
+                              "reference plane - placed level-based at the elevation");
+                else if (ptype == FamilyPlacementType.OneLevelBasedHosted)
+                    return Result(b, row, Status.Failed, Notes("WARNING: legacy wall/ceiling-hosted family cannot be hosted on a " +
+                                                                "reference plane or placed level-based - use a face-based family"), b.Point, angle);
+            }
+            else if (row.Host == HostMode.Vertical)
             {
                 if (ptype == FamilyPlacementType.WorkPlaneBased) onVertical = true;
                 else if (ptype == FamilyPlacementType.OneLevelBased)
@@ -236,7 +267,22 @@ namespace CAD2Revit.Revit
             string hostText = hit?.Describe() ?? "";
 
             // 3. Create the instance according to the family's placement type.
-            if (onVertical)
+            if (onLevelPlane)
+            {
+                // Horizontal plane at level + elevation; the CAD rotation is the reference direction.
+                var rp = levelPlanes.Get(row.OffsetMm, row.Facing);
+                inst = _doc.Create.NewFamilyInstance(rp.GetReference(), target, cadDir, sym);
+                // Make sure the family faces the requested side (a reused plane may point the other way).
+                _doc.Regenerate();
+                var want = LevelPlanes.Normal(row.Facing);
+                if (inst.GetTransform().BasisZ.DotProduct(want) < 0)
+                {
+                    if (inst.CanFlipWorkPlane) inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
+                    else notes.Add("WARNING: could not flip the family to face " + row.Facing.ToString().ToLowerInvariant());
+                }
+                hostText = "Reference plane " + rp.Name;
+            }
+            else if (onVertical)
             {
                 // Device faces the CAD block's local +Y axis (turned by the row's Rotation):
                 // blocks drawn with the wall along X and the room on +Y face into the room.

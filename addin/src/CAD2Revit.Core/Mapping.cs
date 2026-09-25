@@ -6,7 +6,10 @@ using System.Text.RegularExpressions;
 
 namespace CAD2Revit.Core
 {
-    public enum HostMode { None, Ceiling, Face, Wall, Vertical }
+    public enum HostMode { None, Ceiling, Face, Wall, Vertical, RefPlane }
+
+    /// <summary>Which side a family on a horizontal reference plane faces.</summary>
+    public enum Facing { Down, Up }
 
     /// <summary>One row of the mapping table: CAD block -> Revit family type.</summary>
     public class MapRow
@@ -17,6 +20,7 @@ namespace CAD2Revit.Core
         public double OffsetMm;
         public double RotationDeg;
         public HostMode Host;
+        public Facing Facing = Facing.Down;   // used by HostMode.RefPlane
         public int Line;   // row number in the source file (for messages)
 
         public string Label => Family + " : " + TypeName;
@@ -37,7 +41,7 @@ namespace CAD2Revit.Core
         public static readonly string[] TemplateHeader =
         {
             "CAD_Block_Name", "Revit_Family_Name", "Revit_Type_Name",
-            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type",
+            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing",
         };
 
         // Accepted header spellings, compared after lower-casing and removing
@@ -51,6 +55,7 @@ namespace CAD2Revit.Core
             ["offset"] = new[] { "offsetfromlevelmm", "offsetfromlevel", "offsetmm", "offset", "elevationmm" },
             ["rotation"] = new[] { "rotationadjustmentdeg", "rotationadjustment", "rotationdeg", "rotation" },
             ["host"] = new[] { "hosttype", "host", "hosting" },
+            ["facing"] = new[] { "facing", "face direction", "facingdirection" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -64,6 +69,25 @@ namespace CAD2Revit.Core
             ["vertical"] = HostMode.Vertical,
             ["verticalplane"] = HostMode.Vertical,
             ["vplane"] = HostMode.Vertical,
+            ["referenceplane"] = HostMode.RefPlane,
+            ["referenceplaneautocreate"] = HostMode.RefPlane,
+            ["refplane"] = HostMode.RefPlane,
+            ["plane"] = HostMode.RefPlane,
+            // display labels used in the mapping window
+            ["nonelevelbased"] = HostMode.None,
+            ["faceceilingslabroof"] = HostMode.Face,
+            ["verticalplanenowall"] = HostMode.Vertical,
+        };
+
+        /// <summary>Host Type labels shown in the mapping window, in dropdown order.</summary>
+        public static readonly Dictionary<HostMode, string> HostDisplay = new Dictionary<HostMode, string>
+        {
+            [HostMode.None] = "None (level-based)",
+            [HostMode.Ceiling] = "Ceiling",
+            [HostMode.Wall] = "Wall",
+            [HostMode.RefPlane] = "Reference Plane (auto-create)",
+            [HostMode.Face] = "Face (ceiling/slab/roof)",
+            [HostMode.Vertical] = "Vertical plane (no wall)",
         };
 
         /// <summary>Host_Type cell text -> HostMode (null if not recognised).</summary>
@@ -72,7 +96,18 @@ namespace CAD2Revit.Core
 
         /// <summary>HostMode -> the text written in mapping files.</summary>
         public static string HostText(HostMode host) =>
-            host == HostMode.None ? "non-hosted" : host.ToString().ToLowerInvariant();
+            host == HostMode.None ? "non-hosted"
+            : host == HostMode.RefPlane ? "reference plane"
+            : host.ToString().ToLowerInvariant();
+
+        /// <summary>"down"/"up" (default down).</summary>
+        public static Facing? ParseFacing(string text)
+        {
+            var n = Norm(text);
+            if (n.Length == 0 || n == "down" || n == "d") return Facing.Down;
+            if (n == "up" || n == "u") return Facing.Up;
+            return null;
+        }
 
         /// <summary>Writes rows in the standard mapping format (.xlsx or .csv).
         /// Rows with an empty Family are written as "do not place" (Skip).</summary>
@@ -80,7 +115,7 @@ namespace CAD2Revit.Core
         {
             Tables.WriteTable(path, TemplateHeader, rows.Select(r => (IList<object>)new object[]
             {
-                r.Block, r.Family ?? "", r.TypeName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
+                r.Block, r.Family ?? "", r.TypeName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host), r.Facing.ToString(),
             }).ToList());
         }
 
@@ -164,16 +199,22 @@ namespace CAD2Revit.Core
                 var rawHost = Get(r, "host");
                 if (!HostValues.TryGetValue(Norm(rawHost), out var host))
                 {
-                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall/vertical) - using none");
+                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall/vertical/reference plane) - using none");
                     host = HostMode.None;
                 }
                 result.SkippedBlocks.Remove(block);
+                var facing = ParseFacing(Get(r, "facing"));
+                if (facing == null)
+                {
+                    result.Errors.Add($"Row {line}: Facing '{Get(r, "facing")}' not recognised (use Down/Up) - using Down");
+                    facing = Facing.Down;
+                }
                 if (result.Rows.ContainsKey(block))
                     result.Errors.Add($"Row {line}: block '{block}' is mapped twice - last row wins");
                 result.Rows[block] = new MapRow
                 {
                     Block = block, Family = family, TypeName = type,
-                    OffsetMm = offset.Value, RotationDeg = rot.Value, Host = host, Line = line,
+                    OffsetMm = offset.Value, RotationDeg = rot.Value, Host = host, Facing = facing.Value, Line = line,
                 };
             }
             return result;

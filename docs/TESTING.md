@@ -58,6 +58,7 @@ Run **List Blocks** first, then **Place Families** > pick DWG and level > mappin
 | 10 | Undo | Ctrl+Z once removes everything the tool placed in that run |
 | 11 | Rotated link | Rotate/move the DWG link, delete the placed families, run again: everything follows the link |
 | 12 | No host | Delete the ceiling and run: lights are placed at 2800 mm unhosted, with "no ceiling found... placed unhosted" in the log |
+| 12b | Reference Plane | Set the lights to *Reference Plane (auto-create)* at 2800: one plane `CAD2Revit_Level 1_+2800mm` is created, all lights host on it facing down; run again and no second plane is created; Ctrl+Z removes the plane too |
 | 13 | Other level | Run with Level 2 selected: 10 placed (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

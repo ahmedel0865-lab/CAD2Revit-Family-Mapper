@@ -27,6 +27,7 @@ Block scale is recorded in the log (`Block_Scale`) but not applied. Family size 
 - Curtain walls and in-place families are searched like any other wall/ceiling, but results can vary.
 - The `wall` host ignores `Rotation_Adjustment_deg`: the device faces out of the wall.
 - `vertical` (and `wall` when no wall is found) hosts face-based devices on **reference planes** named `CAD2Revit vertical <id>`, one per wall line (devices on the same line share a plane, and later runs reuse them). They show as short dashed lines in plan; hide them with *Visibility/Graphics > Annotation Categories > Reference Planes*. If you delete a plane, its devices are deleted with it. The standalone add-in only; the pyRevit version treats `vertical` as not recognised.
+- **Reference Plane (auto-create)** planes are real model elements named `CAD2Revit_<Level>_+<elevation>mm`. Deleting a plane deletes the devices hosted on it; moving it (e.g. in a section) moves them. Rows with the same elevation but opposite Facing use two planes (`..._Up` for up-facing). A plane you renamed is not recognised, so a new one is created. Planes are drawn in a section/elevation view if the model has one, otherwise in a 3D view.
 - If no host is found and `FallbackToUnhosted = true`, the element is placed unhosted at the row's offset. For `wall` rows, face-based devices stand upright on a vertical plane. For `ceiling`/`face` rows, a face-based family lies on the level's work plane (facing up).
 
 ## Duplicate check

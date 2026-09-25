@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0] - 2026-09-25
+### Added
+- **Host Type "Reference Plane (auto-create)"** (standalone add-in).
+  - Creates a **horizontal reference plane** at level + *Elevation From Level*, named `CAD2Revit_<Level>_+<elevation>mm`, spanning the DWG link extents plus 1 m.
+  - Hosts the family on it with `NewFamilyInstance(reference, point, CAD direction, symbol)`.
+  - Existing planes with the same name are reused, so rows with the same elevation share one plane.
+- **Facing** column (Down / Up, default Down) sets which side the family faces. The plane normal is set to match; up-facing planes are named `..._Up`. After placement the facing is checked and the work plane flipped if needed.
+- Families that are not face-/work-plane-based are placed level-based with a **WARNING** in the log. The result window gains a *Placed with warnings* section.
+- **"Use reference planes for all rows"** checkbox; unticking restores the previous Host Types.
+- Host Type dropdown uses readable labels: None (level-based), Ceiling, Wall, Reference Plane (auto-create), Face, Vertical plane. Mapping files accept both labels and short names, plus an optional **Facing** column.
+- README: *Ceiling vs Reference Plane* guidance.
+
+### Fixed
+- Vertical planes (v0.5.0) and the new reference planes are recreated if the block that first created them was rolled back, instead of reusing a deleted element.
+
 ## [0.5.0] - 2026-09-25
 ### Added
 - **Vertical placement for wall devices** (standalone add-in).

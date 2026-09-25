@@ -82,7 +82,8 @@ namespace CAD2Revit.Commands
                     var mapping = session.ToMapping();
                     var errors = new List<string>();
                     var symbols = Placer.ResolveSymbols(doc, mapping, errors);
-                    var results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview);
+                    var results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
+                                                                    dwgExtents: DwgExtents(opts.Import));
                     var logPath = WriteLog(doc, results, preview);
 
                     var summary = Report.Summarize(results);
@@ -140,6 +141,27 @@ namespace CAD2Revit.Commands
             }
             session.AutoMatch(row => !known.Contains(row.BlockName));
             return session;
+        }
+
+        /// <summary>Plan extents of the DWG link (minX, minY, maxX, maxY in feet), or null.</summary>
+        static double[] DwgExtents(ImportInstance import)
+        {
+            try
+            {
+                var bb = import.get_BoundingBox(null);
+                if (bb == null) return null;
+                var tf = bb.Transform ?? Transform.Identity;
+                var corners = new[]
+                {
+                    tf.OfPoint(new XYZ(bb.Min.X, bb.Min.Y, 0)), tf.OfPoint(new XYZ(bb.Max.X, bb.Min.Y, 0)),
+                    tf.OfPoint(new XYZ(bb.Min.X, bb.Max.Y, 0)), tf.OfPoint(new XYZ(bb.Max.X, bb.Max.Y, 0)),
+                };
+                return new[] { corners.Min(c => c.X), corners.Min(c => c.Y), corners.Max(c => c.X), corners.Max(c => c.Y) };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>Central model path for workshared models, else the file path ("" if unsaved).</summary>

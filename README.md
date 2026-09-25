@@ -12,7 +12,8 @@ Instead of manually placing hundreds of light fixtures, sockets and detectors ov
 - Load / Save mappings as **.xlsx or .csv** (no Excel installation needed); List Blocks exports a ready-to-fill template
 - Places families at block insertion points, keeping the CAD rotation (+ per-row adjustment)
 - Handles DWG units, link position, rotation and shared coordinates automatically
-- Hosting per row: **ceiling**, **face** (ceilings/slabs/roofs/beams), **wall**, **vertical** (upright on a vertical plane, no wall needed), or **non-hosted**, including hosts in linked Revit models
+- Hosting per row: **None (level-based)**, **Ceiling**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models
+- **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up, with a one-click *Use reference planes for all rows*
 - Falls back to unhosted placement (or reports a failure) when no host is found
 - **Preview** does the full placement and then undoes it, so its counts match a real run, then returns to the mapping window
 - Duplicate protection per level, so re-running only adds new blocks
@@ -35,7 +36,7 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
 2. **CAD2Revit > Place Families** > pick the DWG and target level > **Next**.
-3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the elevation, and leave `(Skip)` for blocks you don't want.
+3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the elevation and Host Type (see [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)), and leave `(Skip)` for blocks you don't want.
 4. **Preview** > check the result > **Run**. One Ctrl+Z undoes it all.
 
 Next time in the same project, the mapping window opens pre-filled.
@@ -44,6 +45,20 @@ Next time in the same project, the mapping window opens pre-filled.
 - Test on a small sample first: [docs/TESTING.md](docs/TESTING.md)
 - Known limitations: [docs/LIMITATIONS.md](docs/LIMITATIONS.md)
 - Example mapping: [templates/mapping_template.xlsx](templates/mapping_template.xlsx) / [.csv](templates/mapping_template.csv)
+
+## Ceiling vs Reference Plane: which host to use?
+
+| Use **Ceiling** when... | Use **Reference Plane (auto-create)** when... |
+|---|---|
+| The model (or a linked architectural model) **has ceilings** at the right height. | There are **no ceilings** yet, or they are in a model you can't host on (e.g. a DWG background only). |
+| You want devices to **follow the ceiling**: if the architect moves the ceiling, hosted lights and detectors move with it. | You want a **fixed height** from the level that you control, e.g. 2800 mm for all lights on Level 1, regardless of the architecture. |
+| Ceilings are at different heights in different rooms, and each device should sit on its own ceiling. | Many devices share one height and you want **one tidy plane per height** that you can move later (moving the plane moves every device on it). |
+| | Devices go on the **underside of a slab** or in **open ceilings** (car parks, plant rooms), or **face up** on the floor (floor boxes: set *Facing* = Up). |
+
+Notes:
+- Both need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window.
+- Ceiling hosting looks straight up from each block and needs a ceiling within the search distance. Anything without a ceiling above it falls back to the row's elevation, unhosted.
+- Reference planes are named `CAD2Revit_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
 
 ## Mapping file
 The mapping window can **Load / Save** the mapping as a file, to reuse it across projects or share it with the team. The format is the same one List Blocks exports (empty family = Skip):

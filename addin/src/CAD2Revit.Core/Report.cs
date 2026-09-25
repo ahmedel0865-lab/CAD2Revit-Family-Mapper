@@ -37,6 +37,8 @@ namespace CAD2Revit.Core
         public Dictionary<Status, int> Status = new Dictionary<Status, int>();
         public List<KeyValuePair<string, int>> Unmapped = new List<KeyValuePair<string, int>>();
         public List<PlacementResult> Problems = new List<PlacementResult>();
+        /// <summary>Placed, but with a "WARNING:" message (e.g. placed level-based instead of on a plane).</summary>
+        public List<PlacementResult> Warnings = new List<PlacementResult>();
 
         public int Get(Status s) => Status.TryGetValue(s, out var n) ? n : 0;
     }
@@ -63,7 +65,10 @@ namespace CAD2Revit.Core
             {
                 s.Status[r.Status] = s.Get(r.Status) + r.Count;
                 if (r.Status == Status.Placed && r.Row != null)
+                {
                     byType[r.Row.Label] = (byType.TryGetValue(r.Row.Label, out var n) ? n : 0) + 1;
+                    if ((r.Message ?? "").Contains("WARNING:")) s.Warnings.Add(r);
+                }
                 else if (r.Status == Status.Unmapped)
                     unmapped[r.BlockName] = (unmapped.TryGetValue(r.BlockName, out var m) ? m : 0) + r.Count;
                 else if (r.Status == Status.Failed || r.Status == Status.Skipped)
@@ -140,6 +145,14 @@ namespace CAD2Revit.Core
                 lines.Add("Unmapped blocks (add them to the mapping file to place them):");
                 lines.Add(TextTable.Format(new[] { "CAD block", "Instances" },
                     s.Unmapped.Select(kv => new object[] { kv.Key, kv.Value })));
+            }
+            if (s.Warnings.Count > 0)
+            {
+                lines.Add("");
+                lines.Add(preview ? "Would be placed, with warnings:" : "Placed with warnings:");
+                lines.Add(TextTable.Format(new[] { "CAD block", "Count", "Warning" },
+                    s.Warnings.GroupBy(r => new { r.BlockName, r.Message })
+                        .Select(g => new object[] { g.Key.BlockName, g.Count(), g.Key.Message })));
             }
             if (s.Problems.Count > 0)
             {
