@@ -6,7 +6,8 @@ Instead of manually placing hundreds of light fixtures, sockets and detectors ov
 
 ## Features
 - **Mapping window**: one row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category** (Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other) with a *Show* filter and Find box, a **searchable** family dropdown (electrical categories), **Level** + elevation per row, rotation and host type, all in Revit
-- **Per-row Level**: different blocks can go on different levels in one run; the elevation is measured from the row's level
+- **Per-row Level**: different blocks can go on different levels in one run; the elevation is measured from the row's level (it starts at the DWG's level, no level to pick up front)
+- **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category for all of them in one click
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type
 - **Auto-selects** families whose names closely match the block name (`SMOKE-DET` → *Smoke Detector*)
 - **Remembers the last mapping per project**, so the grid is pre-filled next time
@@ -36,8 +37,8 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
-2. **CAD2Revit > Place Families** > pick the DWG and target level > **Next**.
-3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the elevation and Host Type (see [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)), and leave `(Skip)` for blocks you don't want.
+2. **CAD2Revit > Place Families** > pick the DWG > **Next**.
+3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the level, elevation and Host Type (see [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
 4. **Preview** > check the result > **Run**. One Ctrl+Z undoes it all.
 
 Next time in the same project, the mapping window opens pre-filled.

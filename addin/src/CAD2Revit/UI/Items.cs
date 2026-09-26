@@ -41,12 +41,22 @@ namespace CAD2Revit.UI
                 })
                 .ToList();
 
-        /// <summary>Level of the DWG's own view (view-only links), else the active plan's level.</summary>
+        /// <summary>The level the DWG belongs to: its own view's level (view-only links), else
+        /// the level it was linked on, else the active plan's level, else the lowest level.</summary>
+        public static Level DefaultLevel(Document doc, ImportInstance imp)
+        {
+            var levels = Levels(doc);
+            if (levels.Count == 0) return null;
+            return levels[DefaultLevelIndex(doc, levels, imp)].Element;
+        }
+
         public static int DefaultLevelIndex(Document doc, List<Item<Level>> levels, ImportInstance imp)
         {
             var candidates = new List<Level>();
             if (imp != null && imp.ViewSpecific && doc.GetElement(imp.OwnerViewId) is View owner)
                 candidates.Add(owner.GenLevel);
+            if (imp != null && imp.LevelId != ElementId.InvalidElementId)
+                candidates.Add(doc.GetElement(imp.LevelId) as Level);
             candidates.Add(doc.ActiveView?.GenLevel);
             foreach (var lvl in candidates.Where(l => l != null))
             {

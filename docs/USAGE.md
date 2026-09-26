@@ -42,7 +42,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 ## 3. Map the blocks and place (mapping window)
 
 1. Click **CAD2Revit > Place Families**.
-2. **Step 1:** pick the **DWG link/import** and the **target level** (defaults to the level of the active plan view), and optionally *include nested blocks*. Click **Next >**.
+2. **Step 1:** pick the **DWG link/import**, and optionally *include nested blocks*. Click **Next >**. There is no level to pick here: every row's **Level** starts at the level the DWG is linked on (or the active plan's level) and can be changed per row, or for many rows at once, in the mapping window.
 3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance), **grouped by category** (Electrical first) and sorted by name. Use **Find** and **Show** (category) to filter the rows; **Skip shown rows** sets every row currently shown to (Skip), e.g. all Architectural blocks at once.
    - Block names are simplified so instances group correctly. The `<file>.dwg.` prefix Revit adds is removed. For DWGs **exported from Revit**, the `-<element id>-<view name>` suffix is removed too, so `MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`. Turn this off with `SimplifyBlockNames = false` in settings.ini.
 
@@ -51,7 +51,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 | **CAD Block** | Block name and number of instances, e.g. `SMOKE-DET (42)`. Read-only. |
 | **Category** | Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation or Other. Detected from the block name (e.g. *Luminaire*, *SMOKE-DET* → Electrical; *Door*, *Casework*, *Elevator* → Architectural; *Toilet* → Plumbing; *Grid Head* → Annotation). If the name says nothing, the chosen family's Revit category decides (e.g. Lighting Fixtures → Electrical). Change it if the guess is wrong; it is saved with the mapping. |
 | **Revit Family** | Pick the family type (`Family : Type`). **Type in the box to search**: every word you type must appear, so `smo cei` finds *Smoke Detector : Ceiling*. Press **Enter** to take the first match, **Esc** to cancel. `(Skip)` = do not place (the default). |
-| **Level** | The level this block is placed on. Defaults to the level picked in step 1; pick another level to place that block on a different floor in the same run. |
+| **Level** | The level this block is placed on. Starts at the DWG's level; pick another level to place that block on a different floor in the same run. |
 | **Elevation From Level (mm)** | Height above the row's **Level**. Must be a number; invalid cells turn red and block Preview/Run. |
 | Rotation (deg) | Optional. Added to the CAD block rotation (counter-clockwise). |
 | Host Type | None (level-based), Ceiling, Wall, Reference Plane (auto-create), Face (ceiling/slab/roof) or Vertical plane (no wall). See below. |
@@ -78,6 +78,12 @@ Host types:
 
 The elevation is also the fallback height if a ceiling is not found.
 
+- **Edit many rows at once:**
+  1. Select rows with **Ctrl+click**, **Shift+click**, or **Ctrl+A** / *Select all shown* (all rows after Find / Show).
+  2. In the bar above the grid, choose the values to set: **Host Type**, **Level**, **Elevation (mm)**, **Facing** and/or **Category**. Fields left at *(keep)*, or an empty elevation, are not changed.
+  3. Click **Apply to selected rows**.
+
+  Example: *Show: Electrical* → *Select all shown* → Host Type = *Reference Plane (auto-create)*, Elevation = 2800 → *Apply*.
 - **Use reference planes for all rows** (checkbox above the grid) sets every row's Host Type to *Reference Plane (auto-create)* in one click. Untick it to restore the previous Host Types.
 - For choosing between **Ceiling** and **Reference Plane**, see the table in the [README](../README.md#ceiling-vs-reference-plane-which-host-to-use).
 

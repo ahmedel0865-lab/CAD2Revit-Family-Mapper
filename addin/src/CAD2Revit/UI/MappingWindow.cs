@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -46,7 +47,7 @@ namespace CAD2Revit.UI
             {
                 Margin = new Thickness(0, 0, 0, 8),
                 TextWrapping = TextWrapping.Wrap,
-                Text = $"DWG: {_s.DwgName}     Default level: {_s.LevelName}     " +
+                Text = $"DWG: {_s.DwgName}     Starting level (DWG): {_s.LevelName}     " +
                        $"{_s.Rows.Count} unique blocks, {_s.InstanceCount} instances (sorted by block name).\n" +
                        "Pick a family for each block (type in the box to search). (Skip) = do not place. " +
                        "Elevation is from the row's Level, in mm (Level defaults to the one picked in step 1). " +
@@ -101,6 +102,9 @@ namespace CAD2Revit.UI
             findBar.Children.Add(new TextBlock());
             root.Children.Add(findBar);
 
+            // Bulk edit: set Host Type / Level / Elevation / Facing / Category for all selected rows.
+            root.Children.Add(BuildBulkBar());
+
             // Buttons
             var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0), LastChildFill = false };
             DockPanel.SetDock(bottom, Dock.Bottom);
@@ -148,7 +152,10 @@ namespace CAD2Revit.UI
             _grid.CanUserAddRows = false;
             _grid.CanUserDeleteRows = false;
             _grid.CanUserReorderColumns = false;
-            _grid.SelectionMode = DataGridSelectionMode.Single;
+            // Several rows can be selected (Ctrl+click, Shift+click, Ctrl+A) and edited together.
+            _grid.SelectionMode = DataGridSelectionMode.Extended;
+            _grid.SelectionUnit = DataGridSelectionUnit.FullRow;
+            _grid.SelectionChanged += (o, e) => UpdateSelectionLabel();
             _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
             _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
             _grid.RowHeight = 28;
@@ -236,6 +243,98 @@ namespace CAD2Revit.UI
             style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
             style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.Display))));
             return style;
+        }
+
+        const string Keep = "(keep)";
+        readonly TextBlock _selectedLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 10, 0) };
+        ComboBox _bulkHost, _bulkLevel, _bulkFacing, _bulkCategory;
+        TextBox _bulkElevation;
+
+        static ComboBox KeepCombo(IEnumerable<string> items, double width)
+        {
+            var cb = new ComboBox { Width = width, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+            cb.Items.Add(Keep);
+            foreach (var i in items) cb.Items.Add(i);
+            cb.SelectedIndex = 0;
+            return cb;
+        }
+
+        static TextBlock BarLabel(string text) =>
+            new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
+
+        UIElement BuildBulkBar()
+        {
+            var bar = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+            DockPanel.SetDock(bar, Dock.Top);
+            _bulkHost = KeepCombo(BlockRow.HostChoices, 200);
+            _bulkLevel = KeepCombo(_s.LevelNames, 140);
+            _bulkElevation = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
+                                           ToolTip = "Leave empty to keep each row's elevation" };
+            _bulkFacing = KeepCombo(BlockRow.FacingChoices, 70);
+            _bulkCategory = KeepCombo(BlockCategories.All, 115);
+            var apply = new Button { Content = "Apply to selected rows", Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 0, 8, 0) };
+            apply.Click += (o, e) => ApplyToSelected();
+            var selectAll = new Button { Content = "Select all shown", Padding = new Thickness(8, 2, 8, 2),
+                                         ToolTip = "Select every row currently shown (same as Ctrl+A in the grid)" };
+            selectAll.Click += (o, e) => { _grid.Focus(); _grid.SelectAll(); };
+
+            bar.Children.Add(_selectedLabel);
+            bar.Children.Add(BarLabel("Host Type"));
+            bar.Children.Add(_bulkHost);
+            bar.Children.Add(BarLabel("Level"));
+            bar.Children.Add(_bulkLevel);
+            bar.Children.Add(BarLabel("Elevation (mm)"));
+            bar.Children.Add(_bulkElevation);
+            bar.Children.Add(BarLabel("Facing"));
+            bar.Children.Add(_bulkFacing);
+            bar.Children.Add(BarLabel("Category"));
+            bar.Children.Add(_bulkCategory);
+            bar.Children.Add(apply);
+            bar.Children.Add(selectAll);
+            UpdateSelectionLabel();
+            return bar;
+        }
+
+        void UpdateSelectionLabel()
+        {
+            int n = _grid.SelectedItems.Count;
+            _selectedLabel.Text = n == 0 ? "Select rows (Ctrl/Shift+click, Ctrl+A), then set:" : $"{n} row(s) selected - set:";
+        }
+
+        void ApplyToSelected()
+        {
+            CommitEdits();
+            var rows = _grid.SelectedItems.OfType<BlockRow>().ToList();
+            if (rows.Count == 0)
+            {
+                MessageBox.Show(this, "Select one or more rows first (Ctrl+click, Shift+click, or Ctrl+A for all shown rows).",
+                    "CAD2Revit", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            string host = _bulkHost.SelectedItem as string, level = _bulkLevel.SelectedItem as string,
+                   facing = _bulkFacing.SelectedItem as string, category = _bulkCategory.SelectedItem as string;
+            var elevText = (_bulkElevation.Text ?? "").Trim();
+            if (elevText.Length > 0 && Mapping.ParseNumber(elevText) == null)
+            {
+                MessageBox.Show(this, "Elevation must be a number (mm), or empty to keep each row's value.",
+                    "CAD2Revit", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            bool any = host != Keep || level != Keep || facing != Keep || category != Keep || elevText.Length > 0;
+            if (!any)
+            {
+                MessageBox.Show(this, "Choose at least one value to set (Host Type, Level, Elevation, Facing or Category).",
+                    "CAD2Revit", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            foreach (var r in rows)
+            {
+                if (host != Keep) { r.Host = host; r.HostBeforeAll = null; }
+                if (level != Keep) r.Level = level;
+                if (elevText.Length > 0) r.Elevation = elevText;
+                if (facing != Keep) r.Facing = facing;
+                if (category != Keep) r.Category = category;
+            }
         }
 
         void SetAllReferencePlanes(bool on)

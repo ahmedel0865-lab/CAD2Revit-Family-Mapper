@@ -41,7 +41,7 @@ In the mapping window (Place Families > Next), set the rows as below (or save th
 
 ## 4. Checklist
 
-Run **List Blocks** first, then **Place Families** > pick DWG and level > mapping window > **Preview**, then **Run**.
+Run **List Blocks** first, then **Place Families** > pick the DWG > mapping window > **Preview**, then **Run**.
 
 | # | Check | Expected |
 |---|---|---|
@@ -59,7 +59,7 @@ Run **List Blocks** first, then **Place Families** > pick DWG and level > mappin
 | 11 | Rotated link | Rotate/move the DWG link, delete the placed families, run again: everything follows the link |
 | 12 | No host | Delete the ceiling and run: lights are placed at 2800 mm unhosted, with "no ceiling found... placed unhosted" in the log |
 | 12b | Reference Plane | Set the lights to *Reference Plane (auto-create)* at 2800: one plane `CAD2Revit_Level 1_+2800mm` is created, all lights host on it facing down; run again and no second plane is created; Ctrl+Z removes the plane too |
-| 13 | Other level | Run with Level 2 selected: 10 placed (the Level 1 elements are not treated as duplicates) |
+| 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.
 

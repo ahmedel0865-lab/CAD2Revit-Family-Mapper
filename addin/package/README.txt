@@ -22,7 +22,7 @@ UNINSTALL
 USE
   1. Load your families (face-based for ceiling/wall devices) and link the DWG
      in the floor plan of the target level.
-  2. CAD2Revit > Place Families > choose the DWG and level > Next.
+  2. CAD2Revit > Place Families > choose the DWG > Next.
   3. Mapping window: one row per CAD block name. Pick the Revit family for
      each block (type in the box to search; close matches are pre-selected),
      set Elevation From Level (mm), optionally Rotation and Host Type.

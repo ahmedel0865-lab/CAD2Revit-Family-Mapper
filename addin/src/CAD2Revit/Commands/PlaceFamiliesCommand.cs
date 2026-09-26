@@ -35,12 +35,17 @@ namespace CAD2Revit.Commands
                     return Result.Cancelled;
                 }
 
-                // 1. DWG + level.
+                // 1. DWG (the starting level comes from the DWG; rows can change it).
                 PlaceOptions opts;
                 using (var dlg = new PlaceDialog(doc, settings))
                 {
                     if (dlg.ShowDialog() != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
                     opts = dlg.Result;
+                }
+                if (opts.Level == null)
+                {
+                    TaskDialog.Show("CAD2Revit", "This model has no levels.");
+                    return Result.Cancelled;
                 }
 
                 // 2. Blocks from the DWG.

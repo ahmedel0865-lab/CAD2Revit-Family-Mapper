@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0] - 2026-09-26
+### Added
+- **Edit many rows at once.** Select rows in the mapping window (Ctrl+click, Shift+click, Ctrl+A or *Select all shown*), set **Host Type**, **Level**, **Elevation**, **Facing** and/or **Category** in the new bar above the grid, then click **Apply to selected rows**. Fields left at *(keep)* are not changed. Combined with *Show* (category), e.g. all Electrical blocks can be given the same host in one step.
+
+### Changed
+- **No target level in the first window.** Step 1 now asks only for the DWG and the nested-blocks option. Every row's Level starts at the level the DWG is linked on (view-only links: its view's level; otherwise the active plan's level) and is set per row, or for many rows with the new bulk edit.
+
 ## [0.7.0] - 2026-09-26
 ### Added
 - **Level column** next to *Elevation From Level (mm)* in the mapping window. Each block can be placed on its own level in one run; it defaults to the level picked in step 1.
