@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0] - 2026-09-26
+### Added
+- **Level column** next to *Elevation From Level (mm)* in the mapping window. Each block can be placed on its own level in one run; it defaults to the level picked in step 1.
+  - Hosting, reference planes (`CAD2Revit_<Level>_+<elev>mm`), vertical planes, the ceiling search limit and the duplicate check all work per level.
+  - The log has a new **Level** column.
+  - Mapping files have an optional **Level** column, written right before the offset.
+- **Block categories.** Every block is classified as Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation or Other.
+  - The classification comes from the block name (tested on real Revit-exported names such as `MAAP_Ceiling Mounted Luminaire - F1`, `Casework 16`, `Elevator`, `Grid Head`). When the name gives no clue, the matched family's Revit category is used.
+  - The mapping window **groups rows by category** (Electrical first), has a **Show** filter and a **Skip shown rows** button, and the category can be edited per row. It is saved with the mapping (optional **Category** column).
+  - List Blocks shows and exports the category.
+
+### Fixed
+- The List Blocks template now writes every column of the mapping format (the Facing column was missing).
+
 ## [0.6.0] - 2026-09-25
 ### Added
 - **Host Type "Reference Plane (auto-create)"** (standalone add-in).

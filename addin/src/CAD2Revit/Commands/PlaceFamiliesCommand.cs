@@ -124,8 +124,10 @@ namespace CAD2Revit.Commands
                 ProjectMappingPath = ProjectStore.MappingPathFor(ProjectStore.KeyFor(ModelPath(doc), doc.Title)),
             };
             FamilyCatalog.Load(doc, session);
+            session.LevelNames = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                .OrderBy(l => l.ProjectElevation).Select(l => l.Name).ToList();
             foreach (var kv in DwgReader.CountByName(blocks).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options));
+                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, opts.Level.Name));
 
             var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (File.Exists(session.ProjectMappingPath))
@@ -140,6 +142,7 @@ namespace CAD2Revit.Commands
                             string.Join("\n", missing.Take(15)) + (missing.Count > 15 ? "\n..." : "");
             }
             session.AutoMatch(row => !known.Contains(row.BlockName));
+            foreach (var row in session.Rows) MappingSession.UseFamilyCategory(row);
             return session;
         }
 

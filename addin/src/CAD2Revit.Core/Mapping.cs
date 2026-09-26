@@ -21,6 +21,8 @@ namespace CAD2Revit.Core
         public double RotationDeg;
         public HostMode Host;
         public Facing Facing = Facing.Down;   // used by HostMode.RefPlane
+        public string LevelName = "";         // "" = the level chosen when running
+        public string Category = "";          // Electrical / Architectural / ... ("" = auto)
         public int Line;   // row number in the source file (for messages)
 
         public string Label => Family + " : " + TypeName;
@@ -32,6 +34,8 @@ namespace CAD2Revit.Core
         public Dictionary<string, MapRow> Rows = new Dictionary<string, MapRow>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Blocks listed in the file with an empty family ("do not place" / Skip).</summary>
         public HashSet<string> SkippedBlocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Category column of every row in the file, including skipped ones.</summary>
+        public Dictionary<string, string> Categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public List<string> Errors = new List<string>();
     }
 
@@ -40,8 +44,8 @@ namespace CAD2Revit.Core
     {
         public static readonly string[] TemplateHeader =
         {
-            "CAD_Block_Name", "Revit_Family_Name", "Revit_Type_Name",
-            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing",
+            "CAD_Block_Name", "Revit_Family_Name", "Revit_Type_Name", "Level",
+            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing", "Category",
         };
 
         // Accepted header spellings, compared after lower-casing and removing
@@ -56,6 +60,8 @@ namespace CAD2Revit.Core
             ["rotation"] = new[] { "rotationadjustmentdeg", "rotationadjustment", "rotationdeg", "rotation" },
             ["host"] = new[] { "hosttype", "host", "hosting" },
             ["facing"] = new[] { "facing", "face direction", "facingdirection" },
+            ["level"] = new[] { "level", "levelname", "targetlevel", "revitlevel" },
+            ["category"] = new[] { "category", "discipline", "blockcategory" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -115,7 +121,8 @@ namespace CAD2Revit.Core
         {
             Tables.WriteTable(path, TemplateHeader, rows.Select(r => (IList<object>)new object[]
             {
-                r.Block, r.Family ?? "", r.TypeName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host), r.Facing.ToString(),
+                r.Block, r.Family ?? "", r.TypeName ?? "", r.LevelName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
+                r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
             }).ToList());
         }
 
@@ -178,6 +185,8 @@ namespace CAD2Revit.Core
                 var block = Get(r, "block");
                 var family = Get(r, "family");
                 if (block.Length == 0) continue;
+                var cat = BlockCategories.Normalize(Get(r, "category"));
+                if (cat != null) result.Categories[block] = cat;
                 if (family.Length == 0)                 // empty family = "do not place" (Skip)
                 {
                     if (!result.Rows.ContainsKey(block)) result.SkippedBlocks.Add(block);
@@ -215,6 +224,8 @@ namespace CAD2Revit.Core
                 {
                     Block = block, Family = family, TypeName = type,
                     OffsetMm = offset.Value, RotationDeg = rot.Value, Host = host, Facing = facing.Value, Line = line,
+                    LevelName = Get(r, "level"),
+                    Category = BlockCategories.Normalize(Get(r, "category")) ?? "",
                 };
             }
             return result;

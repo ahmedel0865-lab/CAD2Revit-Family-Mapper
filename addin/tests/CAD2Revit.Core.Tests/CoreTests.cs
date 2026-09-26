@@ -203,12 +203,12 @@ namespace CAD2Revit.Core.Tests
             var rows = Report.LogRows(Sample());
             Assert.Equal(Report.LogHeader.Length, rows[0].Count);
             Assert.Equal("unmapped", rows[0][0]);
-            Assert.Equal("7 instance(s). not in mapping file", rows[0][12]);
-            Assert.Equal(101L, rows[1][4]);
-            Assert.Equal(new object[] { "304.8", "609.6", "2799.9", "270.00" }, rows[1].Skip(6).Take(4).ToArray());
-            Assert.Equal("2 x 1", rows[2][10]);
-            Assert.Equal("yes", rows[2][11]);
-            Assert.Equal("", rows[0][10]);
+            Assert.Equal("7 instance(s). not in mapping file", rows[0][13]);
+            Assert.Equal(101L, rows[1][5]);
+            Assert.Equal(new object[] { "304.8", "609.6", "2799.9", "270.00" }, rows[1].Skip(7).Take(4).ToArray());
+            Assert.Equal("2 x 1", rows[2][11]);
+            Assert.Equal("yes", rows[2][12]);
+            Assert.Equal("", rows[0][11]);
         }
     }
 

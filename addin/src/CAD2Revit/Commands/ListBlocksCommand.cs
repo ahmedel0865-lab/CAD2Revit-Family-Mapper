@@ -46,8 +46,9 @@ namespace CAD2Revit.Commands
                 var anonymous = names.Where(n => n.Length == 0 || n.StartsWith("*")).ToList();
 
                 var text = $"Blocks found in {imp.Name}: {names.Count} names, {blocks.Count} instances\r\n\r\n" +
-                           TextTable.Format(new[] { "Block name", "Count", "Mirrored" },
-                               names.Select(n => new object[] { n, counts[n], mirrored.TryGetValue(n, out var m) ? (object)m : "" }));
+                           TextTable.Format(new[] { "Category", "Block name", "Count", "Mirrored" },
+                               names.OrderBy(n => BlockCategories.Order(BlockCategories.Classify(n)))
+                                    .Select(n => new object[] { BlockCategories.Classify(n), n, counts[n], mirrored.TryGetValue(n, out var m) ? (object)m : "" }));
                 if (anonymous.Count > 0)
                     text += $"\r\n\r\nNote: {anonymous.Count} anonymous block name(s) (e.g. *U12) found. These are usually " +
                             "dynamic blocks and cannot be mapped reliably - see LIMITATIONS.";
@@ -61,9 +62,11 @@ namespace CAD2Revit.Commands
                     })
                     {
                         if (dlg.ShowDialog() != DialogResult.OK) return;
-                        var rows = names.Except(anonymous)
-                            .Select(n => (IList<object>)new object[] { n, "", "", 0, 0, "non-hosted" }).ToList();
-                        Tables.WriteTable(dlg.FileName, Mapping.TemplateHeader, rows);
+                        // Same format as the mapping window's Save Mapping, with a suggested Category.
+                        Mapping.Save(dlg.FileName, names.Except(anonymous).Select(n => new MapRow
+                        {
+                            Block = n, Family = "", TypeName = "", Category = BlockCategories.Classify(n),
+                        }));
                         MessageBox.Show($"Template saved:\n{dlg.FileName}\n\nFill in family, type, offset and host type. " +
                                         "Leave the family empty for blocks you do not want to place.", "CAD2Revit");
                     }

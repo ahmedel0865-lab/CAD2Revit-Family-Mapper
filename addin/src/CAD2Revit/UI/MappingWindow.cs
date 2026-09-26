@@ -30,9 +30,9 @@ namespace CAD2Revit.UI
         {
             _s = session;
             Title = "CAD2Revit - Map CAD blocks to Revit families";
-            Width = 1450;
+            Width = 1680;
             Height = 680;
-            MinWidth = 1000;
+            MinWidth = 1150;
             MinHeight = 400;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ShowInTaskbar = false;
@@ -46,10 +46,10 @@ namespace CAD2Revit.UI
             {
                 Margin = new Thickness(0, 0, 0, 8),
                 TextWrapping = TextWrapping.Wrap,
-                Text = $"DWG: {_s.DwgName}     Level: {_s.LevelName}     " +
+                Text = $"DWG: {_s.DwgName}     Default level: {_s.LevelName}     " +
                        $"{_s.Rows.Count} unique blocks, {_s.InstanceCount} instances (sorted by block name).\n" +
                        "Pick a family for each block (type in the box to search). (Skip) = do not place. " +
-                       "Elevation is from the target level, in mm. " +
+                       "Elevation is from the row's Level, in mm (Level defaults to the one picked in step 1). " +
                        "Facing (Down/Up) applies to Reference Plane hosting.",
             };
             DockPanel.SetDock(header, Dock.Top);
@@ -60,8 +60,31 @@ namespace CAD2Revit.UI
             DockPanel.SetDock(findBar, Dock.Top);
             findBar.Children.Add(new TextBlock { Text = "Find:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             var find = new TextBox { Width = 320, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Show only rows whose block or family contains this text" };
-            find.TextChanged += (o, e) => ApplyFind(find.Text);
+            find.TextChanged += (o, e) => { _findText = find.Text; ApplyFilter(); };
             findBar.Children.Add(find);
+            // Category filter: show one discipline at a time (rows stay grouped by category).
+            findBar.Children.Add(new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 6, 0) });
+            var show = new ComboBox { Width = 190, VerticalContentAlignment = VerticalAlignment.Center };
+            show.Items.Add(AllCategories);
+            foreach (var c in BlockCategories.All)
+            {
+                int n = _s.Rows.Count(r => r.Category == c);
+                if (n > 0) show.Items.Add(new ComboBoxItem { Content = $"{c} ({n})", Tag = c });
+            }
+            show.SelectedIndex = 0;
+            show.SelectionChanged += (o, e) =>
+            {
+                _showCategory = (show.SelectedItem as ComboBoxItem)?.Tag as string;
+                ApplyFilter();
+            };
+            findBar.Children.Add(show);
+            var skipShown = new Button
+            {
+                Content = "Skip shown rows", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(8, 1, 8, 1),
+                ToolTip = "Set every row currently shown (after Find / Show) to (Skip), e.g. all Architectural blocks",
+            };
+            skipShown.Click += (o, e) => SkipShownRows();
+            findBar.Children.Add(skipShown);
             // Global switch: every row -> Reference Plane (unticking restores each row's previous host).
             var allPlanes = new CheckBox
             {
@@ -100,8 +123,9 @@ namespace CAD2Revit.UI
             bottom.Children.Add(right);
             root.Children.Add(bottom);
 
-            // Grid (the row view is shared between Preview round-trips: start unfiltered)
-            CollectionViewSource.GetDefaultView(_s.Rows).Filter = null;
+            // Grid (the row view is shared between Preview round-trips: start unfiltered,
+            // grouped by category, Electrical first, then by block name).
+            SetUpRowView();
             BuildGrid();
             root.Children.Add(_grid);
             Content = root;
@@ -130,7 +154,9 @@ namespace CAD2Revit.UI
             _grid.RowHeight = 28;
             _grid.EnableRowVirtualization = true;
             VirtualizingPanel.SetVirtualizationMode(_grid, VirtualizationMode.Recycling);
+            VirtualizingPanel.SetIsVirtualizingWhenGrouping(_grid, true);
             _grid.ItemsSource = _s.Rows;
+            _grid.GroupStyle.Add(new GroupStyle { HeaderTemplate = GroupHeaderTemplate() });
 
             // 1. CAD Block (read-only)
             _grid.Columns.Add(new DataGridTextColumn
@@ -143,6 +169,16 @@ namespace CAD2Revit.UI
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star),
                 MinWidth = 200,
                 ElementStyle = TrimmedTextStyle(),
+            });
+
+            // Category (auto-detected from the block name; change it if the guess is wrong)
+            _grid.Columns.Add(new DataGridComboBoxColumn
+            {
+                Header = "Category",
+                ItemsSource = BlockCategories.All,
+                SelectedItemBinding = new Binding(nameof(BlockRow.Category)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                SortMemberPath = nameof(BlockRow.CategoryOrder),
+                Width = new DataGridLength(115),
             });
 
             // 2. Revit Family (searchable dropdown, always editable in the cell)
@@ -165,7 +201,14 @@ namespace CAD2Revit.UI
                 MinWidth = 250,
             });
 
-            // 3. Elevation From Level (mm), validated
+            // 3. Level + Elevation From Level (mm), validated
+            _grid.Columns.Add(new DataGridComboBoxColumn
+            {
+                Header = "Level",
+                ItemsSource = _s.LevelNames,
+                SelectedItemBinding = new Binding(nameof(BlockRow.Level)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = new DataGridLength(140),
+            });
             _grid.Columns.Add(NumberColumn("Elevation From Level (mm)", nameof(BlockRow.Elevation), 160));
 
             // Optional extras at the end
@@ -213,17 +256,80 @@ namespace CAD2Revit.UI
             }
         }
 
-        void ApplyFind(string text)
+        const string AllCategories = "All categories";
+        string _findText = "";
+        string _showCategory;   // null = all
+
+        void SetUpRowView()
+        {
+            var view = CollectionViewSource.GetDefaultView(_s.Rows);
+            view.Filter = null;
+            view.GroupDescriptions.Clear();
+            view.SortDescriptions.Clear();
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BlockRow.Category)));
+            view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(BlockRow.CategoryOrder), System.ComponentModel.ListSortDirection.Ascending));
+            view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(BlockRow.BlockName), System.ComponentModel.ListSortDirection.Ascending));
+            // Re-group / re-sort when a row's category is changed in the grid.
+            if (view is System.ComponentModel.ICollectionViewLiveShaping live)
+            {
+                if (live.CanChangeLiveGrouping)
+                {
+                    live.LiveGroupingProperties.Clear();
+                    live.LiveGroupingProperties.Add(nameof(BlockRow.Category));
+                    live.IsLiveGrouping = true;
+                }
+                if (live.CanChangeLiveSorting)
+                {
+                    live.LiveSortingProperties.Clear();
+                    live.LiveSortingProperties.Add(nameof(BlockRow.CategoryOrder));
+                    live.IsLiveSorting = true;
+                }
+            }
+        }
+
+        /// <summary>Group header: "Electrical  -  23 blocks".</summary>
+        static DataTemplate GroupHeaderTemplate()
+        {
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(232, 238, 247)));
+            border.SetValue(Border.PaddingProperty, new Thickness(6, 3, 6, 3));
+            var panel = new FrameworkElementFactory(typeof(StackPanel));
+            panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+            var name = new FrameworkElementFactory(typeof(TextBlock));
+            name.SetBinding(TextBlock.TextProperty, new Binding("Name"));
+            name.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
+            var count = new FrameworkElementFactory(typeof(TextBlock));
+            count.SetBinding(TextBlock.TextProperty, new Binding("ItemCount") { StringFormat = "   -   {0} block(s)" });
+            count.SetValue(TextBlock.ForegroundProperty, Brushes.DimGray);
+            panel.AppendChild(name);
+            panel.AppendChild(count);
+            border.AppendChild(panel);
+            return new DataTemplate { VisualTree = border };
+        }
+
+        void ApplyFilter()
         {
             CommitEdits();   // changing the filter during a cell edit throws
             var view = CollectionViewSource.GetDefaultView(_s.Rows);
-            var terms = (text ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            view.Filter = terms.Length == 0 ? null : (Predicate<object>)(o =>
+            var terms = (_findText ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var cat = _showCategory;
+            view.Filter = terms.Length == 0 && cat == null ? null : (Predicate<object>)(o =>
             {
                 var r = (BlockRow)o;
+                if (cat != null && r.Category != cat) return false;
                 var hay = r.BlockName + " " + r.FamilyLabel;
                 return terms.All(t => hay.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
             });
+        }
+
+        void SkipShownRows()
+        {
+            CommitEdits();
+            var shown = CollectionViewSource.GetDefaultView(_s.Rows).Cast<BlockRow>().Where(r => !r.Family.IsSkip).ToList();
+            if (shown.Count == 0) return;
+            if (MessageBox.Show(this, $"Set {shown.Count} shown row(s) to (Skip)?", "CAD2Revit",
+                    MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+            foreach (var r in shown) r.Family = FamilyOption.Skip;
         }
 
         static DataGridTextColumn NumberColumn(string header, string property, double width)

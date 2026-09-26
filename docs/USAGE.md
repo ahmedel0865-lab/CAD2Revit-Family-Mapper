@@ -43,14 +43,16 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 
 1. Click **CAD2Revit > Place Families**.
 2. **Step 1:** pick the **DWG link/import** and the **target level** (defaults to the level of the active plan view), and optionally *include nested blocks*. Click **Next >**.
-3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance), sorted by name. Use **Find** to filter the rows.
+3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance), **grouped by category** (Electrical first) and sorted by name. Use **Find** and **Show** (category) to filter the rows; **Skip shown rows** sets every row currently shown to (Skip), e.g. all Architectural blocks at once.
    - Block names are simplified so instances group correctly. The `<file>.dwg.` prefix Revit adds is removed. For DWGs **exported from Revit**, the `-<element id>-<view name>` suffix is removed too, so `MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`. Turn this off with `SimplifyBlockNames = false` in settings.ini.
 
 | Column | What to do |
 |---|---|
 | **CAD Block** | Block name and number of instances, e.g. `SMOKE-DET (42)`. Read-only. |
+| **Category** | Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation or Other. Detected from the block name (e.g. *Luminaire*, *SMOKE-DET* → Electrical; *Door*, *Casework*, *Elevator* → Architectural; *Toilet* → Plumbing; *Grid Head* → Annotation). If the name says nothing, the chosen family's Revit category decides (e.g. Lighting Fixtures → Electrical). Change it if the guess is wrong; it is saved with the mapping. |
 | **Revit Family** | Pick the family type (`Family : Type`). **Type in the box to search**: every word you type must appear, so `smo cei` finds *Smoke Detector : Ceiling*. Press **Enter** to take the first match, **Esc** to cancel. `(Skip)` = do not place (the default). |
-| **Elevation From Level (mm)** | Height above the target level. Must be a number; invalid cells turn red and block Preview/Run. |
+| **Level** | The level this block is placed on. Defaults to the level picked in step 1; pick another level to place that block on a different floor in the same run. |
+| **Elevation From Level (mm)** | Height above the row's **Level**. Must be a number; invalid cells turn red and block Preview/Run. |
 | Rotation (deg) | Optional. Added to the CAD block rotation (counter-clockwise). |
 | Host Type | None (level-based), Ceiling, Wall, Reference Plane (auto-create), Face (ceiling/slab/roof) or Vertical plane (no wall). See below. |
 | Facing | Down (default) or Up. Which side a family on a **Reference Plane** faces: Down for ceiling devices (lights, detectors), Up for floor devices (floor boxes). |
@@ -88,10 +90,12 @@ The elevation is also the fallback height if a ceiling is not found.
 | CAD_Block_Name | `SMOKE-DET` | Block name (case-insensitive). |
 | Revit_Family_Name | `Smoke Detector` | Family name exactly as loaded in the project. **Empty = (Skip).** |
 | Revit_Type_Name | `Ceiling` | Type name exactly as in the project. |
+| Level | `Level 2` | Optional. Level name; empty = the level picked when running. |
 | Offset_From_Level_mm | `2800` | Elevation from level. |
 | Rotation_Adjustment_deg | `90` | Rotation adjustment. |
 | Host_Type | `ceiling` | `non-hosted`, `ceiling`, `wall`, `reference plane`, `face` or `vertical` (the window's labels are accepted too). |
 | Facing | `Down` | Optional. `Down` (default) or `Up`, for reference-plane rows. |
+| Category | `Electrical` | Optional. Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other; empty = detected from the name. |
 
 Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, ... all work). CSV files saved with `;` as separator (European/Middle-East Excel locale) are also accepted. In an .xlsx file, the sheet named **Mapping** is used, or the first sheet if there is none with that name. A full example is in [`templates/mapping_template.xlsx`](../templates/mapping_template.xlsx).
 
@@ -99,7 +103,7 @@ Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, .
 
 - The result window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason. Use **Open log** / **Log folder** to jump to the CSV log.
 - A `cad2revit_log_<date>.csv` (or `cad2revit_preview_<date>.csv`) is saved in `Documents\\CAD2Revit\\Logs\\<project>\\`. It has one row per block with:
-  `Status, CAD_Block, Family, Type, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
+  `Status, CAD_Block, Family, Type, Level, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
 - Each placed element's **Comments** parameter contains `CAD: <block name>`. You can use it in schedules and filters, e.g. to select everything the tool placed.
 - Running the tool again skips blocks that already have an instance of the same family within 50 mm on the same level (status `duplicate`). So after adding blocks to the DWG, re-running only adds the new ones.

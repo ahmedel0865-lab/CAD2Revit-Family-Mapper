@@ -25,6 +25,7 @@ namespace CAD2Revit.Core
         public double[] Point;          // X, Y, Z in feet, model internal coordinates
         public double? Rotation;        // radians
         public string Host = "";
+        public string Level = "";
         public double ScaleX = 1, ScaleY = 1;
         public bool Mirrored;
         public bool HasBlock = true;    // false for grouped "unmapped" rows
@@ -50,7 +51,7 @@ namespace CAD2Revit.Core
 
         public static readonly string[] LogHeader =
         {
-            "Status", "CAD_Block", "Family", "Type", "ElementId", "Host", "X_mm", "Y_mm", "Z_mm",
+            "Status", "CAD_Block", "Family", "Type", "Level", "ElementId", "Host", "X_mm", "Y_mm", "Z_mm",
             "Rotation_deg", "Block_Scale", "Mirrored", "Message",
         };
 
@@ -109,7 +110,7 @@ namespace CAD2Revit.Core
                 rows.Add(new object[]
                 {
                     StatusText(r.Status), r.BlockName,
-                    r.Row?.Family ?? "", r.Row?.TypeName ?? "",
+                    r.Row?.Family ?? "", r.Row?.TypeName ?? "", r.Level ?? "",
                     r.ElementId.HasValue ? (object)r.ElementId.Value : "",
                     r.Host ?? "",
                     p != null ? Mm(p[0]) : "", p != null ? Mm(p[1]) : "", p != null ? Mm(p[2]) : "",

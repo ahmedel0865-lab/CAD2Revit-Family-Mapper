@@ -49,9 +49,20 @@ namespace CAD2Revit.Revit
             return result;
         }
 
-        /// <summary>Places every mapped block. dryRun = true rolls everything back (preview).</summary>
+        /// <summary>Per-level helpers (a run can place rows on several levels).</summary>
+        class LevelContext
+        {
+            public Level Level;
+            public double MaxUp;
+            public DuplicateIndex Dups;
+            public LevelPlanes LevelPlanes;
+            public VerticalPlanes VerticalPlanes;
+        }
+
+        /// <summary>Places every mapped block. Each row goes on its own Level (MapRow.LevelName,
+        /// or <paramref name="defaultLevel"/> when empty). dryRun = true rolls everything back.</summary>
         public List<PlacementResult> PlaceAll(List<BlockRef> blocks, MappingResult mapping,
-                                              Dictionary<MapRow, FamilySymbol> symbols, Level level,
+                                              Dictionary<MapRow, FamilySymbol> symbols, Level defaultLevel,
                                               bool dryRun, Action<int, int> progress = null, double[] dwgExtents = null)
         {
             var results = new List<PlacementResult>();
@@ -69,11 +80,9 @@ namespace CAD2Revit.Revit
                     Count = kv.Value, HasBlock = false,
                 });
 
-            double levelZ = level.ProjectElevation;
-            double? top = NextLevelZ(level);
-            double maxUp = Ft(_settings.HostSearchDistanceMm);
-            if (top.HasValue) maxUp = Math.Min(maxUp, top.Value - levelZ);
-            double bandTop = top ?? levelZ + Math.Max(maxUp, Ft(3000));
+            var levelsByName = new Dictionary<string, Level>(StringComparer.OrdinalIgnoreCase);
+            foreach (var l in new FilteredElementCollector(_doc).OfClass(typeof(Level)).Cast<Level>())
+                if (!levelsByName.ContainsKey(l.Name)) levelsByName[l.Name] = l;
 
             using (var t = new Transaction(_doc, "CAD2Revit: Place families"))
             {
@@ -88,34 +97,59 @@ namespace CAD2Revit.Revit
                 HostFinder finder = null;
                 if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall))
                     finder = new HostFinder(_doc, TempView(), _settings.SearchRevitLinks);
-                LevelPlanes levelPlanes = null;
-                if (mapped.Any(m => m.Item2.Host == HostMode.RefPlane))
+                var section = LevelPlanes.SectionView(_doc);
+                var extents = dwgExtents ?? BlockExtents(blocks);
+                bool createdLevelPlanes = false;
+
+                var contexts = new Dictionary<long, LevelContext>();
+                LevelContext ContextFor(Level level)
                 {
-                    var section = LevelPlanes.SectionView(_doc);
-                    levelPlanes = new LevelPlanes(_doc, level, dwgExtents ?? BlockExtents(blocks),
-                                                  () => section ?? (View)TempView());
+                    long key = Compat.IdValue(level.Id);
+                    if (contexts.TryGetValue(key, out var c)) return c;
+                    double levelZ = level.ProjectElevation;
+                    double? top = NextLevelZ(level);
+                    double maxUp = Ft(_settings.HostSearchDistanceMm);
+                    if (top.HasValue) maxUp = Math.Min(maxUp, top.Value - levelZ);
+                    double bandTop = top ?? levelZ + Math.Max(maxUp, Ft(3000));
+                    c = new LevelContext
+                    {
+                        Level = level,
+                        MaxUp = maxUp,
+                        Dups = new DuplicateIndex(_doc, Ft(_settings.DuplicateToleranceMm),
+                                                  levelZ - Ft(300), bandTop, _settings.DuplicateSameTypeOnly),
+                        LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
+                        VerticalPlanes = new VerticalPlanes(_doc, level),
+                    };
+                    contexts[key] = c;
+                    return c;
                 }
-                var planes = mapped.Any(m => m.Item2.Host == HostMode.Vertical || m.Item2.Host == HostMode.Wall)
-                    ? new VerticalPlanes(_doc, level) : null;
-                var dups = new DuplicateIndex(_doc, Ft(_settings.DuplicateToleranceMm),
-                                              levelZ - Ft(300), bandTop, _settings.DuplicateSameTypeOnly);
 
                 for (int i = 0; i < mapped.Count; i++)
                 {
                     progress?.Invoke(i, mapped.Count);
                     var (b, row) = mapped[i];
+                    var level = defaultLevel;
+                    string levelNote = null;
+                    if (!string.IsNullOrWhiteSpace(row.LevelName))
+                    {
+                        if (levelsByName.TryGetValue(row.LevelName.Trim(), out var rowLevel)) level = rowLevel;
+                        else levelNote = $"level '{row.LevelName}' not found - placed on {defaultLevel.Name}";
+                    }
                     if (!symbols.TryGetValue(row, out var sym))
                     {
-                        results.Add(Result(b, row, Status.Skipped, "family/type not loaded", b.Point, b.Rotation));
+                        var skipped = Result(b, row, Status.Skipped, "family/type not loaded", b.Point, b.Rotation);
+                        skipped.Level = level.Name;
+                        results.Add(skipped);
                         continue;
                     }
+                    var ctx = ContextFor(level);
                     PlacementResult res;
                     using (var st = new SubTransaction(_doc))
                     {
                         st.Start();
                         try
                         {
-                            res = PlaceOne(b, row, sym, level, finder, planes, levelPlanes, dups, maxUp);
+                            res = PlaceOne(b, row, sym, level, finder, ctx.VerticalPlanes, ctx.LevelPlanes, ctx.Dups, ctx.MaxUp);
                             if (res.Status == Status.Placed) st.Commit();
                             else st.RollBack();
                         }
@@ -125,6 +159,8 @@ namespace CAD2Revit.Revit
                             res = Result(b, row, Status.Failed, ex.Message.Trim(), b.Point, b.Rotation);
                         }
                     }
+                    res.Level = level.Name;
+                    if (levelNote != null) res.Message = res.Message.Length > 0 ? levelNote + "; " + res.Message : levelNote;
                     results.Add(res);
                 }
 
@@ -132,7 +168,7 @@ namespace CAD2Revit.Revit
                 {
                     // Keep the temporary view only if a reference plane was created in it
                     // (deleting a view could take view-owned elements with it).
-                    bool owned = levelPlanes != null && new FilteredElementCollector(_doc).OfClass(typeof(ReferencePlane))
+                    bool owned = createdLevelPlanes && new FilteredElementCollector(_doc).OfClass(typeof(ReferencePlane))
                         .Any(e => e.OwnerViewId == view.Id);
                     if (!owned) _doc.Delete(view.Id);
                 }
