@@ -71,10 +71,12 @@ namespace CAD2Revit.UI
                 AutoMatched = false;
                 Changed(nameof(Family));
                 Changed(nameof(FamilyLabel));
+                Changed(nameof(IsSkipped));
             }
         }
 
         public string FamilyLabel => _family.Label;
+        public bool IsSkipped => _family.IsSkip;
 
         /// <summary>The level picked in step 1 (used when Level is left at the default).</summary>
         public string DefaultLevel { get; }

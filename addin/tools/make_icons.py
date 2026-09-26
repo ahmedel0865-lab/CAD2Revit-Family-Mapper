@@ -66,7 +66,21 @@ place_icon = [bg,
               (rect(0.47, 0.1, 0.53, 0.9), WHITE), (rect(0.1, 0.47, 0.9, 0.53), WHITE),
               (circle(0.5, 0.5, 0.11), AMBER)]
 
-for name, shapes in (("ListBlocks", list_icon), ("PlaceFamilies", place_icon)):
+def gear_teeth():
+    out = []
+    for i in range(8):
+        a = i * math.pi / 4
+        cx, cy = 0.5 + 0.3 * math.cos(a), 0.5 + 0.3 * math.sin(a)
+        out.append((circle(cx, cy, 0.075), WHITE))
+    return out
+
+
+settings_icon = [bg] + gear_teeth() + [(circle(0.5, 0.5, 0.27), WHITE), (circle(0.5, 0.5, 0.11), BLUE)]
+help_icon = [bg, (circle(0.5, 0.5, 0.36), WHITE),
+             (rect(0.45, 0.43, 0.55, 0.72), BLUE), (circle(0.5, 0.32, 0.06), AMBER)]
+
+for name, shapes in (("ListBlocks", list_icon), ("PlaceFamilies", place_icon),
+                     ("Settings", settings_icon), ("Help", help_icon)):
     for n in (16, 32):
         png(os.path.join(OUT, "%s%d.png" % (name, n)), render(n, shapes), n)
 print("icons written to", os.path.abspath(OUT))

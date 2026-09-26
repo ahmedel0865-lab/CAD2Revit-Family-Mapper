@@ -27,45 +27,80 @@ namespace CAD2Revit.UI
 
         public MappingAction Action { get; private set; } = MappingAction.Cancel;
 
+        // Colours shared by the window (match the ribbon icons).
+        static readonly SolidColorBrush Accent = Frozen(Color.FromRgb(32, 96, 176));
+        static readonly SolidColorBrush AccentLight = Frozen(Color.FromRgb(232, 238, 247));
+        static readonly SolidColorBrush Panel = Frozen(Color.FromRgb(246, 248, 251));
+        static readonly SolidColorBrush PanelBorder = Frozen(Color.FromRgb(214, 222, 234));
+        static readonly SolidColorBrush Muted = Frozen(Color.FromRgb(110, 118, 130));
+
+        static SolidColorBrush Frozen(Color c)
+        {
+            var b = new SolidColorBrush(c);
+            b.Freeze();
+            return b;
+        }
+
+        readonly TextBlock _statMapped = new TextBlock(), _statInstances = new TextBlock(), _statSkipped = new TextBlock(),
+                           _statErrors = new TextBlock();
+
         public MappingWindow(MappingSession session)
         {
             _s = session;
             Title = "CAD2Revit - Map CAD blocks to Revit families";
             Width = 1680;
-            Height = 680;
+            Height = 760;
             MinWidth = 1150;
-            MinHeight = 400;
+            MinHeight = 480;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ShowInTaskbar = false;
             FontFamily = new FontFamily("Segoe UI");
             FontSize = 12;
+            Background = Brushes.White;
 
-            var root = new DockPanel { Margin = new Thickness(12) };
+            var root = new DockPanel { Margin = new Thickness(14) };
 
-            // Header
-            var header = new TextBlock
+            // ---- Header card: what is being mapped + live counts ----------------------
+            var header = new Border
             {
-                Margin = new Thickness(0, 0, 0, 8),
-                TextWrapping = TextWrapping.Wrap,
-                Text = $"DWG: {_s.DwgName}     Starting level (DWG): {_s.LevelName}     " +
-                       $"{_s.Rows.Count} unique blocks, {_s.InstanceCount} instances (sorted by block name).\n" +
-                       "Pick a family for each block (type in the box to search). (Skip) = do not place. " +
-                       "Elevation is from the row's Level, in mm (Level defaults to the one picked in step 1). " +
-                       "Facing (Down/Up) applies to Reference Plane hosting.",
+                Background = AccentLight, CornerRadius = new CornerRadius(4), Padding = new Thickness(14, 10, 14, 10),
+                Margin = new Thickness(0, 0, 0, 10), BorderBrush = PanelBorder, BorderThickness = new Thickness(1),
             };
+            var headerGrid = new DockPanel();
+            var titles = new StackPanel();
+            titles.Children.Add(new TextBlock { Text = "Map CAD blocks to Revit families", FontSize = 17, FontWeight = FontWeights.SemiBold, Foreground = Accent });
+            titles.Children.Add(new TextBlock
+            {
+                Text = $"DWG: {_s.DwgName}     Starting level: {_s.LevelName}     {_s.Rows.Count} unique blocks, {_s.InstanceCount} instances",
+                Foreground = Muted, Margin = new Thickness(0, 2, 0, 0),
+            });
+            titles.Children.Add(new TextBlock
+            {
+                Text = "Pick a Revit family for each block (type in the box to search). (Skip) = do not place. " +
+                       "Elevation is measured from the row's Level. Select several rows to edit them together.",
+                Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0),
+            });
+            var stats = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            stats.Children.Add(Chip("Mapped", _statMapped));
+            stats.Children.Add(Chip("Instances to place", _statInstances));
+            stats.Children.Add(Chip("Skipped", _statSkipped));
+            stats.Children.Add(Chip("Invalid", _statErrors));
+            DockPanel.SetDock(stats, Dock.Right);
+            headerGrid.Children.Add(stats);
+            headerGrid.Children.Add(titles);
+            header.Child = headerGrid;
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
 
-            // Find box: filters the rows by block name or chosen family.
-            var findBar = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
-            DockPanel.SetDock(findBar, Dock.Top);
-            findBar.Children.Add(new TextBlock { Text = "Find:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            var find = new TextBox { Width = 320, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Show only rows whose block or family contains this text" };
+            // ---- Section 1: filter -----------------------------------------------------
+            var filterBar = new WrapPanel();
+            filterBar.Children.Add(BarLabel("Find"));
+            var find = new TextBox { Width = 300, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
+                                     ToolTip = "Show only rows whose block or family contains this text" };
             find.TextChanged += (o, e) => { _findText = find.Text; ApplyFilter(); };
-            findBar.Children.Add(find);
-            // Category filter: show one discipline at a time (rows stay grouped by category).
-            findBar.Children.Add(new TextBlock { Text = "Show:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 6, 0) });
-            var show = new ComboBox { Width = 190, VerticalContentAlignment = VerticalAlignment.Center };
+            filterBar.Children.Add(find);
+            filterBar.Children.Add(BarLabel("Show"));
+            var show = new ComboBox { Width = 190, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
             show.Items.Add(AllCategories);
             foreach (var c in BlockCategories.All)
             {
@@ -78,48 +113,35 @@ namespace CAD2Revit.UI
                 _showCategory = (show.SelectedItem as ComboBoxItem)?.Tag as string;
                 ApplyFilter();
             };
-            findBar.Children.Add(show);
-            var skipShown = new Button
-            {
-                Content = "Skip shown rows", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(8, 1, 8, 1),
-                ToolTip = "Set every row currently shown (after Find / Show) to (Skip), e.g. all Architectural blocks",
-            };
-            skipShown.Click += (o, e) => SkipShownRows();
-            findBar.Children.Add(skipShown);
-            // Global switch: every row -> Reference Plane (unticking restores each row's previous host).
-            var allPlanes = new CheckBox
-            {
-                Content = "Use reference planes for all rows",
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(24, 0, 0, 0),
-                ToolTip = "Sets Host Type to 'Reference Plane (auto-create)' for every row. " +
-                          "Untick to restore the previous Host Types.",
-                IsChecked = _s.Rows.Count > 0 && _s.Rows.All(r => r.Host == BlockRow.RefPlaneLabel),
-            };
-            allPlanes.Checked += (o, e) => SetAllReferencePlanes(true);
-            allPlanes.Unchecked += (o, e) => SetAllReferencePlanes(false);
-            findBar.Children.Add(allPlanes);
-            findBar.Children.Add(new TextBlock());
-            root.Children.Add(findBar);
+            filterBar.Children.Add(show);
+            var skipShown = MakeButton("Skip shown rows", (o, e) => SkipShownRows());
+            skipShown.ToolTip = "Set every row currently shown (after Find / Show) to (Skip), e.g. all Architectural blocks";
+            filterBar.Children.Add(skipShown);
+            var filterSection = Section("1 · Filter", filterBar);
+            DockPanel.SetDock(filterSection, Dock.Top);
+            root.Children.Add(filterSection);
 
-            // Bulk edit: set Host Type / Level / Elevation / Facing / Category for all selected rows.
-            root.Children.Add(BuildBulkBar());
+            // ---- Section 2: edit selected rows -----------------------------------------
+            var editSection = Section("2 · Edit selected rows", BuildBulkBar());
+            DockPanel.SetDock(editSection, Dock.Top);
+            root.Children.Add(editSection);
 
-            // Buttons
-            var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0), LastChildFill = false };
+            // ---- Footer: mapping file (left), actions (right) ---------------------------
+            var bottom = new DockPanel { Margin = new Thickness(0, 12, 0, 0), LastChildFill = false };
             DockPanel.SetDock(bottom, Dock.Bottom);
             var left = new StackPanel { Orientation = Orientation.Horizontal };
-            left.Children.Add(MakeButton("Load Mapping...", (s, e) => LoadMapping()));
-            left.Children.Add(MakeButton("Save Mapping...", (s, e) => SaveMapping()));
-            left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch()));
+            left.Children.Add(new TextBlock { Text = "Mapping file:", Foreground = Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            left.Children.Add(MakeButton("Load...", (s, e) => LoadMapping(), "Load a mapping (XLSX or CSV) into the grid"));
+            left.Children.Add(MakeButton("Save...", (s, e) => SaveMapping(), "Save the grid as a mapping file (XLSX or CSV)"));
+            left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch(), "Pre-select families whose names match the block names (rows still on Skip)"));
             left.Children.Add(_status);
             DockPanel.SetDock(left, Dock.Left);
             bottom.Children.Add(left);
             var right = new StackPanel { Orientation = Orientation.Horizontal };
-            var preview = MakeButton("Preview", (s, e) => Finish(MappingAction.Preview));
-            preview.IsDefault = false;
-            right.Children.Add(preview);
-            right.Children.Add(MakeButton("Run", (s, e) => Finish(MappingAction.Run)));
+            right.Children.Add(MakeButton("Preview", (s, e) => Finish(MappingAction.Preview),
+                "Run the placement and undo it: see exactly what Run would do, then come back here"));
+            var run = MakeButton("Run", (s, e) => Finish(MappingAction.Run), "Place the families (one Ctrl+Z undoes the whole run)", primary: true);
+            right.Children.Add(run);
             var cancel = MakeButton("Cancel", (s, e) => { Action = MappingAction.Cancel; Close(); });
             cancel.IsCancel = true;
             right.Children.Add(cancel);
@@ -127,11 +149,10 @@ namespace CAD2Revit.UI
             bottom.Children.Add(right);
             root.Children.Add(bottom);
 
-            // Grid (the row view is shared between Preview round-trips: start unfiltered,
-            // grouped by category, Electrical first, then by block name).
+            // ---- Grid (grouped by category, Electrical first) ---------------------------
             SetUpRowView();
             BuildGrid();
-            root.Children.Add(_grid);
+            root.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = _grid });
             Content = root;
 
             foreach (var row in _s.Rows) row.PropertyChanged += OnRowChanged;
@@ -139,9 +160,48 @@ namespace CAD2Revit.UI
             UpdateStatus();
         }
 
-        static Button MakeButton(string text, RoutedEventHandler click)
+        /// <summary>A titled, lightly framed block of controls.</summary>
+        static Border Section(string title, UIElement content)
         {
-            var b = new Button { Content = text, MinWidth = 90, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 6, 0) };
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock { Text = title.ToUpperInvariant(), FontSize = 10.5, FontWeight = FontWeights.SemiBold,
+                                               Foreground = Muted, Margin = new Thickness(0, 0, 0, 6) });
+            stack.Children.Add(content);
+            return new Border
+            {
+                Background = Panel, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 8), Child = stack,
+            };
+        }
+
+        /// <summary>Small statistic in the header: big number over a caption.</summary>
+        static Border Chip(string caption, TextBlock value)
+        {
+            value.FontSize = 18;
+            value.FontWeight = FontWeights.SemiBold;
+            value.HorizontalAlignment = HorizontalAlignment.Center;
+            var stack = new StackPanel();
+            stack.Children.Add(value);
+            stack.Children.Add(new TextBlock { Text = caption, FontSize = 10.5, Foreground = Muted, HorizontalAlignment = HorizontalAlignment.Center });
+            return new Border
+            {
+                Background = Brushes.White, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(8, 0, 0, 0), MinWidth = 90, Child = stack,
+            };
+        }
+
+        static Button MakeButton(string text, RoutedEventHandler click, string tooltip = null, bool primary = false)
+        {
+            var b = new Button { Content = text, MinWidth = 90, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0) };
+            if (tooltip != null) b.ToolTip = tooltip;
+            if (primary)
+            {
+                b.Background = Accent;
+                b.Foreground = Brushes.White;
+                b.BorderBrush = Accent;
+                b.FontWeight = FontWeights.SemiBold;
+                b.MinWidth = 110;
+            }
             b.Click += click;
             return b;
         }
@@ -158,7 +218,14 @@ namespace CAD2Revit.UI
             _grid.SelectionChanged += (o, e) => UpdateSelectionLabel();
             _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
             _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
-            _grid.RowHeight = 28;
+            _grid.HorizontalGridLinesBrush = PanelBorder;
+            _grid.BorderThickness = new Thickness(0);
+            _grid.Background = Brushes.White;
+            _grid.RowBackground = Brushes.White;
+            _grid.AlternatingRowBackground = Panel;
+            _grid.RowHeight = 30;
+            _grid.ColumnHeaderStyle = HeaderStyle();
+            _grid.RowStyle = RowStyle();
             _grid.EnableRowVirtualization = true;
             VirtualizingPanel.SetVirtualizationMode(_grid, VirtualizationMode.Recycling);
             VirtualizingPanel.SetIsVirtualizingWhenGrouping(_grid, true);
@@ -236,6 +303,27 @@ namespace CAD2Revit.UI
             });
         }
 
+        static Style HeaderStyle()
+        {
+            var style = new Style(typeof(DataGridColumnHeader));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, AccentLight));
+            style.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 6, 6, 6)));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, PanelBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
+            return style;
+        }
+
+        /// <summary>Skipped rows are greyed so the mapped ones stand out.</summary>
+        static Style RowStyle()
+        {
+            var style = new Style(typeof(DataGridRow));
+            var skipped = new DataTrigger { Binding = new Binding(nameof(BlockRow.IsSkipped)), Value = true };
+            skipped.Setters.Add(new Setter(Control.ForegroundProperty, Muted));
+            style.Triggers.Add(skipped);
+            return style;
+        }
+
         static Style TrimmedTextStyle()
         {
             var style = new Style(typeof(TextBlock));
@@ -264,19 +352,28 @@ namespace CAD2Revit.UI
 
         UIElement BuildBulkBar()
         {
-            var bar = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
-            DockPanel.SetDock(bar, Dock.Top);
+            var bar = new WrapPanel();
             _bulkHost = KeepCombo(BlockRow.HostChoices, 200);
             _bulkLevel = KeepCombo(_s.LevelNames, 140);
             _bulkElevation = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
                                            ToolTip = "Leave empty to keep each row's elevation" };
             _bulkFacing = KeepCombo(BlockRow.FacingChoices, 70);
             _bulkCategory = KeepCombo(BlockCategories.All, 115);
-            var apply = new Button { Content = "Apply to selected rows", Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 0, 8, 0) };
-            apply.Click += (o, e) => ApplyToSelected();
-            var selectAll = new Button { Content = "Select all shown", Padding = new Thickness(8, 2, 8, 2),
-                                         ToolTip = "Select every row currently shown (same as Ctrl+A in the grid)" };
-            selectAll.Click += (o, e) => { _grid.Focus(); _grid.SelectAll(); };
+            var apply = MakeButton("Apply to selected rows", (o, e) => ApplyToSelected(),
+                "Set the chosen values on every selected row; '(keep)' fields are not changed", primary: true);
+            var selectAll = MakeButton("Select all shown", (o, e) => { _grid.Focus(); _grid.SelectAll(); },
+                "Select every row currently shown (same as Ctrl+A in the grid)");
+            // Global switch: every row -> Reference Plane (unticking restores each row's previous host).
+            var allPlanes = new CheckBox
+            {
+                Content = "Reference planes for all rows",
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0),
+                ToolTip = "Sets Host Type to 'Reference Plane (auto-create)' for every row. Untick to restore the previous Host Types.",
+                IsChecked = _s.Rows.Count > 0 && _s.Rows.All(r => r.Host == BlockRow.RefPlaneLabel),
+            };
+            allPlanes.Checked += (o, e) => SetAllReferencePlanes(true);
+            allPlanes.Unchecked += (o, e) => SetAllReferencePlanes(false);
 
             bar.Children.Add(_selectedLabel);
             bar.Children.Add(BarLabel("Host Type"));
@@ -291,6 +388,7 @@ namespace CAD2Revit.UI
             bar.Children.Add(_bulkCategory);
             bar.Children.Add(apply);
             bar.Children.Add(selectAll);
+            bar.Children.Add(allPlanes);
             UpdateSelectionLabel();
             return bar;
         }
@@ -462,9 +560,15 @@ namespace CAD2Revit.UI
             int mapped = _s.Rows.Count(r => !r.Family.IsSkip);
             int instances = _s.Rows.Where(r => !r.Family.IsSkip).Sum(r => r.Count);
             int bad = _s.Rows.Count(r => r.Error != null);
-            _status.Text = $"{mapped} of {_s.Rows.Count} blocks mapped ({instances} instances)" +
-                           (bad > 0 ? $"   -   {bad} row(s) with invalid numbers" : "");
-            _status.Foreground = bad > 0 ? Brushes.Firebrick : Brushes.DimGray;
+            _statMapped.Text = $"{mapped} / {_s.Rows.Count}";
+            _statMapped.Foreground = Accent;
+            _statInstances.Text = instances.ToString();
+            _statSkipped.Text = (_s.Rows.Count - mapped).ToString();
+            _statSkipped.Foreground = Muted;
+            _statErrors.Text = bad.ToString();
+            _statErrors.Foreground = bad > 0 ? Brushes.Firebrick : Muted;
+            _status.Text = bad > 0 ? $"{bad} row(s) have invalid numbers (red cells)" : "";
+            _status.Foreground = Brushes.Firebrick;
         }
 
         void CommitEdits()

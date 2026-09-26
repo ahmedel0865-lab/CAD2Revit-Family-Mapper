@@ -37,7 +37,7 @@ namespace CAD2Revit.UI
             StartPosition = FormStartPosition.CenterScreen;
             Font = new System.Drawing.Font("Segoe UI", 9f);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(560, 170);
+            ClientSize = new Size(560, 215);
 
             var imports = Items.Imports(doc);
             _dwg.Items.AddRange(imports.ToArray());
@@ -50,6 +50,12 @@ namespace CAD2Revit.UI
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             Label L(string t) => new Label { Text = t, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 6) };
+            var title = new Label
+            {
+                Text = "Step 1 of 2  -  Choose the DWG", Dock = DockStyle.Top, AutoSize = false, Height = 40,
+                Font = new System.Drawing.Font("Segoe UI Semibold", 11f), ForeColor = Color.FromArgb(32, 96, 176),
+                BackColor = Color.FromArgb(232, 238, 247), Padding = new Padding(12, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft,
+            };
             grid.Controls.Add(L("DWG link / import"), 0, 0);
             grid.Controls.Add(_dwg, 1, 0);
             grid.SetColumnSpan(_dwg, 2);
@@ -64,7 +70,8 @@ namespace CAD2Revit.UI
             grid.Controls.Add(note, 0, 2);
             grid.SetColumnSpan(note, 3);
 
-            var next = new Button { Text = "Next >", Width = 90 };
+            var next = new Button { Text = "Next >", Width = 90, BackColor = Color.FromArgb(32, 96, 176), ForeColor = Color.White,
+                                    FlatStyle = FlatStyle.Flat, Font = new System.Drawing.Font("Segoe UI Semibold", 9f) };
             var cancel = new Button { Text = "Cancel", Width = 90, DialogResult = DialogResult.Cancel };
             next.Click += (s, e) => Finish();
             var buttons = new FlowLayoutPanel
@@ -73,6 +80,7 @@ namespace CAD2Revit.UI
             };
             buttons.Controls.AddRange(new Control[] { cancel, next });
             Controls.Add(grid);
+            Controls.Add(title);
             Controls.Add(buttons);
             AcceptButton = next;
             CancelButton = cancel;

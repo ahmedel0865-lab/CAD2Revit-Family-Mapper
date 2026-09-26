@@ -9,7 +9,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
    - It installs the add-in for every Revit **2022 / 2023 / 2024 / 2025 / 2026** found on the PC.
    - Per Windows user, so no administrator rights are needed. Files go to `%AppData%\Autodesk\Revit\Addins\<version>\`.
 3. Start Revit. When Revit asks about loading the unsigned add-in *CAD2Revit Family Mapper*, click **Always Load**.
-4. A **CAD2Revit** tab appears with a **Mapper** panel containing **List Blocks** and **Place Families**.
+4. A **CAD2Revit** tab appears with two panels: **Mapper** (**List Blocks**, **Place Families**) and **Tools** (**Settings**, **Help**).
 
 - **Manual install** (if IT policy blocks `Install.bat`): copy `<version>\CAD2Revit.addin` and the folder `<version>\CAD2Revit` into `%AppData%\Autodesk\Revit\Addins\<version>\`. Then right-click `CAD2Revit\CAD2Revit.dll` > *Properties* > tick **Unblock**.
 - **Update:** close Revit and run `Install.bat` from the new zip.
@@ -43,7 +43,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 
 1. Click **CAD2Revit > Place Families**.
 2. **Step 1:** pick the **DWG link/import**, and optionally *include nested blocks*. Click **Next >**. There is no level to pick here: every row's **Level** starts at the level the DWG is linked on (or the active plan's level) and can be changed per row, or for many rows at once, in the mapping window.
-3. **Step 2, the mapping window:** one row per **unique** CAD block name (not one row per instance), **grouped by category** (Electrical first) and sorted by name. Use **Find** and **Show** (category) to filter the rows; **Skip shown rows** sets every row currently shown to (Skip), e.g. all Architectural blocks at once.
+3. **Step 2, the mapping window.** It is organized top to bottom: a header with the DWG and live counts (mapped / instances to place / skipped / invalid); **1 · Filter** (Find, Show, Skip shown rows); **2 · Edit selected rows**; the grid; and the footer (mapping file Load / Save / Auto-match on the left, **Preview** and **Run** on the right). The grid shows one row per **unique** CAD block name (not one row per instance), **grouped by category** (Electrical first) and sorted by name. Use **Find** and **Show** (category) to filter the rows; **Skip shown rows** sets every row currently shown to (Skip), e.g. all Architectural blocks at once.
    - Block names are simplified so instances group correctly. The `<file>.dwg.` prefix Revit adds is removed. For DWGs **exported from Revit**, the `-<element id>-<view name>` suffix is removed too, so `MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`. Turn this off with `SimplifyBlockNames = false` in settings.ini.
 
 | Column | What to do |
@@ -126,7 +126,7 @@ Statuses in the log:
 
 ## 6. Settings
 
-Settings are stored in **`%AppData%\CAD2Revit\settings.ini`**, which is created on the first run. Open it in Notepad and change the values; the next command you run uses them. There is no need to restart Revit.
+Click **CAD2Revit > Tools > Settings** to open it in Notepad. Settings are stored in **`%AppData%\CAD2Revit\settings.ini`**, which is created on the first run. Open it in Notepad and change the values; the next command you run uses them. There is no need to restart Revit.
 
 | Setting | Default | Meaning |
 |---|---|---|

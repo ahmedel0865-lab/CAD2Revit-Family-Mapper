@@ -21,8 +21,15 @@ namespace CAD2Revit
             AddButton(panel, "CAD2Revit.ListBlocks", "List\nBlocks", dll, typeof(Commands.ListBlocksCommand).FullName, "ListBlocks",
                 "List every block name in a linked/imported DWG (with counts) and export a mapping template (XLSX or CSV).");
             AddButton(panel, "CAD2Revit.PlaceFamilies", "Place\nFamilies", dll, typeof(Commands.PlaceFamiliesCommand).FullName, "PlaceFamilies",
-                "Replace DWG blocks with Revit families using a CSV/XLSX mapping file. Preview first, then Run. " +
-                $"Settings: {Core.Settings.DefaultPath}   (version {version.ToString(3)})");
+                "Pick a DWG, map each CAD block to a Revit family, level and host in one window, Preview, then Run. " +
+                $"(version {version.ToString(3)})");
+
+            var tools = app.CreateRibbonPanel(TabName, "Tools");
+            AddButton(tools, "CAD2Revit.Settings", "Settings", dll, typeof(Commands.SettingsCommand).FullName, "Settings",
+                "Open settings.ini (duplicate tolerance, host search distances, fallbacks...) in Notepad. " +
+                "Changes apply the next time you run a command.");
+            AddButton(tools, "CAD2Revit.Help", "Help", dll, typeof(Commands.HelpCommand).FullName, "Help",
+                "User guide, version, and quick links to the logs and saved project mappings.");
             return Result.Succeeded;
         }
 

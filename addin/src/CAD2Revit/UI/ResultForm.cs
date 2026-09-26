@@ -43,7 +43,14 @@ namespace CAD2Revit.UI
                 act.Click += (s, e) => action();
                 buttons.Controls.Add(act);
             }
+            var header = new Label
+            {
+                Text = title.Replace("CAD2Revit - ", ""), Dock = DockStyle.Top, AutoSize = false, Height = 40,
+                Font = new Font("Segoe UI Semibold", 11f), ForeColor = Color.FromArgb(32, 96, 176),
+                BackColor = Color.FromArgb(232, 238, 247), Padding = new Padding(12, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft,
+            };
             Controls.Add(box);
+            Controls.Add(header);
             Controls.Add(buttons);
             CancelButton = close;
             box.Select(0, 0);

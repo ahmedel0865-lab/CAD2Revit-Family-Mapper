@@ -1,28 +1,66 @@
 # CAD2Revit Family Mapper
 
-A **standalone Revit add-in** that converts AutoCAD blocks in a linked DWG into Revit family instances. It's built for MEP / electrical shop drawings (lighting, power, fire alarm, ELV). **pyRevit is not required.**
+[![Build](https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper/actions/workflows/build.yml/badge.svg)](https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper/actions/workflows/build.yml)
+![Revit 2022-2026](https://img.shields.io/badge/Revit-2022%E2%80%932026-2060B0)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
 
-Instead of manually placing hundreds of light fixtures, sockets and detectors over a CAD background, you map each CAD block to a Revit family type once in an Excel/CSV file. The tool then places them all at the correct location, rotation and level, hosted on ceilings or walls where required.
+**Turn the blocks in a linked DWG into real Revit families, in one window.**
+Built for electrical / MEP shop drawings (lighting, power, fire alarm, ELV). It's a standalone Revit add-in, so no pyRevit, Dynamo or Excel is needed.
+
+Instead of placing hundreds of light fixtures, sockets and detectors by hand over a CAD background, you map each CAD block to a Revit family type once. The tool places every instance at the right location, rotation, level and height, hosted on ceilings, walls or reference planes as you choose.
+
+```mermaid
+flowchart LR
+    A[Link the DWG] --> B[Place Families<br/>pick the DWG]
+    B --> C[Mapping window<br/>one row per block<br/>family · level · elevation · host]
+    C --> D[Preview<br/>nothing is changed]
+    D -->|adjust| C
+    D --> E[Run<br/>one Ctrl+Z undoes it]
+    E --> F[Summary + CSV log]
+```
+
+## Contents
+- [The CAD2Revit ribbon](#the-cad2revit-ribbon)
+- [Features](#features)
+- [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
+- [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)
+- [Mapping file](#mapping-file) · [Project structure](#project-structure) · [Building from source](#building-from-source)
+- [Limitations](#limitations-short) · [Roadmap](#roadmap)
+- Guides: [Usage](docs/USAGE.md) · [Testing on a sample](docs/TESTING.md) · [Limitations](docs/LIMITATIONS.md) · [Changelog](CHANGELOG.md)
+
+## The CAD2Revit ribbon
+
+| Panel | Button | What it does |
+|---|---|---|
+| Mapper | **List Blocks** | Lists every block in a DWG by category, with counts, and exports a mapping template. |
+| Mapper | **Place Families** | Pick the DWG, then map, preview and place everything in the mapping window. |
+| Tools | **Settings** | Opens `settings.ini` (tolerances, host search distances, fallbacks) in Notepad. |
+| Tools | **Help** | Version, user guide, and quick links to the logs and the saved project mappings. |
 
 ## Features
-- **Mapping window**: one row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category** (Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other) with a *Show* filter and Find box, a **searchable** family dropdown (electrical categories), **Level** + elevation per row, rotation and host type, all in Revit
-- **Per-row Level**: different blocks can go on different levels in one run; the elevation is measured from the row's level (it starts at the DWG's level, no level to pick up front)
-- **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category for all of them in one click
-- Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type
-- **Auto-selects** families whose names closely match the block name (`SMOKE-DET` → *Smoke Detector*)
-- **Remembers the last mapping per project**, so the grid is pre-filled next time
-- Load / Save mappings as **.xlsx or .csv** (no Excel installation needed); List Blocks exports a ready-to-fill template
-- Places families at block insertion points, keeping the CAD rotation (+ per-row adjustment)
-- Handles DWG units, link position, rotation and shared coordinates automatically
-- Hosting per row: **None (level-based)**, **Ceiling**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models
-- **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up, with a one-click *Use reference planes for all rows*
-- Falls back to unhosted placement (or reports a failure) when no host is found
-- **Preview** does the full placement and then undoes it, so its counts match a real run, then returns to the mapping window
-- Duplicate protection per level, so re-running only adds new blocks
-- One transaction: undo everything with a single Ctrl+Z
-- Writes the source block name into each element's Comments parameter
-- Summary per family type, unmapped blocks, failures with reasons
-- CSV log of every block with its Element ID, host, coordinates and rotation
+
+**Mapping window**
+- One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
+- **Find** box and **Show** filter; **Skip shown rows** hides e.g. all architectural blocks in one click.
+- **Searchable family dropdown** (electrical categories): type part of a name to filter.
+- **Auto-selects** families whose names match the block name (`SMOKE-DET` → *Smoke Detector*), including common CAD abbreviations.
+- **Level + elevation per row**: different blocks can go on different levels in one run.
+- **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category together.
+- Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
+- **Remembers the last mapping per project**; Load / Save mappings as **.xlsx or .csv**.
+
+**Placement and hosting**
+- Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
+- Hosts per row: **None (level-based)**, **Ceiling**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
+- **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up.
+- If no host is found, falls back to unhosted placement (or reports a failure, your choice).
+
+**Safety and output**
+- **Preview** runs the full placement and undoes it, so its counts match a real run.
+- **Duplicate protection** per level: re-running only adds new blocks.
+- **One transaction**: a single Ctrl+Z undoes a whole run.
+- Summary per family type, unmapped blocks and failures with reasons; a **CSV log** of every block with Element ID, level, host, coordinates and rotation.
+- Writes `CAD: <block name>` into each element's Comments, for filters and schedules.
 
 ## Requirements
 - Autodesk Revit **2022, 2023, 2024, 2025 or 2026** on Windows
@@ -75,10 +113,13 @@ The mapping window can **Load / Save** the mapping as a file, to reuse it across
 ## Project structure
 ```
 addin/                            standalone Revit add-in (C#)  <- main product
-  src/CAD2Revit/                  Revit add-in: ribbon, commands, DWG reader,
-                                  host finder, placer, dialogs, WPF mapping window
-  src/CAD2Revit.Core/             Revit-free logic: CSV/XLSX, mapping, name matching,
-                                  per-project memory, report, settings
+  src/CAD2Revit/                  Revit add-in
+    App.cs                        ribbon: Mapper (List Blocks, Place Families), Tools (Settings, Help)
+    Commands/                     the four ribbon commands
+    Revit/                        DWG reader, host finder, reference/vertical planes, placer
+    UI/                           mapping window (WPF), step-1 dialog, result window
+  src/CAD2Revit.Core/             Revit-free logic (unit tested): CSV/XLSX, mapping, name
+                                  matching, block names & categories, report, settings
   tests/CAD2Revit.Core.Tests/     unit tests (run without Revit)
   package/                        .addin manifest, Install.bat, install.ps1
   tools/package.sh                build all Revit versions + zip

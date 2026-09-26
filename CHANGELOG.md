@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0] - 2026-09-26
+### Changed: a tidier, more organized tool
+- **Mapping window redesigned.**
+  - A header card with the DWG and live counts: mapped, instances to place, skipped, invalid.
+  - Controls grouped into two titled sections, **1 · Filter** and **2 · Edit selected rows**. The *Reference planes for all rows* switch moved into the edit section.
+  - Styled column headers, striped rows, and **skipped rows greyed out** so the mapped ones stand out.
+  - Footer: mapping file (Load / Save / Auto-match) on the left, **Preview** and a highlighted **Run** on the right.
+  - Tooltips on the buttons.
+- **Step-1 dialog and result window** get the same blue title header.
+- **Ribbon:** a new **Tools** panel.
+  - **Settings** opens `settings.ini` in Notepad.
+  - **Help** shows the version, a short how-to, and links to the user guide, the logs folder and the saved project mappings.
+  - New matching icons.
+- **README reorganized:** badges, a workflow diagram, contents, a ribbon table, and features grouped into *Mapping window / Placement and hosting / Safety and output*.
+
 ## [0.8.1] - 2026-09-26
 ### Fixed
 - Reference Plane rows in a model with **no section/elevation view**: the temporary 3D view used to draw the planes was created inside the first block's sub-transaction. If that block failed, the view was rolled back with it, later blocks used a deleted view, and the final clean-up threw, **rolling back the whole run**. The view is now created up front, and validity is checked before it is reused or deleted.
