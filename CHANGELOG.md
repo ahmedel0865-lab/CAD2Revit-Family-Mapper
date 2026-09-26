@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0] - 2026-09-26
+### Added
+- **2D symbol preview** in the mapping window.
+  - A **Symbol preview** panel on the right shows the CAD block's line work for the row under the mouse, or the selected row when the mouse leaves the grid.
+  - It also shows the block name, instance count, category, size (e.g. `600 x 600 mm`) and the chosen family.
+  - Hovering the block name shows the symbol in a tooltip too.
+  - The line work (lines, arcs, polylines, curves and nested blocks) is read from each block definition once, when the DWG is read. Very large blocks are simplified.
+  - Text, hatches and solids are not part of the DWG geometry that Revit exposes, so they don't appear in the preview.
+
 ## [0.9.0] - 2026-09-26
 ### Changed: a tidier, more organized tool
 - **Mapping window redesigned.**

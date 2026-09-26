@@ -15,6 +15,8 @@ namespace CAD2Revit.Revit
         public double Rotation;    // radians, in plan
         public bool Mirrored;
         public double ScaleX = 1, ScaleY = 1;
+        /// <summary>The DWG block reference itself (for reading the symbol's line work).</summary>
+        public GeometryInstance Instance;
 
         public bool IsAnonymous => string.IsNullOrEmpty(Name) || Name.StartsWith("*");
     }
@@ -75,6 +77,7 @@ namespace CAD2Revit.Revit
                     Mirrored = tf.HasReflection,
                     ScaleX = bx.GetLength() / baseLen,
                     ScaleY = tf.BasisY.GetLength() / baseLen,
+                    Instance = gi,
                 });
                 if (includeNested)
                     Walk(doc, gi.GetSymbolGeometry(), tf, link, depth + 1, includeNested, result);
@@ -104,6 +107,63 @@ namespace CAD2Revit.Revit
         {
             var map = Core.BlockNames.Simplify(blocks.Select(b => b.Name));
             foreach (var b in blocks) b.Name = map[b.Name];
+        }
+
+        /// <summary>The 2D symbol (line work of the block definition) for every block name,
+        /// read from the first instance of each name. Unscaled, unrotated, in feet.</summary>
+        public static Dictionary<string, Core.BlockSymbol> ExtractSymbols(IEnumerable<BlockRef> blocks)
+        {
+            var result = new Dictionary<string, Core.BlockSymbol>(StringComparer.OrdinalIgnoreCase);
+            foreach (var b in blocks)
+            {
+                if (b.Instance == null || result.ContainsKey(b.Name)) continue;
+                var symbol = new Core.BlockSymbol();
+                try
+                {
+                    // Symbol geometry is in the block's own coordinates; the DWG link scale is
+                    // removed so sizes read in real units.
+                    double unit = 1.0 / Math.Max(1e-12, b.Transform.BasisX.GetLength() / Math.Max(1e-12, b.ScaleX));
+                    CollectLines(b.Instance.GetSymbolGeometry(), Transform.Identity.ScaleBasis(unit), symbol, 0);
+                }
+                catch (Exception) { /* preview only: ignore unreadable geometry */ }
+                result[b.Name] = symbol;
+            }
+            return result;
+        }
+
+        static bool CollectLines(GeometryElement geom, Transform tf, Core.BlockSymbol symbol, int depth)
+        {
+            if (geom == null || depth > 6) return true;
+            foreach (var obj in geom)
+            {
+                bool more = true;
+                switch (obj)
+                {
+                    case PolyLine pl:
+                        more = symbol.AddPath(Flatten(pl.GetCoordinates(), tf));
+                        break;
+                    case Curve c when c.IsBound:
+                        more = symbol.AddPath(Flatten(c.Tessellate(), tf));
+                        break;
+                    case GeometryInstance nested:   // blocks inside the block
+                        more = CollectLines(nested.GetSymbolGeometry(), tf.Multiply(nested.Transform), symbol, depth + 1);
+                        break;
+                }
+                if (!more) return false;
+            }
+            return true;
+        }
+
+        static List<double> Flatten(IList<XYZ> points, Transform tf)
+        {
+            var xy = new List<double>(points.Count * 2);
+            foreach (var p in points)
+            {
+                var q = tf.OfPoint(p);
+                xy.Add(q.X);
+                xy.Add(q.Y);
+            }
+            return xy;
         }
 
         public static Dictionary<string, int> CountByName(IEnumerable<BlockRef> blocks)

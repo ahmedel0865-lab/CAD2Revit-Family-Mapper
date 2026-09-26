@@ -40,6 +40,7 @@ flowchart LR
 ## Features
 
 **Mapping window**
+- **2D symbol preview**: hover over or select a block to see its CAD symbol, size and count before you pick a family.
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
 - **Find** box and **Show** filter; **Skip shown rows** hides e.g. all architectural blocks in one click.
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.

@@ -131,8 +131,12 @@ namespace CAD2Revit.Commands
             FamilyCatalog.Load(doc, session);
             session.LevelNames = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
                 .OrderBy(l => l.ProjectElevation).Select(l => l.Name).ToList();
+            var symbols = DwgReader.ExtractSymbols(blocks);
             foreach (var kv in DwgReader.CountByName(blocks).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, opts.Level.Name));
+                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, opts.Level.Name)
+                {
+                    Symbol = symbols.TryGetValue(kv.Key, out var sym) ? sym : null,
+                });
 
             var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (File.Exists(session.ProjectMappingPath))

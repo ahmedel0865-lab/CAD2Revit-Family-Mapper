@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Windows.Data;
+using System.Windows.Media;
 using CAD2Revit.Core;
 
 namespace CAD2Revit.UI
@@ -77,6 +78,37 @@ namespace CAD2Revit.UI
 
         public string FamilyLabel => _family.Label;
         public bool IsSkipped => _family.IsSkip;
+
+        /// <summary>2D line work of the CAD block (for the symbol preview), may be empty.</summary>
+        public BlockSymbol Symbol { get; set; }
+        ImageSource _symbolImage;
+        bool _symbolRendered;
+        /// <summary>The symbol drawn as an image (built on first use), or null if there is no line work.</summary>
+        public ImageSource SymbolImage
+        {
+            get
+            {
+                if (!_symbolRendered)
+                {
+                    _symbolImage = SymbolRenderer.Render(Symbol, Color.FromRgb(20, 40, 70));
+                    _symbolRendered = true;
+                }
+                return _symbolImage;
+            }
+        }
+
+        /// <summary>Tooltip for the CAD Block cell: the full name and the symbol.</summary>
+        public object SymbolToolTip
+        {
+            get
+            {
+                var panel = new System.Windows.Controls.StackPanel { MaxWidth = 320 };
+                panel.Children.Add(new System.Windows.Controls.TextBlock { Text = Display, FontWeight = System.Windows.FontWeights.SemiBold, TextWrapping = System.Windows.TextWrapping.Wrap });
+                if (SymbolImage != null)
+                    panel.Children.Add(new System.Windows.Controls.Image { Source = SymbolImage, Width = 140, Height = 140, Margin = new System.Windows.Thickness(0, 6, 0, 0) });
+                return panel;
+            }
+        }
 
         /// <summary>The level picked in step 1 (used when Level is left at the default).</summary>
         public string DefaultLevel { get; }

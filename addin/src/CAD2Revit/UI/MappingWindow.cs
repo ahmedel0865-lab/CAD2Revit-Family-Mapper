@@ -152,12 +152,71 @@ namespace CAD2Revit.UI
             // ---- Grid (grouped by category, Electrical first) ---------------------------
             SetUpRowView();
             BuildGrid();
-            root.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = _grid });
+            var body = new DockPanel();
+            var preview = BuildPreviewPanel();
+            DockPanel.SetDock(preview, Dock.Right);
+            body.Children.Add(preview);
+            body.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = _grid });
+            root.Children.Add(body);
             Content = root;
 
             foreach (var row in _s.Rows) row.PropertyChanged += OnRowChanged;
             Closed += (o, e) => { foreach (var row in _s.Rows) row.PropertyChanged -= OnRowChanged; };
             UpdateStatus();
+        }
+
+        // ---- Symbol preview -----------------------------------------------------------
+        readonly Image _previewImage = new Image { Width = 210, Height = 210, Stretch = Stretch.Uniform };
+        readonly TextBlock _previewName = new TextBlock { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 2) };
+        readonly TextBlock _previewInfo = new TextBlock { Foreground = Muted, TextWrapping = TextWrapping.Wrap };
+        readonly TextBlock _previewEmpty = new TextBlock
+        {
+            Foreground = Muted, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(12),
+        };
+
+        Border BuildPreviewPanel()
+        {
+            var frame = new Grid { Width = 220, Height = 220, Background = Brushes.White };
+            frame.Children.Add(_previewImage);
+            frame.Children.Add(_previewEmpty);
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock { Text = "SYMBOL PREVIEW", FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = Muted, Margin = new Thickness(0, 0, 0, 6) });
+            stack.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = frame });
+            stack.Children.Add(_previewName);
+            stack.Children.Add(_previewInfo);
+            ShowPreview(null);
+            return new Border
+            {
+                Width = 246, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 8, 10, 8),
+                Background = Panel, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+                Child = stack,
+            };
+        }
+
+        /// <summary>Show a row's symbol: the hovered row, else the selected row.</summary>
+        void ShowPreview(BlockRow row)
+        {
+            row = row ?? _grid.SelectedItem as BlockRow;
+            if (row == null)
+            {
+                _previewImage.Source = null;
+                _previewEmpty.Text = "Hover over or select a CAD block to see its 2D symbol.";
+                _previewEmpty.Visibility = Visibility.Visible;
+                _previewName.Text = "";
+                _previewInfo.Text = "";
+                return;
+            }
+            var img = row.SymbolImage;
+            _previewImage.Source = img;
+            _previewEmpty.Text = "No line work to preview\n(the block may contain only text, hatches or solids).";
+            _previewEmpty.Visibility = img == null ? Visibility.Visible : Visibility.Collapsed;
+            _previewName.Text = row.BlockName;
+            var size = row.Symbol?.SizeText() ?? "";
+            _previewInfo.Text = $"{row.Count} instance(s)  ·  {row.Category}" +
+                                (size.Length > 0 ? $"\nSize: {size}" : "") +
+                                (row.IsSkipped ? "\nNot mapped (Skip)" : "\n" + row.FamilyLabel) +
+                                (row.Symbol != null && row.Symbol.Truncated ? "\n(large block: preview simplified)" : "");
         }
 
         /// <summary>A titled, lightly framed block of controls.</summary>
@@ -215,7 +274,8 @@ namespace CAD2Revit.UI
             // Several rows can be selected (Ctrl+click, Shift+click, Ctrl+A) and edited together.
             _grid.SelectionMode = DataGridSelectionMode.Extended;
             _grid.SelectionUnit = DataGridSelectionUnit.FullRow;
-            _grid.SelectionChanged += (o, e) => UpdateSelectionLabel();
+            _grid.SelectionChanged += (o, e) => { UpdateSelectionLabel(); ShowPreview(null); };
+            _grid.MouseLeave += (o, e) => ShowPreview(null);
             _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
             _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
             _grid.HorizontalGridLinesBrush = PanelBorder;
@@ -315,9 +375,12 @@ namespace CAD2Revit.UI
         }
 
         /// <summary>Skipped rows are greyed so the mapped ones stand out.</summary>
-        static Style RowStyle()
+        Style RowStyle()
         {
             var style = new Style(typeof(DataGridRow));
+            // Hovering a row shows its symbol in the preview panel.
+            style.Setters.Add(new EventSetter(UIElement.MouseEnterEvent, new System.Windows.Input.MouseEventHandler(
+                (o, e) => ShowPreview((o as DataGridRow)?.Item as BlockRow))));
             var skipped = new DataTrigger { Binding = new Binding(nameof(BlockRow.IsSkipped)), Value = true };
             skipped.Setters.Add(new Setter(Control.ForegroundProperty, Muted));
             style.Triggers.Add(skipped);
@@ -329,7 +392,7 @@ namespace CAD2Revit.UI
             var style = new Style(typeof(TextBlock));
             style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
             style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.Display))));
+            style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.SymbolToolTip))));
             return style;
         }
 
