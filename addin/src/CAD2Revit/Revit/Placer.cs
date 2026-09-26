@@ -92,12 +92,16 @@ namespace CAD2Revit.Revit
                 t.SetFailureHandlingOptions(opts);
                 t.Start();
 
+                // The temporary 3D view is always created here, outside the per-block
+                // sub-transactions: a view created inside one would be deleted again if that
+                // block were rolled back, and later blocks would use a deleted view.
                 View3D view = null;
-                View3D TempView() => view ?? (view = HostFinder.CreateTempView(_doc));
+                View3D TempView() => view != null && view.IsValidObject ? view : (view = HostFinder.CreateTempView(_doc));
                 HostFinder finder = null;
                 if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall))
                     finder = new HostFinder(_doc, TempView(), _settings.SearchRevitLinks);
                 var section = LevelPlanes.SectionView(_doc);
+                if (section == null && mapped.Any(m => m.Item2.Host == HostMode.RefPlane)) TempView();
                 var extents = dwgExtents ?? BlockExtents(blocks);
                 bool createdLevelPlanes = false;
 
@@ -164,7 +168,7 @@ namespace CAD2Revit.Revit
                     results.Add(res);
                 }
 
-                if (view != null)
+                if (view != null && view.IsValidObject)
                 {
                     // Keep the temporary view only if a reference plane was created in it
                     // (deleting a view could take view-owned elements with it).

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.8.1] - 2026-09-26
+### Fixed
+- Reference Plane rows in a model with **no section/elevation view**: the temporary 3D view used to draw the planes was created inside the first block's sub-transaction. If that block failed, the view was rolled back with it, later blocks used a deleted view, and the final clean-up threw, **rolling back the whole run**. The view is now created up front, and validity is checked before it is reused or deleted.
+
 ## [0.8.0] - 2026-09-26
 ### Added
 - **Edit many rows at once.** Select rows in the mapping window (Ctrl+click, Shift+click, Ctrl+A or *Select all shown*), set **Host Type**, **Level**, **Elevation**, **Facing** and/or **Category** in the new bar above the grid, then click **Apply to selected rows**. Fields left at *(keep)* are not changed. Combined with *Show* (category), e.g. all Electrical blocks can be given the same host in one step.
