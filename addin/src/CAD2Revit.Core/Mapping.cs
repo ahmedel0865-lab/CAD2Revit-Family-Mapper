@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace CAD2Revit.Core
 {
-    public enum HostMode { None, Ceiling, Face, Wall, Vertical, RefPlane }
+    public enum HostMode { None, Ceiling, Face, Wall, Vertical, RefPlane, SlabAbove, SlabBelow }
 
     /// <summary>Which side a family on a horizontal reference plane faces.</summary>
     public enum Facing { Down, Up }
@@ -79,6 +79,13 @@ namespace CAD2Revit.Core
             ["referenceplaneautocreate"] = HostMode.RefPlane,
             ["refplane"] = HostMode.RefPlane,
             ["plane"] = HostMode.RefPlane,
+            ["slab"] = HostMode.SlabAbove,
+            ["slababove"] = HostMode.SlabAbove,
+            ["slabsoffit"] = HostMode.SlabAbove,
+            ["soffit"] = HostMode.SlabAbove,
+            ["slabbelow"] = HostMode.SlabBelow,
+            ["floor"] = HostMode.SlabBelow,
+            ["floorslab"] = HostMode.SlabBelow,
             // display labels used in the mapping window
             ["nonelevelbased"] = HostMode.None,
             ["faceceilingslabroof"] = HostMode.Face,
@@ -90,6 +97,8 @@ namespace CAD2Revit.Core
         {
             [HostMode.None] = "None (level-based)",
             [HostMode.Ceiling] = "Ceiling",
+            [HostMode.SlabAbove] = "Slab (above)",
+            [HostMode.SlabBelow] = "Slab (below)",
             [HostMode.Wall] = "Wall",
             [HostMode.RefPlane] = "Reference Plane (auto-create)",
             [HostMode.Face] = "Face (ceiling/slab/roof)",
@@ -104,6 +113,8 @@ namespace CAD2Revit.Core
         public static string HostText(HostMode host) =>
             host == HostMode.None ? "non-hosted"
             : host == HostMode.RefPlane ? "reference plane"
+            : host == HostMode.SlabAbove ? "slab above"
+            : host == HostMode.SlabBelow ? "slab below"
             : host.ToString().ToLowerInvariant();
 
         /// <summary>"down"/"up" (default down).</summary>
@@ -208,7 +219,7 @@ namespace CAD2Revit.Core
                 var rawHost = Get(r, "host");
                 if (!HostValues.TryGetValue(Norm(rawHost), out var host))
                 {
-                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/face/wall/vertical/reference plane) - using none");
+                    result.Errors.Add($"Row {line}: Host_Type '{rawHost}' not recognised (use none/ceiling/slab above/slab below/face/wall/vertical/reference plane) - using none");
                     host = HostMode.None;
                 }
                 result.SkippedBlocks.Remove(block);

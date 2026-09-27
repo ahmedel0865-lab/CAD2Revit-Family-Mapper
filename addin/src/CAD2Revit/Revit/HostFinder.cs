@@ -15,13 +15,22 @@ namespace CAD2Revit.Revit
         public XYZ RoomNormal;        // walls: horizontal, pointing back to the CAD point
         public Element Element;       // host element (in its own document)
         public bool IsLinked;         // host lives in a Revit link
+        public string LinkName = "";  // e.g. "STR.rvt" when linked
         public double Distance;       // ray length, feet
 
+        /// <summary>e.g. "Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)".</summary>
         public string Describe()
         {
-            string cat = "?";
-            try { cat = Element?.Category?.Name ?? "?"; } catch (Exception) { }
-            return cat + (IsLinked ? " (linked)" : "");
+            string cat = null, type = null, level = null;
+            try { cat = Element?.Category?.Name; } catch (Exception) { }
+            try { type = Element?.Name; } catch (Exception) { }
+            try
+            {
+                var id = Element?.LevelId;
+                if (id != null && id != ElementId.InvalidElementId) level = Element.Document.GetElement(id)?.Name;
+            }
+            catch (Exception) { }
+            return HostLabels.Format(cat, type, level, IsLinked ? LinkName ?? "" : null);
         }
     }
 
@@ -66,6 +75,8 @@ namespace CAD2Revit.Revit
             if (_intersectors.TryGetValue(mode, out var ri)) return ri;
             var cats = mode == HostMode.Wall
                 ? new List<BuiltInCategory> { BuiltInCategory.OST_Walls }
+                : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors }   // structural + architectural slabs only
                 : mode == HostMode.Ceiling
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings }
                     : new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
@@ -91,7 +102,92 @@ namespace CAD2Revit.Revit
             {
                 Reference = reference, Point = pt, FaceNormal = normal, RoomNormal = normal,
                 Element = elem, IsLinked = linked, Distance = ctx.Proximity,
+                LinkName = linked ? LinkName(reference.ElementId) : "",
             };
+        }
+
+        string LinkName(ElementId linkInstanceId)
+        {
+            try
+            {
+                var link = _doc.GetElement(linkInstanceId) as RevitLinkInstance;
+                var name = link != null ? _doc.GetElement(link.GetTypeId())?.Name : null;   // RevitLinkType, e.g. "STR.rvt"
+                if (string.IsNullOrWhiteSpace(name)) name = link?.GetLinkDocument()?.Title;
+                return name ?? "";
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// Slab (above): the underside of the first floor slab straight above (x, y), searching
+        /// up from the level - i.e. the slab of the level above. Slab (below): the top face of the
+        /// slab at the level, searching down from just above it. Only Floor elements count (beams,
+        /// ceilings, ducts are ignored), in this model and in Revit links. Faces pointing the wrong
+        /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
+        /// (no slab, or the ray passes through an opening).
+        /// </summary>
+        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt)
+        {
+            var dir = above ? XYZ.BasisZ : XYZ.BasisZ.Negate();
+            var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
+            var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
+            if (hits == null) return null;
+            foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
+            {
+                var hit = MakeHit(ctx, dir);
+                double nz = hit.FaceNormal.Z;
+                if (above ? nz < -0.5 : nz > 0.5) return hit;   // bottom face (faces down) / top face (faces up)
+            }
+            return null;
+        }
+
+        readonly Dictionary<string, double?> _slabZ = new Dictionary<string, double?>();
+
+        /// <summary>
+        /// Elevation to use when a ray finds no slab (opening, or slab missing at that point):
+        /// the underside (above) or top (below) of the largest floor slab in the search window
+        /// of this level, from bounding boxes of floors in this model and in links. Null if none.
+        /// </summary>
+        public double? FallbackSlabZ(bool above, double levelZ, double maxDistFt)
+        {
+            var key = (above ? "A" : "B") + levelZ.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture);
+            if (_slabZ.TryGetValue(key, out var cached)) return cached;
+            double? best = null;
+            double bestArea = -1;
+            void Consider(Element e, Transform tf)
+            {
+                BoundingBoxXYZ bb;
+                try { bb = e.get_BoundingBox(null); } catch (Exception) { return; }
+                if (bb == null) return;
+                var t = tf ?? Transform.Identity;
+                if (bb.Transform != null) t = t.Multiply(bb.Transform);
+                double zMin = t.OfPoint(bb.Min).Z, zMax = t.OfPoint(bb.Max).Z;
+                if (zMin > zMax) { var tmp = zMin; zMin = zMax; zMax = tmp; }
+                double z = above ? zMin : zMax;
+                bool inWindow = above
+                    ? z > levelZ + 0.01 && z <= levelZ + maxDistFt
+                    : z <= levelZ + SlabSearch.BelowStartMm / SlabSearch.MmPerFoot && z >= levelZ + SlabSearch.BelowStartMm / SlabSearch.MmPerFoot - maxDistFt;
+                if (!inWindow) return;
+                double area = Math.Abs((bb.Max.X - bb.Min.X) * (bb.Max.Y - bb.Min.Y));
+                if (area > bestArea) { bestArea = area; best = z; }
+            }
+            foreach (var e in new FilteredElementCollector(_doc).OfCategory(BuiltInCategory.OST_Floors).WhereElementIsNotElementType())
+                Consider(e, null);
+            if (_searchLinks)
+                foreach (var link in new FilteredElementCollector(_doc).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>())
+                {
+                    Document linkDoc;
+                    try { linkDoc = link.GetLinkDocument(); } catch (Exception) { continue; }
+                    if (linkDoc == null) continue;
+                    var tf = link.GetTotalTransform();
+                    foreach (var e in new FilteredElementCollector(linkDoc).OfCategory(BuiltInCategory.OST_Floors).WhereElementIsNotElementType())
+                        Consider(e, tf);
+                }
+            _slabZ[key] = best;
+            return best;
         }
 
         /// <summary>Nearest ceiling (Ceiling) or ceiling/slab/roof/beam (Face) straight above

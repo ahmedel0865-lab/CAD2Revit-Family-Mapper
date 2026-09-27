@@ -32,6 +32,8 @@ namespace CAD2Revit.UI
         {
             Mapping.HostDisplay[HostMode.None],
             Mapping.HostDisplay[HostMode.Ceiling],
+            Mapping.HostDisplay[HostMode.SlabAbove],
+            Mapping.HostDisplay[HostMode.SlabBelow],
             Mapping.HostDisplay[HostMode.Wall],
             Mapping.HostDisplay[HostMode.RefPlane],
             Mapping.HostDisplay[HostMode.Face],
@@ -70,6 +72,7 @@ namespace CAD2Revit.UI
                 if (value == null || value == _family) return;   // null = transient state while filtering
                 _family = value;
                 AutoMatched = false;
+                DetectedHost = "";
                 Changed(nameof(Family));
                 Changed(nameof(FamilyLabel));
                 Changed(nameof(IsSkipped));
@@ -113,7 +116,7 @@ namespace CAD2Revit.UI
         /// <summary>The level picked in step 1 (used when Level is left at the default).</summary>
         public string DefaultLevel { get; }
         /// <summary>Level this block is placed on; Elevation is measured from it.</summary>
-        public string Level { get => _level; set { _level = value ?? DefaultLevel; Changed(nameof(Level)); } }
+        public string Level { get => _level; set { var v = value ?? DefaultLevel; if (v != _level) DetectedHost = ""; _level = v; Changed(nameof(Level)); } }
 
         /// <summary>Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other.</summary>
         public string Category
@@ -133,7 +136,21 @@ namespace CAD2Revit.UI
 
         public string Elevation { get => _elevation; set { _elevation = value; Changed(nameof(Elevation)); } }
         public string Rotation { get => _rotation; set { _rotation = value; Changed(nameof(Rotation)); } }
-        public string Host { get => _host; set { _host = value; Changed(nameof(Host)); } }
+        public string Host { get => _host; set { if (value != _host) DetectedHost = ""; _host = value; Changed(nameof(Host)); } }
+
+        string _detectedHost = "";
+        /// <summary>Host found by the last Preview for this block, e.g. "Floor: 250mm RC Slab -
+        /// Third Floor (linked: STR.rvt)". Cleared when Family, Level or Host Type change.</summary>
+        public string DetectedHost
+        {
+            get => _detectedHost;
+            set
+            {
+                if (_detectedHost == (value ?? "")) return;
+                _detectedHost = value ?? "";
+                Changed(nameof(DetectedHost));
+            }
+        }
         /// <summary>Down (ceiling devices) or Up (floor devices); used by Reference Plane hosting.</summary>
         public string Facing { get => _facing; set { _facing = value; Changed(nameof(Facing)); } }
         /// <summary>Host Type before "Use reference planes for all rows" was ticked.</summary>
@@ -269,6 +286,20 @@ namespace CAD2Revit.UI
             if (fromFamily == null) return;
             row.Category = fromFamily;
             row.CategoryIsAuto = true;
+        }
+
+        /// <summary>After a Preview: show each block's detected host in the grid.</summary>
+        public void SetDetectedHosts(IEnumerable<PlacementResult> results)
+        {
+            var byBlock = new Dictionary<string, List<PlacementResult>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in results)
+            {
+                if (!r.HasBlock || r.Status == Status.Unmapped) continue;
+                if (!byBlock.TryGetValue(r.BlockName, out var list)) byBlock[r.BlockName] = list = new List<PlacementResult>();
+                list.Add(r);
+            }
+            foreach (var row in Rows)
+                row.DetectedHost = byBlock.TryGetValue(row.BlockName, out var list) ? HostLabels.Summarize(list) : "";
         }
 
         public MappingResult ToMapping()

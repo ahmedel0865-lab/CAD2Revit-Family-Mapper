@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0] - 2026-09-27
+### Added
+- **Host Type "Slab (above)"**, for ceiling devices hosted on the underside of the structural slab.
+  - A ray is cast **straight up** from the row's level at each block, in a clean temporary 3D view, using `ReferenceIntersector` with face targets.
+  - Only **Floor** elements count, both structural and architectural slabs. Beams, ceilings, ducts and anything else are ignored.
+  - Slabs in **linked Revit models** are found too, e.g. a structural link.
+  - The **first slab underside above the level** is used, which is the slab of the level above. For example, target *Second Floor* hosts on the underside of the *Third Floor* slab. Top faces, such as a finish slab sitting just above the level, are skipped.
+  - The face-based family is hosted on that **bottom face, facing down**, with the CAD block rotation as its direction.
+  - The search stops at the **level-to-level height + 500 mm**, so it never reaches a slab two floors up. The 500 mm is `SlabSearchToleranceMm` in `settings.ini`.
+- **Host Type "Slab (below)"**, for floor devices (floor boxes, floor sockets).
+  - A ray is cast **down** from 300 mm above the level, and the family is hosted on the **top face** of the slab at that level, **facing up**.
+- **Slab fallbacks**, each logged as a warning:
+  - **No slab at a block** (a slab opening, or no slab there): the family is hosted on a reference plane at the **underside of that level's slab** (or the top, for Slab (below)). That slab is found from the floors' extents in the model and its links. If the level has no slab, the plane goes at the level above's elevation (or at the level itself for Slab (below)). The plane is created or reused as `CAD2Revit_<Level>_+<elev>mm`.
+  - **Family not face-based / work-plane-based**: placed level-based at *Elevation From Level*.
+- **Detected Host (Preview)** column in the mapping window.
+  - After **Preview**, each row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
+  - Mixed results are counted, e.g. `... (38) · Reference plane CAD2Revit_Second Floor_+3250mm (4) · 1 failed`.
+  - The value is cleared when you change that row's family, level or host type.
+- The log's **Host** column uses the same detailed names for all host types: category, type, level and link.
+### Unchanged
+- Still **one transaction** per run with a sub-transaction per block. Reference planes created by a fallback are undone by the same Ctrl+Z.
+
 ## [0.10.0] - 2026-09-26
 ### Added
 - **2D symbol preview** in the mapping window.

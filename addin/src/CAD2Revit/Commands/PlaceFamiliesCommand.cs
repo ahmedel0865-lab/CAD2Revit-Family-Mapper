@@ -90,6 +90,7 @@ namespace CAD2Revit.Commands
                     var results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
                                                                     dwgExtents: DwgExtents(opts.Import));
                     var logPath = WriteLog(doc, results, preview);
+                    if (preview) session.SetDetectedHosts(results);
 
                     var summary = Report.Summarize(results);
                     var text = Report.SummaryText(summary, preview);

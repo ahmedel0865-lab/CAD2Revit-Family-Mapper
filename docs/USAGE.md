@@ -54,7 +54,8 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 | **Level** | The level this block is placed on. Starts at the DWG's level; pick another level to place that block on a different floor in the same run. |
 | **Elevation From Level (mm)** | Height above the row's **Level**. Must be a number; invalid cells turn red and block Preview/Run. |
 | Rotation (deg) | Optional. Added to the CAD block rotation (counter-clockwise). |
-| Host Type | None (level-based), Ceiling, Wall, Reference Plane (auto-create), Face (ceiling/slab/roof) or Vertical plane (no wall). See below. |
+| Host Type | None (level-based), Ceiling, Slab (above), Slab (below), Wall, Reference Plane (auto-create), Face (ceiling/slab/roof) or Vertical plane (no wall). See below. |
+| Detected Host (Preview) | Filled in by **Preview**: the host each block would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`. Read-only. |
 | Facing | Down (default) or Up. Which side a family on a **Reference Plane** faces: Down for ceiling devices (lights, detectors), Up for floor devices (floor boxes). |
 
 - The dropdown lists loaded family types in the electrical categories: Lighting Fixtures, Lighting Devices (switches), Electrical Fixtures, Electrical Equipment, Fire Alarm Devices, Communication Devices, Data Devices, Security Devices, Nurse Call Devices and Telephone Devices. A family from another category is added to the list automatically when a loaded mapping file uses it.
@@ -72,6 +73,8 @@ Host types:
 | `non-hosted` = **None (level-based)** | Placed on the level at the elevation, rotated like the CAD block. |
 | `ceiling` | Casts a ray straight up from the block and hosts on the first **ceiling** face (this model or linked models), up to the next level or 6 m. |
 | `face` | Same, but also hosts on floor/roof undersides and beams (useful where there is no ceiling, e.g. car parks, plant rooms). |
+| `slab above` = **Slab (above)** | Casts a ray straight up from the row's level and hosts on the **underside of the first floor slab** above it (the slab of the level above), **facing down**, with the CAD rotation as direction. Only **Floor** elements count (structural and architectural), in this model and in linked models; beams, ceilings and ducts are ignored. The search goes up to the level-to-level height + `SlabSearchToleranceMm` (500 mm), so never two floors up. **No slab at a block** (opening, or no slab) → hosted on a reference plane at the underside of that level's slab (or at the level above if the level has no slab), with a warning. **Not a face-based / work-plane-based family** → placed level-based at *Elevation From Level*, with a warning. The Facing column is not used. |
+| `slab below` = **Slab (below)** | For floor boxes / floor sockets: casts a ray down from 300 mm above the level and hosts on the **top face of the slab** at that level, **facing up**. Same fallbacks (reference plane at the slab top, or at the level). |
 | `wall` | Looks for the nearest **wall** face within 500 mm of the block, at the elevation height, and places the device on that face facing into the room. **If no wall is found**, a face-based device is stood upright on a vertical plane instead (as `vertical` below). |
 | `reference plane` = **Reference Plane (auto-create)** | Creates (or reuses) a **horizontal reference plane** at *level elevation + Elevation From Level*, named `CAD2Revit_<Level>_+<elevation>mm` (e.g. `CAD2Revit_Level 1_+2800mm`; up-facing planes end in `_Up`). The plane covers the DWG link's extents plus 1 m. The family is hosted on it, with the CAD block rotation as its direction and facing Down or Up (the **Facing** column). All rows with the same elevation and facing share one plane, and later runs reuse it. Only face-based / work-plane-based families can be hosted this way; others are placed level-based with a warning. |
 | `vertical` = **Vertical plane (no wall)** | **No wall needed.** Places a face-based device upright on a vertical work plane through the CAD point, at the elevation height. Use it for sockets, switches, call points and so on when the model has no Revit walls (only the DWG background). The device faces the CAD block's local **+Y** direction (a block drawn with the wall along X and the room on +Y faces into the room). If devices face the wrong way, set **Rotation** to 180 (or ±90). |
@@ -99,7 +102,7 @@ The elevation is also the fallback height if a ceiling is not found.
 | Level | `Level 2` | Optional. Level name; empty = the level picked when running. |
 | Offset_From_Level_mm | `2800` | Elevation from level. |
 | Rotation_Adjustment_deg | `90` | Rotation adjustment. |
-| Host_Type | `ceiling` | `non-hosted`, `ceiling`, `wall`, `reference plane`, `face` or `vertical` (the window's labels are accepted too). |
+| Host_Type | `ceiling` | `non-hosted`, `ceiling`, `slab above`, `slab below`, `wall`, `reference plane`, `face` or `vertical` (the window's labels are accepted too). |
 | Facing | `Down` | Optional. `Down` (default) or `Up`, for reference-plane rows. |
 | Category | `Electrical` | Optional. Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other; empty = detected from the name. |
 
@@ -136,6 +139,7 @@ Click **CAD2Revit > Tools > Settings** to open it in Notepad. Settings are store
 | `SimplifyBlockNames` | true | Group block names: remove the `.dwg.` file prefix and, for Revit-exported DWGs, the `-<id>-<view>` suffix. |
 | `HostSearchDistanceMm` | 6000 | Max search distance up to a ceiling/soffit (never past the next level). |
 | `WallSearchDistanceMm` | 500 | Max distance from the CAD point to a wall face. |
+| `SlabSearchToleranceMm` | 500 | Slab (above) searches up to the next level + this; Slab (below) searches this far below the level. |
 | `SearchRevitLinks` | true | Also host on faces in linked Revit models. |
 | `FallbackToUnhosted` | true | If no host is found, place unhosted at the row offset (`true`), or report as failed (`false`). |
 | `WriteBlockNameToComments` | true | Write `CAD: <block>` into Comments. |

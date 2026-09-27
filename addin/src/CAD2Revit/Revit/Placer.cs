@@ -54,6 +54,9 @@ namespace CAD2Revit.Revit
         {
             public Level Level;
             public double MaxUp;
+            public double? NextZ;       // elevation of the level above (null = top level)
+            public double SlabUp;       // Slab (above) search distance
+            public double SlabDown;     // Slab (below) search distance
             public DuplicateIndex Dups;
             public LevelPlanes LevelPlanes;
             public VerticalPlanes VerticalPlanes;
@@ -98,7 +101,8 @@ namespace CAD2Revit.Revit
                 View3D view = null;
                 View3D TempView() => view != null && view.IsValidObject ? view : (view = HostFinder.CreateTempView(_doc));
                 HostFinder finder = null;
-                if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall))
+                if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall ||
+                                    m.Item2.Host == HostMode.SlabAbove || m.Item2.Host == HostMode.SlabBelow))
                     finder = new HostFinder(_doc, TempView(), _settings.SearchRevitLinks);
                 var section = LevelPlanes.SectionView(_doc);
                 if (section == null && mapped.Any(m => m.Item2.Host == HostMode.RefPlane)) TempView();
@@ -119,6 +123,9 @@ namespace CAD2Revit.Revit
                     {
                         Level = level,
                         MaxUp = maxUp,
+                        NextZ = top,
+                        SlabUp = SlabSearch.AboveDistanceFt(levelZ, top, _settings.SlabSearchToleranceMm, _settings.HostSearchDistanceMm),
+                        SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
                         Dups = new DuplicateIndex(_doc, Ft(_settings.DuplicateToleranceMm),
                                                   levelZ - Ft(300), bandTop, _settings.DuplicateSameTypeOnly),
                         LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
@@ -153,7 +160,7 @@ namespace CAD2Revit.Revit
                         st.Start();
                         try
                         {
-                            res = PlaceOne(b, row, sym, level, finder, ctx.VerticalPlanes, ctx.LevelPlanes, ctx.Dups, ctx.MaxUp);
+                            res = PlaceOne(b, row, sym, level, finder, ctx);
                             if (res.Status == Status.Placed) st.Commit();
                             else st.RollBack();
                         }
@@ -213,10 +220,12 @@ namespace CAD2Revit.Revit
             };
         }
 
-        PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level,
-                                 HostFinder finder, VerticalPlanes planes, LevelPlanes levelPlanes,
-                                 DuplicateIndex dups, double maxUp)
+        PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx)
         {
+            var planes = ctx.VerticalPlanes;
+            var levelPlanes = ctx.LevelPlanes;
+            var dups = ctx.Dups;
+            double maxUp = ctx.MaxUp;
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
             double angle = b.Rotation + row.RotationDeg * Math.PI / 180.0;
@@ -233,7 +242,45 @@ namespace CAD2Revit.Revit
             HostHit hit = null;
             bool onVertical = false;   // face-based family on a vertical work plane (no wall)
             bool onLevelPlane = false; // face/work-plane based family on a horizontal reference plane
-            if (row.Host == HostMode.RefPlane)
+            double planeElevMm = row.OffsetMm;   // plane height above the level, and which way it faces
+            var planeFacing = row.Facing;
+            if (row.Host == HostMode.SlabAbove || row.Host == HostMode.SlabBelow)
+            {
+                bool above = row.Host == HostMode.SlabAbove;
+                string word = above ? "above" : "below";
+                double maxDist = above ? ctx.SlabUp : ctx.SlabDown;
+                if (ptype == FamilyPlacementType.OneLevelBased)
+                {
+                    notes.Add($"WARNING: family is not face-based/work-plane-based, so it cannot be hosted on a slab - " +
+                              $"placed level-based at Elevation From Level {row.OffsetMm:0} mm");
+                }
+                else
+                {
+                    hit = finder.FindSlab(above, x, y, levelZ, maxDist);
+                    if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
+                        return Result(b, row, Status.Failed,
+                            Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
+                                  "use a face-based family"), b.Point, angle);
+                    if (hit == null)
+                    {
+                        string why = $"no slab {word} this point within {maxDist * MmPerFoot:0} mm (slab opening or no slab)";
+                        if (ptype != FamilyPlacementType.WorkPlaneBased)
+                            return Result(b, row, Status.Failed, Notes(why + " - legacy hosted family needs a real slab"), b.Point, angle);
+                        // Fallback: a reference plane at the slab height found for this level
+                        // (or the level above / the level itself if the level has no slab).
+                        var slabZ = finder.FallbackSlabZ(above, levelZ, maxDist);
+                        string source = slabZ.HasValue ? (above ? "underside of the slab above" : "top of the slab at this level")
+                                      : above ? (ctx.NextZ.HasValue ? "level above (no slab found for this level)" : "Elevation From Level (no level above)")
+                                      : "level (no slab found for this level)";
+                        double z = slabZ ?? (above ? ctx.NextZ ?? levelZ + offset : levelZ);
+                        planeElevMm = Math.Round((z - levelZ) * MmPerFoot, 1);
+                        planeFacing = above ? Facing.Down : Facing.Up;
+                        onLevelPlane = true;
+                        notes.Add($"WARNING: {why} - hosted on a reference plane at {planeElevMm:0} mm ({source})");
+                    }
+                }
+            }
+            else if (row.Host == HostMode.RefPlane)
             {
                 if (ptype == FamilyPlacementType.WorkPlaneBased) onLevelPlane = true;
                 else if (ptype == FamilyPlacementType.OneLevelBased)
@@ -293,7 +340,9 @@ namespace CAD2Revit.Revit
             }
 
             // 2. Target point, then duplicate check at that point.
-            var target = hit != null ? hit.Point : new XYZ(x, y, levelZ + offset);
+            var target = hit != null ? hit.Point
+                       : onLevelPlane ? new XYZ(x, y, levelZ + Ft(planeElevMm))
+                       : new XYZ(x, y, levelZ + offset);
             if (dups.Contains(sym, target))
                 return Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle);
 
@@ -310,15 +359,15 @@ namespace CAD2Revit.Revit
             if (onLevelPlane)
             {
                 // Horizontal plane at level + elevation; the CAD rotation is the reference direction.
-                var rp = levelPlanes.Get(row.OffsetMm, row.Facing);
+                var rp = levelPlanes.Get(planeElevMm, planeFacing);
                 inst = _doc.Create.NewFamilyInstance(rp.GetReference(), target, cadDir, sym);
                 // Make sure the family faces the requested side (a reused plane may point the other way).
                 _doc.Regenerate();
-                var want = LevelPlanes.Normal(row.Facing);
+                var want = LevelPlanes.Normal(planeFacing);
                 if (inst.GetTransform().BasisZ.DotProduct(want) < 0)
                 {
                     if (inst.CanFlipWorkPlane) inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
-                    else notes.Add("WARNING: could not flip the family to face " + row.Facing.ToString().ToLowerInvariant());
+                    else notes.Add("WARNING: could not flip the family to face " + planeFacing.ToString().ToLowerInvariant());
                 }
                 hostText = "Reference plane " + rp.Name;
             }

@@ -23,7 +23,7 @@ flowchart LR
 - [The CAD2Revit ribbon](#the-cad2revit-ribbon)
 - [Features](#features)
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
-- [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)
+- [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)
 - [Mapping file](#mapping-file) · [Project structure](#project-structure) · [Building from source](#building-from-source)
 - [Limitations](#limitations-short) · [Roadmap](#roadmap)
 - Guides: [Usage](docs/USAGE.md) · [Testing on a sample](docs/TESTING.md) · [Limitations](docs/LIMITATIONS.md) · [Changelog](CHANGELOG.md)
@@ -52,7 +52,9 @@ flowchart LR
 
 **Placement and hosting**
 - Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
-- Hosts per row: **None (level-based)**, **Ceiling**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
+- Hosts per row: **None (level-based)**, **Ceiling**, **Slab (above)**, **Slab (below)**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
+- **Slab (above)**: hosts on the **underside of the slab of the level above**, found straight up from each block. Only floor slabs count; beams, ceilings and ducts are ignored. Structural links are searched too, and the search is limited to the level-to-level height + 500 mm. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits under a slab opening, the family goes on a reference plane at the slab's height, with a warning.
+- **Detected Host (Preview)** column: after Preview, every row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
 - **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up.
 - If no host is found, falls back to unhosted placement (or reports a failure, your choice).
 
@@ -77,8 +79,8 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
 2. **CAD2Revit > Place Families** > pick the DWG > **Next**.
-3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the level, elevation and Host Type (see [Ceiling vs Reference Plane](#ceiling-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
-4. **Preview** > check the result > **Run**. One Ctrl+Z undoes it all.
+3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
+4. **Preview** > check the result and the *Detected Host* column > **Run**. One Ctrl+Z undoes it all.
 
 Next time in the same project, the mapping window opens pre-filled.
 
@@ -87,7 +89,9 @@ Next time in the same project, the mapping window opens pre-filled.
 - Known limitations: [docs/LIMITATIONS.md](docs/LIMITATIONS.md)
 - Example mapping: [templates/mapping_template.xlsx](templates/mapping_template.xlsx) / [.csv](templates/mapping_template.csv)
 
-## Ceiling vs Reference Plane: which host to use?
+## Ceiling vs Slab vs Reference Plane: which host to use?
+
+**Slab (above)** fits when devices hang from the **structural slab soffit**: exposed or open ceilings, car parks, plant rooms, or wherever the ceilings aren't modelled yet but the structural model is linked. Devices follow the slab: if the structure changes, re-running finds the new soffit. **Slab (below)** is the same for floor boxes and floor sockets on top of the slab. The table below compares Ceiling and Reference Plane.
 
 | Use **Ceiling** when... | Use **Reference Plane (auto-create)** when... |
 |---|---|
@@ -97,7 +101,7 @@ Next time in the same project, the mapping window opens pre-filled.
 | | Devices go on the **underside of a slab** or in **open ceilings** (car parks, plant rooms), or **face up** on the floor (floor boxes: set *Facing* = Up). |
 
 Notes:
-- Both need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window.
+- All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window.
 - Ceiling hosting looks straight up from each block and needs a ceiling within the search distance. Anything without a ceiling above it falls back to the row's elevation, unhosted.
 - Reference planes are named `CAD2Revit_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
 
@@ -110,6 +114,9 @@ The mapping window can **Load / Save** the mapping as a file, to reuse it across
 | SOCKET-DOUBLE | Duplex Receptacle | Standard | 300 | 0 | wall |
 | SMOKE-DET | Smoke Detector | Ceiling | 2800 | 0 | ceiling |
 | DB-PANEL | Lighting and Appliance Panelboard | 400A | 1500 | 180 | non-hosted |
+| FLOOR-BOX | Floor Box | Standard | 0 | 0 | slab below |
+
+`Host_Type` values: `non-hosted`, `ceiling`, `slab above`, `slab below`, `wall`, `reference plane`, `face` or `vertical`. The window's labels are accepted too.
 
 ## Project structure
 ```
@@ -160,6 +167,7 @@ See [docs/LIMITATIONS.md](docs/LIMITATIONS.md) for details and workarounds.
 - [x] Wall-hosted placement (sockets, switches)
 - [x] Standalone Revit add-in (no pyRevit)
 - [x] In-Revit mapping window with searchable families and per-project memory
+- [x] Slab soffit / slab top hosting, including structural links
 - [ ] Copy block attributes via an AutoCAD Data Extraction CSV matched by location
 - [ ] Auto-assign circuits / panel parameters
 - [ ] Save and reuse mapping profiles per project

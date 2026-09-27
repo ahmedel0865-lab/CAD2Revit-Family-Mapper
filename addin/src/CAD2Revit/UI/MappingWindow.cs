@@ -361,6 +361,20 @@ namespace CAD2Revit.UI
                 SelectedItemBinding = new Binding(nameof(BlockRow.Facing)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
                 Width = new DataGridLength(70),
             });
+
+            // Filled by Preview: which host each block would use (check before Run).
+            var detectedStyle = new Style(typeof(TextBlock));
+            detectedStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            detectedStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            detectedStyle.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.DetectedHost))));
+            _grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Detected Host (Preview)",
+                Binding = new Binding(nameof(BlockRow.DetectedHost)) { Mode = BindingMode.OneWay },
+                IsReadOnly = true,
+                Width = new DataGridLength(300),
+                ElementStyle = detectedStyle,
+            });
         }
 
         static Style HeaderStyle()
