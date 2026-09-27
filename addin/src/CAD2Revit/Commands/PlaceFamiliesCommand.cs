@@ -49,8 +49,10 @@ namespace CAD2Revit.Commands
                 }
 
                 // 2. Blocks from the DWG.
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var blocks = DwgReader.Read(doc, opts.Import, opts.IncludeNested);
                 if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
+                var readDwgTime = sw.Elapsed;
                 if (blocks.Count == 0)
                 {
                     TaskDialog.Show("CAD2Revit", "No blocks found in the selected DWG.\n\n" +
@@ -58,7 +60,9 @@ namespace CAD2Revit.Commands
                     return Result.Cancelled;
                 }
 
+                sw.Restart();
                 var session = BuildSession(doc, opts, blocks, settings, out var startupNotes);
+                var setupTime = sw.Elapsed;
 
                 // 3. Mapping window -> Preview / Run loop.
                 while (true)
@@ -84,18 +88,43 @@ namespace CAD2Revit.Commands
                     }
                     catch (Exception) { /* remembering is a convenience only */ }
 
-                    var mapping = session.ToMapping();
+                    // Timings of this Preview/Run (DWG reading and window setup happened once, at the start).
+                    var timer = new PhaseTimer();
+                    timer.Add(Phases.ReadDwg, readDwgTime);
+                    timer.Add(Phases.Setup, setupTime);
+                    var total = System.Diagnostics.Stopwatch.StartNew();
+                    MappingResult mapping;
+                    Dictionary<MapRow, FamilySymbol> symbols;
                     var errors = new List<string>();
-                    var symbols = Placer.ResolveSymbols(doc, mapping, errors);
-                    var results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
-                                                                    dwgExtents: DwgExtents(opts.Import));
-                    var logPath = WriteLog(doc, results, preview);
+                    using (timer.Time(Phases.LoadMapping))
+                    {
+                        mapping = session.ToMapping();
+                        symbols = Placer.ResolveSymbols(doc, mapping, errors);
+                    }
+                    List<PlacementResult> results;
+                    try
+                    {
+                        using (var progress = new ProgressWindow(preview ? "CAD2Revit - Preview" : "CAD2Revit - Placing families",
+                                                                 uiapp.MainWindowHandle))
+                            results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
+                                                                         progress.Report, DwgExtents(opts.Import), timer);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        TaskDialog.Show("CAD2Revit", "Cancelled. Everything was rolled back - nothing was changed in the model.");
+                        continue;   // back to the mapping window
+                    }
+                    string logPath;
+                    total.Stop();
+                    timer.Add(Phases.Total, total.Elapsed + readDwgTime + setupTime);
+                    using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
                     if (preview) session.SetDetectedHosts(results);
 
                     var summary = Report.Summarize(results);
                     var text = Report.SummaryText(summary, preview);
                     if (errors.Count > 0)
                         text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
+                    text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
                     text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
                     if (preview)
                         text += "\r\n\r\nClose this window to return to the mapping. Click Run there to place the families.";
@@ -193,7 +222,7 @@ namespace CAD2Revit.Commands
         }
 
         /// <summary>CSV log in Documents\CAD2Revit\Logs (temp folder if that fails).</summary>
-        static string WriteLog(Document doc, List<PlacementResult> results, bool preview)
+        static string WriteLog(Document doc, List<PlacementResult> results, bool preview, PhaseTimer timer = null)
         {
             var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             var project = ProjectStore.KeyFor(ModelPath(doc), doc.Title);
@@ -208,7 +237,9 @@ namespace CAD2Revit.Commands
                 {
                     Directory.CreateDirectory(folder);
                     var p = Path.Combine(folder, name);
-                    Tables.WriteCsv(p, Report.LogHeader, Report.LogRows(results));
+                    var rows = Report.LogRows(results);
+                    if (timer != null) rows.AddRange(timer.LogRows());   // Status = "timing"
+                    Tables.WriteCsv(p, Report.LogHeader, rows);
                     return p;
                 }
                 catch (Exception) { }

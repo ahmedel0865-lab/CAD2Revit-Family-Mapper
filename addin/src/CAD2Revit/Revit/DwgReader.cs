@@ -42,7 +42,7 @@ namespace CAD2Revit.Revit
             if (import.ViewSpecific)
                 opts.View = doc.GetElement(import.OwnerViewId) as View;   // "Current view only" links
             else
-                opts.DetailLevel = ViewDetailLevel.Fine;
+                opts.DetailLevel = ViewDetailLevel.Coarse;   // only insertion points/names are needed: cheapest geometry
 
             var result = new List<BlockRef>();
             var geo = import.get_Geometry(opts);
@@ -79,6 +79,7 @@ namespace CAD2Revit.Revit
                     ScaleY = tf.BasisY.GetLength() / baseLen,
                     Instance = gi,
                 });
+                // Nested blocks are only walked when the option is on (their geometry is not touched otherwise).
                 if (includeNested)
                     Walk(doc, gi.GetSymbolGeometry(), tf, link, depth + 1, includeNested, result);
             }

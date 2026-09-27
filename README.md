@@ -25,7 +25,7 @@ flowchart LR
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)
 - [Mapping file](#mapping-file) · [Project structure](#project-structure) · [Building from source](#building-from-source)
-- [Limitations](#limitations-short) · [Roadmap](#roadmap)
+- [Performance](#performance) · [Limitations](#limitations-short) · [Roadmap](#roadmap)
 - Guides: [Usage](docs/USAGE.md) · [Testing on a sample](docs/TESTING.md) · [Limitations](docs/LIMITATIONS.md) · [Changelog](CHANGELOG.md)
 
 ## The CAD2Revit ribbon
@@ -62,6 +62,7 @@ flowchart LR
 - **Preview** runs the full placement and undoes it, so its counts match a real run.
 - **Duplicate protection** per level: re-running only adds new blocks.
 - **One transaction**: a single Ctrl+Z undoes a whole run.
+- **Fast on big drawings**: hosts are found from face/wall indexes built once (not one ray per block), and level-based families are created in batches. A progress bar with **Cancel** is shown (Cancel rolls everything back), and a **Timings** table shows where the time went. See [Performance](#performance).
 - Summary per family type, unmapped blocks and failures with reasons; a **CSV log** of every block with Element ID, level, host, coordinates and rotation.
 - Writes `CAD: <block name>` into each element's Comments, for filters and schedules.
 
@@ -153,6 +154,27 @@ If you already use pyRevit, the placement engine is also available as a pyRevit 
 pyrevit extend ui CAD2Revit https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper.git
 ```
 You only need one of the two. Don't install both, or you'll get two CAD2Revit tabs.
+
+## Performance
+
+Every Preview/Run ends with a **Timings** table in the result window (also in the CSV log, rows with Status `timing`). It shows the time per phase: DWG reading, host detection, duplicate check, creation, rotation, parameters and commit.
+
+What v0.12 changed, **for 1,000 blocks** (counts of Revit API work, from the code):
+
+| Work | v0.11 | v0.12 |
+|---|---|---|
+| Slab / ceiling / face host detection | 1,000 ray casts (`ReferenceIntersector.Find`) | host geometry read **once** + 1,000 in-memory lookups |
+| Wall host detection | up to **16,000** rays (16 per block) | line-index lookup, then face projection on the 1–2 nearest walls |
+| Level-based creation | 1,000 `NewFamilyInstance` + up to 1,000 `RotateElement` | **one** `NewFamilyInstances2` per mapping row and level, rotation included |
+| Regenerations | 1 per reference-plane block, plus 1 per newly activated type | **1**, before the loop |
+| Duplicate grid | rebuilt from all instances for every level used | built **once** |
+| DWG geometry | Fine detail | Coarse detail |
+
+Measured without Revit (`addin/src/CAD2Revit.Core`, .NET 8, 1,000 random block points):
+- face index over 400 slab bays with openings: built in about 5–8 ms, and 1,000 lookups take about 3 ms;
+- duplicate grid of 20,000 existing instances: built in about 25–40 ms, and 1,000 queries take about 2 ms.
+
+Wall-clock times inside Revit depend on the model and haven't been measured yet (Revit can't run in the build environment). Run a Preview on your drawing, and the Timings table gives the numbers for your project. Please share them so this section can list real before/after times.
 
 ## Limitations (short)
 - **Block attributes** (circuit number, panel name, etc.) are not readable through the Revit API, so they are not copied yet.

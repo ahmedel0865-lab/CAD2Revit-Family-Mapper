@@ -17,6 +17,7 @@ namespace CAD2Revit.Revit
         public bool IsLinked;         // host lives in a Revit link
         public string LinkName = "";  // e.g. "STR.rvt" when linked
         public double Distance;       // ray length, feet
+        public bool FromIndex;        // found by the face/wall index (not a ray)
 
         /// <summary>e.g. "Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)".</summary>
         public string Describe()
@@ -35,12 +36,18 @@ namespace CAD2Revit.Revit
     }
 
     /// <summary>
-    /// Finds host faces (ceilings, slab soffits, walls) by ray casting with
-    /// ReferenceIntersector in a temporary, clean 3D view, so view templates,
-    /// hidden categories or section boxes in the user's views cannot hide hosts.
-    /// Hosts inside linked Revit models are found too.
+    /// Finds host faces (ceilings, slab soffits and tops, walls), in this model and in
+    /// linked Revit models.
+    ///
+    /// Fast path (HostIndexes.cs): candidate hosts are collected ONCE per run, their
+    /// horizontal planar faces (and wall side faces) are put in plan indexes, and each
+    /// block point is looked up there - no ray per block. Results are cached.
+    /// Fallback: ray casting with a single ReferenceIntersector per host type, in a
+    /// temporary clean 3D view (view templates, hidden categories or section boxes in the
+    /// user's views cannot hide hosts), used only where the index could not be built
+    /// (non-planar faces, curtain walls, ...) or when a face from the index cannot host.
     /// </summary>
-    public class HostFinder
+    public partial class HostFinder
     {
         public const string TempViewName = "CAD2Revit - host search (temporary)";
 
@@ -49,11 +56,14 @@ namespace CAD2Revit.Revit
         readonly bool _searchLinks;
         readonly Dictionary<HostMode, ReferenceIntersector> _intersectors = new Dictionary<HostMode, ReferenceIntersector>();
 
-        public HostFinder(Document doc, View3D view, bool searchLinks)
+        readonly PhaseTimer _timer;
+
+        public HostFinder(Document doc, View3D view, bool searchLinks, PhaseTimer timer = null)
         {
             _doc = doc;
             _view = view;
             _searchLinks = searchLinks;
+            _timer = timer ?? new PhaseTimer();
         }
 
         /// <summary>Creates a plain isometric 3D view. Call inside a transaction.</summary>
@@ -129,8 +139,10 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the ray passes through an opening).
         /// </summary>
-        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt)
+        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt)
         {
+            using (_timer.Time(Phases.HostRay))
+            {
             var dir = above ? XYZ.BasisZ : XYZ.BasisZ.Negate();
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
             var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
@@ -142,6 +154,7 @@ namespace CAD2Revit.Revit
                 if (above ? nz < -0.5 : nz > 0.5) return hit;   // bottom face (faces down) / top face (faces up)
             }
             return null;
+            }
         }
 
         readonly Dictionary<string, double?> _slabZ = new Dictionary<string, double?>();
@@ -192,17 +205,22 @@ namespace CAD2Revit.Revit
 
         /// <summary>Nearest ceiling (Ceiling) or ceiling/slab/roof/beam (Face) straight above
         /// (x, y), searching from just above the level.</summary>
-        public HostHit FindAbove(HostMode mode, double x, double y, double levelZ, double maxDistFt)
+        public HostHit FindAboveRay(HostMode mode, double x, double y, double levelZ, double maxDistFt)
         {
+            using (_timer.Time(Phases.HostRay))
+            {
             var ctx = Intersector(mode).FindNearest(new XYZ(x, y, levelZ + 0.01), XYZ.BasisZ);
             if (ctx == null || ctx.Proximity > maxDistFt) return null;
             return MakeHit(ctx, XYZ.BasisZ);
+            }
         }
 
         /// <summary>Nearest wall face around (x, y) at height z. Casts horizontal rays
         /// (starting at the CAD block's rotation) and keeps the shortest hit.</summary>
-        public HostHit FindWall(double x, double y, double z, double maxDistFt, double startAngle, int rays = 16)
+        public HostHit FindWallRay(double x, double y, double z, double maxDistFt, double startAngle, int rays = 16)
         {
+            using (_timer.Time(Phases.HostRay))
+            {
             var ri = Intersector(HostMode.Wall);
             var origin = new XYZ(x, y, z);
             ReferenceWithContext best = null;
@@ -228,6 +246,7 @@ namespace CAD2Revit.Revit
             // only when the CAD point lies inside the wall thickness).
             hit.RoomNormal = n.DotProduct(bestDir) > 0 ? n.Negate() : n;
             return hit;
+            }
         }
 
         XYZ FaceNormal(Reference reference, XYZ point)

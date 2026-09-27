@@ -110,7 +110,9 @@ Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, .
 
 ## 5. Check the results
 
+- While placing, a **progress bar** shows the block count and the time left. **Cancel** stops and rolls everything back; nothing is changed, and you return to the mapping window.
 - The result window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason. Use **Open log** / **Log folder** to jump to the CSV log.
+- At the bottom, a **Timings** table shows where the time went: DWG reading, host detection (index build, per block, ray fallback), duplicate check, family creation (single and batched), rotation, planes, parameters, and commit. If a run is slow, this table shows which phase to look at.
 - A `cad2revit_log_<date>.csv` (or `cad2revit_preview_<date>.csv`) is saved in `Documents\\CAD2Revit\\Logs\\<project>\\`. It has one row per block with:
   `Status, CAD_Block, Family, Type, Level, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
@@ -126,6 +128,7 @@ Statuses in the log:
 | `unmapped` | The block is set to **(Skip)** in the mapping window (empty family in a mapping file). |
 | `skipped` | Mapped, but the family/type is not loaded in the project. |
 | `failed` | Revit refused the placement, or no host was found and fallback is off. The message says why. |
+| `timing` | Not a block: one row per phase of the run, with its time and number of calls in *Message* (CAD_Block = phase name). |
 
 ## 6. Settings
 

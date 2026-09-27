@@ -5,17 +5,26 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
 using CAD2Revit.Core;
 using Settings = CAD2Revit.Core.Settings;
+using FamilyInstanceCreationData = Autodesk.Revit.Creation.FamilyInstanceCreationData;
 
 namespace CAD2Revit.Revit
 {
     /// <summary>
     /// Places Revit family instances at CAD block locations.
     ///
-    /// Everything happens inside ONE Transaction (one Ctrl+Z undoes the whole
-    /// run). Each block is placed inside its own SubTransaction, so one bad block
-    /// is rolled back on its own and does not stop the rest. Preview runs exactly
-    /// the same code and rolls the transaction back at the end, so its counts
-    /// (including hosts found and failures) match what Run will do.
+    /// Everything happens inside ONE Transaction (one Ctrl+Z undoes the whole run, Cancel
+    /// rolls it back). Preview runs exactly the same code and rolls back at the end, so its
+    /// counts match what Run will do.
+    ///
+    /// Performance (see the Timings table in the result window):
+    /// - family types are activated once, with one regeneration, before the loop;
+    /// - hosts are looked up in face/wall indexes built once (HostFinder), not by one ray per block;
+    /// - the duplicate check uses one spatial grid of the existing instances;
+    /// - level-based rows are created in batches with NewFamilyInstances2 (rotation in the
+    ///   creation data); other rows are created one by one, each in its own SubTransaction so
+    ///   one bad block is rolled back on its own;
+    /// - Comments / level / elevation parameters are set in one pass at the end;
+    /// - no Regenerate inside the loop, and warnings are deleted by a failures preprocessor.
     /// </summary>
     public class Placer
     {
@@ -24,6 +33,7 @@ namespace CAD2Revit.Revit
 
         readonly Document _doc;
         readonly Settings _settings;
+        PhaseTimer _timer = new PhaseTimer();
 
         public Placer(Document doc, Settings settings)
         {
@@ -57,17 +67,57 @@ namespace CAD2Revit.Revit
             public double? NextZ;       // elevation of the level above (null = top level)
             public double SlabUp;       // Slab (above) search distance
             public double SlabDown;     // Slab (below) search distance
-            public DuplicateIndex Dups;
+            public double BandMin, BandMax;   // duplicate-check height band of this level
             public LevelPlanes LevelPlanes;
             public VerticalPlanes VerticalPlanes;
         }
 
+        /// <summary>What step 1 (host detection) decided for one block.</summary>
+        class Plan
+        {
+            public PlacementResult Failed;
+            public HostHit Hit;
+            public bool OnVertical, OnLevelPlane;
+            public double PlaneElevMm;
+            public Facing PlaneFacing;
+            public List<string> Notes;
+            public double Angle;
+            public PlacementResult Fail(PlacementResult r)
+            {
+                Failed = r;
+                return r;
+            }
+        }
+
+        /// <summary>A level-based block waiting for batch creation.</summary>
+        class Pending
+        {
+            public BlockRef Block;
+            public PlacementResult Result;
+            public XYZ Base;     // on the level
+            public double Angle;
+        }
+
+        /// <summary>An instance whose parameters are set in the final pass.</summary>
+        class Created
+        {
+            public ElementId Id;
+            public Level Level;
+            public string BlockName;
+            public double? Offset;          // level-based: Elevation From Level (feet)
+            public PlacementResult Result;
+        }
+
         /// <summary>Places every mapped block. Each row goes on its own Level (MapRow.LevelName,
-        /// or <paramref name="defaultLevel"/> when empty). dryRun = true rolls everything back.</summary>
+        /// or <paramref name="defaultLevel"/> when empty). dryRun = true rolls everything back.
+        /// <paramref name="progress"/> (done, total) returns false to cancel: everything is rolled
+        /// back and OperationCanceledException is thrown.</summary>
         public List<PlacementResult> PlaceAll(List<BlockRef> blocks, MappingResult mapping,
                                               Dictionary<MapRow, FamilySymbol> symbols, Level defaultLevel,
-                                              bool dryRun, Action<int, int> progress = null, double[] dwgExtents = null)
+                                              bool dryRun, Func<int, int, bool> progress = null, double[] dwgExtents = null,
+                                              PhaseTimer timer = null)
         {
+            _timer = timer ?? new PhaseTimer();
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
             var unmapped = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -84,118 +134,190 @@ namespace CAD2Revit.Revit
                 });
 
             var levelsByName = new Dictionary<string, Level>(StringComparer.OrdinalIgnoreCase);
+            var levelZs = new List<double>();
             foreach (var l in new FilteredElementCollector(_doc).OfClass(typeof(Level)).Cast<Level>())
+            {
                 if (!levelsByName.ContainsKey(l.Name)) levelsByName[l.Name] = l;
+                levelZs.Add(l.ProjectElevation);
+            }
 
             using (var t = new Transaction(_doc, "CAD2Revit: Place families"))
             {
                 var opts = t.GetFailureHandlingOptions();
                 opts.SetFailuresPreprocessor(new WarningSwallower());
                 opts.SetClearAfterRollback(true);
+                opts.SetForcedModalHandling(false);   // never block on a failure dialog
+                opts.SetDelayedMiniWarnings(true);
                 t.SetFailureHandlingOptions(opts);
                 t.Start();
-
-                // The temporary 3D view is always created here, outside the per-block
-                // sub-transactions: a view created inside one would be deleted again if that
-                // block were rolled back, and later blocks would use a deleted view.
-                View3D view = null;
-                View3D TempView() => view != null && view.IsValidObject ? view : (view = HostFinder.CreateTempView(_doc));
-                HostFinder finder = null;
-                if (mapped.Any(m => m.Item2.Host == HostMode.Ceiling || m.Item2.Host == HostMode.Face || m.Item2.Host == HostMode.Wall ||
-                                    m.Item2.Host == HostMode.SlabAbove || m.Item2.Host == HostMode.SlabBelow))
-                    finder = new HostFinder(_doc, TempView(), _settings.SearchRevitLinks);
-                var section = LevelPlanes.SectionView(_doc);
-                if (section == null && mapped.Any(m => m.Item2.Host == HostMode.RefPlane)) TempView();
-                var extents = dwgExtents ?? BlockExtents(blocks);
-                bool createdLevelPlanes = false;
-
-                var contexts = new Dictionary<long, LevelContext>();
-                LevelContext ContextFor(Level level)
+                try
                 {
-                    long key = Compat.IdValue(level.Id);
-                    if (contexts.TryGetValue(key, out var c)) return c;
-                    double levelZ = level.ProjectElevation;
-                    double? top = NextLevelZ(level);
-                    double maxUp = Ft(_settings.HostSearchDistanceMm);
-                    if (top.HasValue) maxUp = Math.Min(maxUp, top.Value - levelZ);
-                    double bandTop = top ?? levelZ + Math.Max(maxUp, Ft(3000));
-                    c = new LevelContext
+                    // Activate every family type needed, once, then regenerate once.
+                    using (_timer.Time(Phases.Activate))
                     {
-                        Level = level,
-                        MaxUp = maxUp,
-                        NextZ = top,
-                        SlabUp = SlabSearch.AboveDistanceFt(levelZ, top, _settings.SlabSearchToleranceMm, _settings.HostSearchDistanceMm),
-                        SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
-                        Dups = new DuplicateIndex(_doc, Ft(_settings.DuplicateToleranceMm),
-                                                  levelZ - Ft(300), bandTop, _settings.DuplicateSameTypeOnly),
-                        LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
-                        VerticalPlanes = new VerticalPlanes(_doc, level),
-                    };
-                    contexts[key] = c;
-                    return c;
-                }
+                        bool activated = false;
+                        foreach (var sym in mapped.Select(m => symbols.TryGetValue(m.Item2, out var s) ? s : null)
+                                                  .Where(s => s != null).Distinct())
+                            if (!sym.IsActive)
+                            {
+                                sym.Activate();
+                                activated = true;
+                            }
+                        if (activated) _doc.Regenerate();
+                    }
 
-                for (int i = 0; i < mapped.Count; i++)
-                {
-                    progress?.Invoke(i, mapped.Count);
-                    var (b, row) = mapped[i];
-                    var level = defaultLevel;
-                    string levelNote = null;
-                    if (!string.IsNullOrWhiteSpace(row.LevelName))
+                    // The temporary 3D view (ray-cast fallback, reference planes without a section
+                    // view) is always created here, outside the per-block sub-transactions: a view
+                    // created inside one would be deleted again if that block were rolled back.
+                    View3D view = null;
+                    View3D TempView() => view != null && view.IsValidObject ? view : (view = HostFinder.CreateTempView(_doc));
+                    var modes = mapped.Select(m => m.Item2.Host).Distinct().ToList();
+                    HostFinder finder = null;
+                    if (modes.Any(m => m == HostMode.Ceiling || m == HostMode.Face || m == HostMode.Wall ||
+                                       m == HostMode.SlabAbove || m == HostMode.SlabBelow))
                     {
-                        if (levelsByName.TryGetValue(row.LevelName.Trim(), out var rowLevel)) level = rowLevel;
-                        else levelNote = $"level '{row.LevelName}' not found - placed on {defaultLevel.Name}";
+                        using (_timer.Time(Phases.HostIndex)) TempView();
+                        finder = new HostFinder(_doc, view, _settings.SearchRevitLinks, _timer);
+                        finder.Prepare(modes);
                     }
-                    if (!symbols.TryGetValue(row, out var sym))
+                    var section = LevelPlanes.SectionView(_doc);
+                    if (section == null && modes.Contains(HostMode.RefPlane)) TempView();
+                    var extents = dwgExtents ?? BlockExtents(blocks);
+                    bool createdLevelPlanes = false;
+
+                    // Duplicate check: one grid of all existing instances, built once.
+                    PointGrid dups;
+                    var familyOfType = new Dictionary<long, long>();
+                    using (_timer.Time(Phases.DupIndex))
                     {
-                        var skipped = Result(b, row, Status.Skipped, "family/type not loaded", b.Point, b.Rotation);
-                        skipped.Level = level.Name;
-                        results.Add(skipped);
-                        continue;
+                        dups = new PointGrid(Ft(_settings.DuplicateToleranceMm));
+                        foreach (var fi in new FilteredElementCollector(_doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
+                            if (fi.Location is LocationPoint lp)
+                            {
+                                var key = DupKey(fi.GetTypeId(), familyOfType);
+                                if (key != 0) dups.Add(key, lp.Point.X, lp.Point.Y, lp.Point.Z);
+                            }
                     }
-                    var ctx = ContextFor(level);
-                    PlacementResult res;
-                    using (var st = new SubTransaction(_doc))
+
+                    var contexts = new Dictionary<long, LevelContext>();
+                    LevelContext ContextFor(Level level)
                     {
-                        st.Start();
-                        try
+                        long key = Compat.IdValue(level.Id);
+                        if (contexts.TryGetValue(key, out var c)) return c;
+                        double levelZ = level.ProjectElevation;
+                        var above = levelZs.Where(z => z > levelZ + 0.01).ToList();
+                        double? top = above.Count > 0 ? above.Min() : (double?)null;
+                        double maxUp = Ft(_settings.HostSearchDistanceMm);
+                        if (top.HasValue) maxUp = Math.Min(maxUp, top.Value - levelZ);
+                        c = new LevelContext
                         {
-                            res = PlaceOne(b, row, sym, level, finder, ctx);
-                            if (res.Status == Status.Placed) st.Commit();
-                            else st.RollBack();
-                        }
-                        catch (Exception ex)
-                        {
-                            if (st.HasStarted() && !st.HasEnded()) st.RollBack();
-                            res = Result(b, row, Status.Failed, ex.Message.Trim(), b.Point, b.Rotation);
-                        }
+                            Level = level,
+                            MaxUp = maxUp,
+                            NextZ = top,
+                            SlabUp = SlabSearch.AboveDistanceFt(levelZ, top, _settings.SlabSearchToleranceMm, _settings.HostSearchDistanceMm),
+                            SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
+                            BandMin = levelZ - Ft(300),
+                            BandMax = top ?? levelZ + Math.Max(maxUp, Ft(3000)),
+                            LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
+                            VerticalPlanes = new VerticalPlanes(_doc, level),
+                        };
+                        contexts[key] = c;
+                        return c;
                     }
-                    res.Level = level.Name;
-                    if (levelNote != null) res.Message = res.Message.Length > 0 ? levelNote + "; " + res.Message : levelNote;
-                    results.Add(res);
-                }
 
-                if (view != null && view.IsValidObject)
-                {
-                    // Keep the temporary view only if a reference plane was created in it
-                    // (deleting a view could take view-owned elements with it).
-                    bool owned = createdLevelPlanes && new FilteredElementCollector(_doc).OfClass(typeof(ReferencePlane))
-                        .Any(e => e.OwnerViewId == view.Id);
-                    if (!owned) _doc.Delete(view.Id);
+                    var batches = new Dictionary<(MapRow, long), List<Pending>>();
+                    var batchLevel = new Dictionary<(MapRow, long), (Level, FamilySymbol)>();
+                    var created = new List<Created>();
+
+                    for (int i = 0; i < mapped.Count; i++)
+                    {
+                        if (progress != null && !progress(i, mapped.Count)) throw new OperationCanceledException();
+                        var (b, row) = mapped[i];
+                        var level = defaultLevel;
+                        string levelNote = null;
+                        if (!string.IsNullOrWhiteSpace(row.LevelName))
+                        {
+                            if (levelsByName.TryGetValue(row.LevelName.Trim(), out var rowLevel)) level = rowLevel;
+                            else levelNote = $"level '{row.LevelName}' not found - placed on {defaultLevel.Name}";
+                        }
+                        PlacementResult res;
+                        if (!symbols.TryGetValue(row, out var sym))
+                        {
+                            res = Result(b, row, Status.Skipped, "family/type not loaded", b.Point, b.Rotation);
+                        }
+                        else
+                        {
+                            var ctx = ContextFor(level);
+                            res = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created);
+                        }
+                        res.Level = level.Name;
+                        if (levelNote != null) res.Message = res.Message.Length > 0 ? levelNote + "; " + res.Message : levelNote;
+                        results.Add(res);
+                    }
+                    progress?.Invoke(mapped.Count, mapped.Count);
+
+                    // Level-based rows: one NewFamilyInstances2 call per (row, level).
+                    foreach (var kv in batches)
+                    {
+                        var (lvl, sym) = batchLevel[kv.Key];
+                        CreateBatch(kv.Value, sym, lvl, kv.Key.Item1, created);
+                    }
+
+                    // Parameters, in one pass.
+                    using (_timer.Time(Phases.Params))
+                        foreach (var c in created)
+                        {
+                            var inst = _doc.GetElement(c.Id);
+                            if (inst == null) continue;
+                            SetParam(inst, BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM, c.Level.Id);
+                            if (_settings.WriteBlockNameToComments)
+                                SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "CAD: " + c.BlockName);
+                            if (c.Offset.HasValue && !SetOffset(inst, c.Offset.Value) && Math.Abs(c.Offset.Value) > 1e-9)
+                                c.Result.Message = (c.Result.Message.Length > 0 ? c.Result.Message + "; " : "") + "could not set offset";
+                        }
+
+                    if (view != null && view.IsValidObject)
+                    {
+                        // Keep the temporary view only if a reference plane was created in it
+                        // (deleting a view could take view-owned elements with it).
+                        bool owned = createdLevelPlanes && new FilteredElementCollector(_doc).OfClass(typeof(ReferencePlane))
+                            .Any(e => e.OwnerViewId == view.Id);
+                        if (!owned) _doc.Delete(view.Id);
+                    }
+                    if (dryRun)
+                    {
+                        using (_timer.Time(Phases.Rollback)) t.RollBack();
+                        foreach (var r in results) r.ElementId = null;
+                    }
+                    else
+                    {
+                        TransactionStatus status;
+                        using (_timer.Time(Phases.Commit)) status = t.Commit();
+                        if (status != TransactionStatus.Committed)
+                            throw new InvalidOperationException($"Revit did not commit the transaction ({status}).");
+                    }
                 }
-                if (dryRun)
+                catch (Exception)
                 {
-                    t.RollBack();
-                    foreach (var r in results) r.ElementId = null;
-                }
-                else
-                {
-                    var status = t.Commit();
-                    if (status != TransactionStatus.Committed)
-                        throw new InvalidOperationException($"Revit did not commit the transaction ({status}).");
+                    if (t.HasStarted() && !t.HasEnded()) t.RollBack();
+                    throw;
                 }
             }
             return results;
+        }
+
+        /// <summary>Duplicate-grid key: the family (or, with DuplicateSameTypeOnly, the type).</summary>
+        long DupKey(ElementId typeId, Dictionary<long, long> familyOfType)
+        {
+            if (typeId == null || typeId == ElementId.InvalidElementId) return 0;
+            long t = Compat.IdValue(typeId);
+            if (_settings.DuplicateSameTypeOnly) return t;
+            if (!familyOfType.TryGetValue(t, out var f))
+            {
+                f = _doc.GetElement(typeId) is FamilySymbol fs ? Compat.IdValue(fs.Family.Id) : t;
+                familyOfType[t] = f;
+            }
+            return f;
         }
 
         static double[] BlockExtents(List<BlockRef> blocks) =>
@@ -220,11 +342,10 @@ namespace CAD2Revit.Revit
             };
         }
 
-        PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx)
+        /// <summary>Step 1 - host detection for one block.</summary>
+        Plan Decide(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx)
         {
-            var planes = ctx.VerticalPlanes;
-            var levelPlanes = ctx.LevelPlanes;
-            var dups = ctx.Dups;
+            var plan = new Plan();
             double maxUp = ctx.MaxUp;
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
@@ -232,6 +353,8 @@ namespace CAD2Revit.Revit
             double offset = Ft(row.OffsetMm);
             double x = b.Point.X, y = b.Point.Y;
             var notes = new List<string>();
+            plan.Notes = notes;
+            plan.Angle = angle;
             string Notes(string extra = null)
             {
                 if (!string.IsNullOrEmpty(extra)) notes.Add(extra);
@@ -258,14 +381,14 @@ namespace CAD2Revit.Revit
                 {
                     hit = finder.FindSlab(above, x, y, levelZ, maxDist);
                     if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
-                        return Result(b, row, Status.Failed,
+                        { plan.Fail(Result(b, row, Status.Failed,
                             Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
-                                  "use a face-based family"), b.Point, angle);
+                                  "use a face-based family"), b.Point, angle)); return plan; }
                     if (hit == null)
                     {
                         string why = $"no slab {word} this point within {maxDist * MmPerFoot:0} mm (slab opening or no slab)";
                         if (ptype != FamilyPlacementType.WorkPlaneBased)
-                            return Result(b, row, Status.Failed, Notes(why + " - legacy hosted family needs a real slab"), b.Point, angle);
+                            { plan.Fail(Result(b, row, Status.Failed, Notes(why + " - legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
                         // Fallback: a reference plane at the slab height found for this level
                         // (or the level above / the level itself if the level has no slab).
                         var slabZ = finder.FallbackSlabZ(above, levelZ, maxDist);
@@ -287,8 +410,8 @@ namespace CAD2Revit.Revit
                     notes.Add("WARNING: family is not face-based/work-plane-based, so it cannot be hosted on a " +
                               "reference plane - placed level-based at the elevation");
                 else if (ptype == FamilyPlacementType.OneLevelBasedHosted)
-                    return Result(b, row, Status.Failed, Notes("WARNING: legacy wall/ceiling-hosted family cannot be hosted on a " +
-                                                                "reference plane or placed level-based - use a face-based family"), b.Point, angle);
+                    { plan.Fail(Result(b, row, Status.Failed, Notes("WARNING: legacy wall/ceiling-hosted family cannot be hosted on a " +
+                                                                "reference plane or placed level-based - use a face-based family"), b.Point, angle)); return plan; }
             }
             else if (row.Host == HostMode.Vertical)
             {
@@ -296,8 +419,8 @@ namespace CAD2Revit.Revit
                 else if (ptype == FamilyPlacementType.OneLevelBased)
                     notes.Add("family is not face-based - placed level-based");
                 else if (ptype == FamilyPlacementType.OneLevelBasedHosted)
-                    return Result(b, row, Status.Failed, Notes("legacy wall-hosted family needs a real wall - use Host Type " +
-                                                                "'wall' or a face-based family"), b.Point, angle);
+                    { plan.Fail(Result(b, row, Status.Failed, Notes("legacy wall-hosted family needs a real wall - use Host Type " +
+                                                                "'wall' or a face-based family"), b.Point, angle)); return plan; }
             }
             else if (row.Host != HostMode.None)
             {
@@ -321,14 +444,14 @@ namespace CAD2Revit.Revit
                         where = $"within {maxUp * MmPerFoot:0} mm above the level";
                     }
                     if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
-                        return Result(b, row, Status.Failed,
+                        { plan.Fail(Result(b, row, Status.Failed,
                             Notes("host is in a Revit link; legacy wall/ceiling-hosted families can only be hosted " +
-                                  "in this model - use a face-based family"), b.Point, angle);
+                                  "in this model - use a face-based family"), b.Point, angle)); return plan; }
                     if (hit == null)
                     {
                         var msg = $"no {hostWord} found {where}";
                         if (!_settings.FallbackToUnhosted || ptype == FamilyPlacementType.OneLevelBasedHosted)
-                            return Result(b, row, Status.Failed, Notes(msg), b.Point, angle);
+                            { plan.Fail(Result(b, row, Status.Failed, Notes(msg), b.Point, angle)); return plan; }
                         if (row.Host == HostMode.Wall && ptype == FamilyPlacementType.WorkPlaneBased)
                         {
                             onVertical = true;   // stand it up on a vertical plane instead of lying flat
@@ -339,59 +462,171 @@ namespace CAD2Revit.Revit
                 }
             }
 
+
+            plan.Hit = hit;
+            plan.OnVertical = onVertical;
+            plan.OnLevelPlane = onLevelPlane;
+            plan.PlaneElevMm = planeElevMm;
+            plan.PlaneFacing = planeFacing;
+            return plan;
+        }
+
+        PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx,
+                                 PointGrid dups, Dictionary<long, long> familyOfType,
+                                 Dictionary<(MapRow, long), List<Pending>> batches,
+                                 Dictionary<(MapRow, long), (Level, FamilySymbol)> batchLevel, List<Created> created)
+        {
+            Plan plan;
+            using (_timer.Time(Phases.HostQuery))
+                plan = Decide(b, row, sym, level, finder, ctx);
+            if (plan.Failed != null) return plan.Failed;
+
+            var ptype = sym.Family.FamilyPlacementType;
+            double levelZ = level.ProjectElevation;
+            double offset = Ft(row.OffsetMm);
+            double x = b.Point.X, y = b.Point.Y;
+            double angle = plan.Angle;
+            var notes = plan.Notes;
+            var hit = plan.Hit;
+            string Notes(string extra = null)
+            {
+                if (!string.IsNullOrEmpty(extra)) notes.Add(extra);
+                return string.Join("; ", notes);
+            }
+
             // 2. Target point, then duplicate check at that point.
             var target = hit != null ? hit.Point
-                       : onLevelPlane ? new XYZ(x, y, levelZ + Ft(planeElevMm))
+                       : plan.OnLevelPlane ? new XYZ(x, y, levelZ + Ft(plan.PlaneElevMm))
                        : new XYZ(x, y, levelZ + offset);
-            if (dups.Contains(sym, target))
-                return Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle);
+            long dupKey = DupKey(sym.Id, familyOfType);
+            using (_timer.Time(Phases.DupQuery))
+                if (dups.Contains(dupKey, target.X, target.Y, ctx.BandMin, ctx.BandMax))
+                    return Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle);
 
-            if (!sym.IsActive)
+            // 3a. Level-based without a host: batched (created after the loop).
+            if (hit == null && !plan.OnLevelPlane && !plan.OnVertical && ptype == FamilyPlacementType.OneLevelBased)
             {
-                sym.Activate();
-                _doc.Regenerate();
+                var key = (row, Compat.IdValue(level.Id));
+                if (!batches.TryGetValue(key, out var list))
+                {
+                    batches[key] = list = new List<Pending>();
+                    batchLevel[key] = (level, sym);
+                }
+                var pending = Result(b, row, Status.Placed, Notes(), target, angle);
+                list.Add(new Pending { Block = b, Result = pending, Base = new XYZ(x, y, levelZ), Angle = angle });
+                dups.Add(dupKey, target.X, target.Y, target.Z);
+                return pending;
+            }
+
+            // 3b. Everything else: one by one, each in its own sub-transaction.
+            PlacementResult res;
+            using (var st = new SubTransaction(_doc))
+            {
+                st.Start();
+                try
+                {
+                    res = CreateOne(b, row, sym, level, finder, ctx, plan, ref target, out var inst, out var instOffset);
+                    if (res.Status == Status.Placed)
+                    {
+                        st.Commit();
+                        dups.Add(dupKey, target.X, target.Y, target.Z);
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res });
+                    }
+                    else st.RollBack();
+                }
+                catch (Exception ex)
+                {
+                    if (st.HasStarted() && !st.HasEnded()) st.RollBack();
+                    res = Result(b, row, Status.Failed, Notes(ex.Message.Trim()), b.Point, angle);
+                }
+            }
+            return res;
+        }
+
+        /// <summary>Step 3 - create one instance according to the plan.</summary>
+        PlacementResult CreateOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx, Plan plan,
+                                  ref XYZ target, out FamilyInstance inst, out double? instOffset)
+        {
+            var ptype = sym.Family.FamilyPlacementType;
+            double levelZ = level.ProjectElevation;
+            double offset = Ft(row.OffsetMm);
+            double x = b.Point.X, y = b.Point.Y;
+            double angle = plan.Angle;
+            var notes = plan.Notes;
+            var hit = plan.Hit;
+            inst = null;
+            instOffset = null;
+            string Notes(string extra = null)
+            {
+                if (!string.IsNullOrEmpty(extra)) notes.Add(extra);
+                return string.Join("; ", notes);
             }
             var cadDir = new XYZ(Math.Cos(angle), Math.Sin(angle), 0);
-            FamilyInstance inst;
             string hostText = hit?.Describe() ?? "";
 
-            // 3. Create the instance according to the family's placement type.
-            if (onLevelPlane)
+            if (plan.OnLevelPlane)
             {
                 // Horizontal plane at level + elevation; the CAD rotation is the reference direction.
-                var rp = levelPlanes.Get(planeElevMm, planeFacing);
-                inst = _doc.Create.NewFamilyInstance(rp.GetReference(), target, cadDir, sym);
-                // Make sure the family faces the requested side (a reused plane may point the other way).
-                _doc.Regenerate();
-                var want = LevelPlanes.Normal(planeFacing);
-                if (inst.GetTransform().BasisZ.DotProduct(want) < 0)
+                ReferencePlane rp;
+                using (_timer.Time(Phases.Planes)) rp = ctx.LevelPlanes.Get(plan.PlaneElevMm, plan.PlaneFacing);
+                using (_timer.Time(Phases.Create))
+                    inst = _doc.Create.NewFamilyInstance(rp.GetReference(), target, cadDir, sym);
+                // Face the requested side. The plane's normal is known, so no regeneration is
+                // needed to decide (a reused plane may point the other way).
+                if (rp.Normal.DotProduct(LevelPlanes.Normal(plan.PlaneFacing)) < 0)
                 {
                     if (inst.CanFlipWorkPlane) inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
-                    else notes.Add("WARNING: could not flip the family to face " + planeFacing.ToString().ToLowerInvariant());
+                    else notes.Add("WARNING: could not flip the family to face " + plan.PlaneFacing.ToString().ToLowerInvariant());
                 }
                 hostText = "Reference plane " + rp.Name;
             }
-            else if (onVertical)
+            else if (plan.OnVertical)
             {
                 // Device faces the CAD block's local +Y axis (turned by the row's Rotation):
                 // blocks drawn with the wall along X and the room on +Y face into the room.
                 var facing = new XYZ(-Math.Sin(angle), Math.Cos(angle), 0);
-                var planeRef = planes.Get(target, facing, out var onPlane);
-                inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, XYZ.BasisZ.CrossProduct(facing).Normalize(), sym);
+                Reference planeRef;
+                XYZ onPlane;
+                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane);
+                using (_timer.Time(Phases.Create))
+                    inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, XYZ.BasisZ.CrossProduct(facing).Normalize(), sym);
                 target = onPlane;
                 hostText = "Vertical plane";
             }
             else if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
             {
-                var n = hit.FaceNormal;
-                XYZ refDir = row.Host == HostMode.Wall
-                    ? XYZ.BasisZ.CrossProduct(n)                               // family "up" = project up
-                    : cadDir.Subtract(n.Multiply(cadDir.DotProduct(n)));       // CAD angle, in the face plane
-                inst = _doc.Create.NewFamilyInstance(hit.Reference, hit.Point, refDir.Normalize(), sym);
+                XYZ RefDir(HostHit h)
+                {
+                    var n = h.FaceNormal;
+                    var d = row.Host == HostMode.Wall
+                        ? XYZ.BasisZ.CrossProduct(n)                               // family "up" = project up
+                        : cadDir.Subtract(n.Multiply(cadDir.DotProduct(n)));       // CAD angle, in the face plane
+                    return d.Normalize();
+                }
+                using (_timer.Time(Phases.Create))
+                {
+                    try
+                    {
+                        inst = _doc.Create.NewFamilyInstance(hit.Reference, hit.Point, RefDir(hit), sym);
+                    }
+                    catch (Exception) when (hit.FromIndex && finder != null)
+                    {
+                        // The indexed face could not host (unusual face reference): find it again by ray.
+                        var z = row.Host == HostMode.Wall ? levelZ + Math.Max(offset, Ft(10)) : levelZ;
+                        double dist = row.Host == HostMode.Wall ? Ft(_settings.WallSearchDistanceMm) : Math.Max(hit.Distance + 1, 1);
+                        var again = finder.Recast(row.Host, x, y, levelZ, z, dist, b.Rotation);
+                        if (again == null) throw;
+                        hit = again;
+                        inst = _doc.Create.NewFamilyInstance(hit.Reference, hit.Point, RefDir(hit), sym);
+                        target = hit.Point;
+                        hostText = hit.Describe();
+                    }
+                }
             }
             else if (hit != null && ptype == FamilyPlacementType.OneLevelBasedHosted)
             {
-                inst = _doc.Create.NewFamilyInstance(hit.Point, sym, hit.Element, level, StructuralType.NonStructural);
+                using (_timer.Time(Phases.Create))
+                    inst = _doc.Create.NewFamilyInstance(hit.Point, sym, hit.Element, level, StructuralType.NonStructural);
                 if (row.Host == HostMode.Wall)
                 {
                     SetOffset(inst, offset);
@@ -400,23 +635,23 @@ namespace CAD2Revit.Revit
                 }
                 else if (Math.Abs(angle) > 1e-9)
                 {
-                    ElementTransformUtils.RotateElement(_doc, inst.Id,
-                        Line.CreateBound(hit.Point, hit.Point.Add(XYZ.BasisZ)), angle);
+                    using (_timer.Time(Phases.Rotate))
+                        ElementTransformUtils.RotateElement(_doc, inst.Id,
+                            Line.CreateBound(hit.Point, hit.Point.Add(XYZ.BasisZ)), angle);
                 }
             }
             else if (ptype == FamilyPlacementType.WorkPlaneBased)
             {
                 // Face/work-plane based family without a host: put it on the level plane.
-                inst = _doc.Create.NewFamilyInstance(level.GetPlaneReference(), new XYZ(x, y, levelZ), cadDir, sym);
-                if (!SetOffset(inst, offset) && Math.Abs(offset) > 1e-9) notes.Add("could not set offset");
+                using (_timer.Time(Phases.Create))
+                    inst = _doc.Create.NewFamilyInstance(level.GetPlaneReference(), new XYZ(x, y, levelZ), cadDir, sym);
+                instOffset = offset;
             }
             else if (ptype == FamilyPlacementType.OneLevelBased)
             {
-                var basePt = new XYZ(x, y, levelZ);
-                inst = _doc.Create.NewFamilyInstance(basePt, sym, level, StructuralType.NonStructural);
-                if (!SetOffset(inst, offset) && Math.Abs(offset) > 1e-9) notes.Add("could not set offset");
-                if (Math.Abs(angle) > 1e-9)
-                    ElementTransformUtils.RotateElement(_doc, inst.Id, Line.CreateBound(basePt, basePt.Add(XYZ.BasisZ)), angle);
+                // Normally batched; used when a batch fails.
+                inst = CreateLevelBased(sym, level, new XYZ(x, y, levelZ), angle);
+                instOffset = offset;
             }
             else if (ptype == FamilyPlacementType.OneLevelBasedHosted)
             {
@@ -426,19 +661,113 @@ namespace CAD2Revit.Revit
             {
                 return Result(b, row, Status.Failed, Notes($"placement type '{ptype}' is not supported"), b.Point, angle);
             }
-
-            // 4. Parameters.
-            SetParam(inst, BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM, level.Id);
-            if (_settings.WriteBlockNameToComments)
-                SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "CAD: " + b.Name);
-
-            dups.Add(sym, target);
             return Result(b, row, Status.Placed, Notes(), target, angle, inst.Id, hostText);
+        }
+
+        FamilyInstance CreateLevelBased(FamilySymbol sym, Level level, XYZ basePt, double angle)
+        {
+            FamilyInstance inst;
+            using (_timer.Time(Phases.Create))
+                inst = _doc.Create.NewFamilyInstance(basePt, sym, level, StructuralType.NonStructural);
+            if (Math.Abs(angle) > 1e-9)
+                using (_timer.Time(Phases.Rotate))
+                    ElementTransformUtils.RotateElement(_doc, inst.Id, Line.CreateBound(basePt, basePt.Add(XYZ.BasisZ)), angle);
+            return inst;
+        }
+
+        /// <summary>Creates all pending level-based instances of one (row, level) with a single
+        /// NewFamilyInstances2 call, rotation included in the creation data. If the batch call
+        /// fails, the instances are created one by one instead.</summary>
+        void CreateBatch(List<Pending> items, FamilySymbol sym, Level level, MapRow row, List<Created> created)
+        {
+            double offset = Ft(row.OffsetMm);
+            var data = new List<FamilyInstanceCreationData>(items.Count);
+            foreach (var it in items)
+            {
+                var d = new FamilyInstanceCreationData(it.Base, sym, level, StructuralType.NonStructural);
+                if (Math.Abs(it.Angle) > 1e-9)
+                {
+                    d.RotateAngle = it.Angle;
+                    d.Axis = Line.CreateBound(it.Base, it.Base.Add(XYZ.BasisZ));
+                }
+                data.Add(d);
+            }
+            using (var st = new SubTransaction(_doc))
+            {
+                st.Start();
+                try
+                {
+                    ICollection<ElementId> ids;
+                    using (_timer.Time(Phases.CreateBatch))
+                        ids = _doc.Create.NewFamilyInstances2(data);
+                    if (ids == null || ids.Count != items.Count)
+                        throw new InvalidOperationException($"batch created {ids?.Count ?? 0} of {items.Count} instances");
+                    st.Commit();
+                    AssignIds(items, ids, level, offset, created);
+                    return;
+                }
+                catch (Exception)
+                {
+                    if (st.HasStarted() && !st.HasEnded()) st.RollBack();
+                }
+            }
+            // Fallback: one by one, each in its own sub-transaction.
+            foreach (var it in items)
+                using (var st = new SubTransaction(_doc))
+                {
+                    st.Start();
+                    try
+                    {
+                        var inst = CreateLevelBased(sym, level, it.Base, it.Angle);
+                        st.Commit();
+                        it.Result.ElementId = Compat.IdValue(inst.Id);
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = it.Block.Name, Offset = offset, Result = it.Result });
+                    }
+                    catch (Exception ex)
+                    {
+                        if (st.HasStarted() && !st.HasEnded()) st.RollBack();
+                        it.Result.Status = Status.Failed;
+                        it.Result.Message = (it.Result.Message.Length > 0 ? it.Result.Message + "; " : "") + ex.Message.Trim();
+                    }
+                }
+        }
+
+        /// <summary>Match the new element ids to their blocks by location (order is used for any
+        /// that cannot be matched).</summary>
+        void AssignIds(List<Pending> items, ICollection<ElementId> ids, Level level, double offset, List<Created> created)
+        {
+            var byKey = new Dictionary<(long, long), Queue<Pending>>();
+            (long, long) Key(XYZ p) => ((long)Math.Round(p.X * 1000), (long)Math.Round(p.Y * 1000));
+            foreach (var it in items)
+            {
+                var k = Key(it.Base);
+                if (!byKey.TryGetValue(k, out var q)) byKey[k] = q = new Queue<Pending>();
+                q.Enqueue(it);
+            }
+            var unmatchedIds = new List<ElementId>();
+            var done = new HashSet<Pending>();
+            foreach (var id in ids)
+            {
+                Pending it = null;
+                if (_doc.GetElement(id)?.Location is LocationPoint lp && byKey.TryGetValue(Key(lp.Point), out var q) && q.Count > 0)
+                    it = q.Dequeue();
+                if (it == null) { unmatchedIds.Add(id); continue; }
+                done.Add(it);
+                Attach(it, id);
+            }
+            var rest = items.Where(i => !done.Contains(i)).ToList();
+            for (int i = 0; i < rest.Count && i < unmatchedIds.Count; i++) Attach(rest[i], unmatchedIds[i]);
+
+            void Attach(Pending it, ElementId id)
+            {
+                it.Result.ElementId = Compat.IdValue(id);
+                created.Add(new Created { Id = id, Level = level, BlockName = it.Block.Name, Offset = offset, Result = it.Result });
+            }
         }
 
         /// <summary>'Elevation from Level' (level-based / wall-hosted) or 'Offset from Host'
         /// (work-plane based placed on the level plane).</summary>
-        static bool SetOffset(FamilyInstance inst, double offsetFt) =>
+        static bool SetOffset(Element inst, double offsetFt) =>
             SetParam(inst, BuiltInParameter.INSTANCE_ELEVATION_PARAM, offsetFt) ||
             SetParam(inst, BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM, offsetFt);
 
@@ -470,58 +799,20 @@ namespace CAD2Revit.Revit
         }
     }
 
-    /// <summary>Spatial hash of existing family instances within a Z band (the target
-    /// level up to the next level), keyed by family (or by type).</summary>
-    public class DuplicateIndex
-    {
-        readonly double _tol, _zMin, _zMax;
-        readonly bool _byType;
-        readonly Dictionary<(long, long, long), List<XYZ>> _cells = new Dictionary<(long, long, long), List<XYZ>>();
-
-        public DuplicateIndex(Document doc, double tolFt, double zMin, double zMax, bool byType)
-        {
-            _tol = tolFt;
-            _zMin = zMin;
-            _zMax = zMax;
-            _byType = byType;
-            foreach (var fi in new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
-                if (fi.Location is LocationPoint lp && fi.Symbol != null)
-                    Add(fi.Symbol, lp.Point);
-        }
-
-        long Key(FamilySymbol s) => Compat.IdValue(_byType ? s.Id : s.Family.Id);
-        long Cell(double v) => (long)Math.Floor(v / _tol);
-
-        public void Add(FamilySymbol sym, XYZ pt)
-        {
-            if (pt.Z < _zMin || pt.Z >= _zMax) return;
-            var k = (Key(sym), Cell(pt.X), Cell(pt.Y));
-            if (!_cells.TryGetValue(k, out var list)) _cells[k] = list = new List<XYZ>();
-            list.Add(pt);
-        }
-
-        public bool Contains(FamilySymbol sym, XYZ pt)
-        {
-            long key = Key(sym), cx = Cell(pt.X), cy = Cell(pt.Y);
-            for (long dx = -1; dx <= 1; dx++)
-                for (long dy = -1; dy <= 1; dy++)
-                    if (_cells.TryGetValue((key, cx + dx, cy + dy), out var list))
-                        foreach (var p in list)
-                            if (Math.Sqrt((p.X - pt.X) * (p.X - pt.X) + (p.Y - pt.Y) * (p.Y - pt.Y)) <= _tol)
-                                return true;
-            return false;
-        }
-    }
-
-    /// <summary>Dismisses Revit warnings (e.g. "identical instances in the same place") so
-    /// they do not pop up hundreds of times or cancel the transaction.</summary>
+    /// <summary>
+    /// Deletes Revit warnings (e.g. "There are identical instances in the same place",
+    /// "Instance doesn't intersect its host") during the transaction, so they neither pop up
+    /// hundreds of times nor slow down the commit. Errors are left to Revit (the block's
+    /// sub-transaction is rolled back).
+    /// </summary>
     public class WarningSwallower : IFailuresPreprocessor
     {
         public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
         {
+            bool hasWarnings = false;
             foreach (var f in accessor.GetFailureMessages())
-                if (f.GetSeverity() == FailureSeverity.Warning)
-                    accessor.DeleteWarning(f);
+                if (f.GetSeverity() == FailureSeverity.Warning) { hasWarnings = true; break; }
+            if (hasWarnings) accessor.DeleteAllWarnings();
             return FailureProcessingResult.Continue;
         }
     }

@@ -61,6 +61,8 @@ Run **List Blocks** first, then **Place Families** > pick the DWG > mapping wind
 | 12b | Reference Plane | Set the lights to *Reference Plane (auto-create)* at 2800: one plane `CAD2Revit_Level 1_+2800mm` is created, all lights host on it facing down; run again and no second plane is created; Ctrl+Z removes the plane too |
 | 12c | Slab (above) | Add a floor slab at Level 2 (4000) (or link a structural model with one), set the lights to *Slab (above)* on Level 1, Preview: *Detected Host* shows `Floor: <type> - Level 2` (with `(linked: <file>.rvt)` for a link). Run: lights sit on the slab underside, facing down. Put a shaft opening in the slab over one light: that light goes on a reference plane at the slab underside with a warning |
 | 12d | Slab (below) | Floor slab at Level 1, a floor box row set to *Slab (below)*: hosted on the slab top, facing up |
+| 12e | Progress + Cancel | On a large DWG, click Run, then Cancel in the progress window: "Cancelled... nothing was changed", nothing added to the model, back in the mapping window |
+| 12f | Timings | The result window ends with a Timings table, and the CSV log has `timing` rows |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

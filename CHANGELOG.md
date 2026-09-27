@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.12.0] - 2026-09-27
+### Performance
+- **Timings**: every Preview/Run measures each phase with a Stopwatch: reading the DWG, loading the mapping, host detection (index build, per block, ray fallback), duplicate check, family creation (single and batched), rotation, planes, parameter setting, and commit/rollback.
+  - The result window shows a **Timings** table (time, calls, share of the total).
+  - The CSV log gets the same rows with Status `timing`.
+- **Host detection without one ray per block.**
+  - Slabs, ceilings and Face hosts are collected **once**, from this model and from links. Their horizontal planar faces (with openings) go into a plan index.
+  - Each block point is looked up there: a bounding-box prefilter, then a point-in-face test. Results are cached.
+  - **Walls**: candidate walls come from an index of their location lines. The point is then projected onto the side faces of those 1–2 walls. Before, each block cast 16 rays.
+  - Ray casting (`ReferenceIntersector`, one instance per host type) remains only as a fallback: where faces could not be indexed (curved faces, curtain walls), or when a face from the index refuses to host.
+- **Batched creation**: level-based rows are created with **`NewFamilyInstances2`**, one call per mapping row and level, with the rotation in the `FamilyInstanceCreationData`. If a batch fails, it falls back to one-by-one creation.
+- **No `Regenerate()` in the loop.**
+  - All needed family types are activated once, with one regeneration, before the loop.
+  - Reference-plane rows no longer regenerate per block to check their facing.
+- **Duplicate check**: one spatial hash grid (cell = tolerance) of the existing instances, built **once per run**. Before, it was rebuilt for every level used.
+- **Parameters** (Comments, schedule level, elevation) are set in one pass after creation.
+- **DWG** geometry is read at Coarse detail level. Nested blocks are only walked when the option is on.
+- **Warnings** (e.g. *identical instances in the same place*) are deleted in the failures preprocessor, and failure dialogs are never forced. The commit doesn't stop for them.
+- **Progress bar with Cancel** while placing. Cancel rolls the whole run back and returns to the mapping window. Revit's window is disabled while it runs.
+### Unchanged
+- Still one transaction per run (one Ctrl+Z). Non-level-based blocks keep their own sub-transaction, so one bad block doesn't stop the rest.
+
 ## [0.11.0] - 2026-09-27
 ### Added
 - **Host Type "Slab (above)"**, for ceiling devices hosted on the underside of the structural slab.
