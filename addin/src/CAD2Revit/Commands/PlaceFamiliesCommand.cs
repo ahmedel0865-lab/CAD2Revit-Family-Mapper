@@ -120,18 +120,20 @@ namespace CAD2Revit.Commands
                     using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
                     if (preview) session.SetDetectedHosts(results);
 
+                    // Details (behind "Show details"): the full technical summary, timings and log path.
                     var summary = Report.Summarize(results);
                     var text = Report.SummaryText(summary, preview);
                     if (errors.Count > 0)
                         text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
                     text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
                     text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
-                    if (preview)
-                        text += "\r\n\r\nClose this window to return to the mapping. Click Run there to place the families.";
-                    else if (summary.Get(Status.Placed) > 0)
-                        text += "\r\nUndo the whole run with a single Ctrl+Z (\"CAD2Revit: Place families\").";
 
-                    using (var form = new ResultForm(preview ? "CAD2Revit - Preview" : "CAD2Revit - Done", text, logPath))
+                    var simple = SimpleReport.From(results, preview);
+                    string footnote = preview
+                        ? "Close this window to return to the mapping, then click Run to place the families."
+                        : summary.Get(Status.Placed) > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
+
+                    using (var form = new ResultForm(simple, text, logPath, footnote))
                         form.ShowDialog(RevitOwner.Win32);
                     if (!preview) return Result.Succeeded;
                 }

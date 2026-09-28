@@ -212,6 +212,73 @@ namespace CAD2Revit.Core.Tests
         }
     }
 
+    public class SimpleReportTests
+    {
+        static PlacementResult R(string block, string family, Status status, string msg = "", int count = 1) =>
+            new PlacementResult
+            {
+                BlockName = block, Status = status, Message = msg, Count = count,
+                Row = family == null ? null : new MapRow { Block = block, Family = family, TypeName = "T" },
+            };
+
+        [Fact]
+        public void HeadlineGroupsByFamilyAndIsGreenOnlyWhenAllPlaced()
+        {
+            var all = SimpleReport.From(new[]
+            {
+                R("L1", "Panel", Status.Placed), R("L2", "Panel", Status.Placed), R("S", "Smoke", Status.Placed),
+            }, preview: false);
+            Assert.Equal("Placed 3 of 3 families", all.Headline);
+            Assert.True(all.AllPlaced);
+            Assert.Equal(new[] { "Panel", "Smoke" }, all.ByFamily.Select(kv => kv.Key));
+            Assert.Equal(new[] { 2, 1 }, all.ByFamily.Select(kv => kv.Value));
+            Assert.Empty(all.Warnings);
+
+            var some = SimpleReport.From(new[]
+            {
+                R("L1", "Panel", Status.Placed), R("S", "Smoke", Status.Failed, "no ceiling found"),
+                R("TEXT", null, Status.Unmapped, "not mapped (Skip)", count: 7),
+            }, preview: true);
+            Assert.Equal("Would place 1 of 9 families", some.Headline);
+            Assert.False(some.AllPlaced);
+            Assert.False(new SimpleReport().AllPlaced);
+        }
+
+        [Fact]
+        public void WarningsArePlainOneLinePerProblem()
+        {
+            var r = SimpleReport.From(new[]
+            {
+                R("LIGHT", "Panel", Status.Placed, "no ceiling found within 6000 mm above the level - placed unhosted"),
+                R("LIGHT", "Panel", Status.Placed, "no ceiling found within 6000 mm above the level - placed unhosted"),
+                R("SMOKE", "Smoke", Status.Failed,
+                  "family is not face-based (placement type OneLevelBased) - it cannot be hosted on a ceiling; " +
+                  "use a family made from a face-based template; DEBUG linked=yes element=123 (Floors) normal=(0,0,-1)"),
+                R("EXIT", "Exit", Status.Skipped, "family/type not loaded"),
+                R("DUP", "Panel", Status.Duplicate, "exists"),
+                R("OK", "Panel", Status.Placed, ""),
+            }, preview: false);
+            Assert.Equal(new[]
+            {
+                "SMOKE: family is not face-based, it cannot be hosted on a ceiling, not placed",
+                "EXIT: family 'Exit' is not loaded in this project, not placed",
+                "LIGHT (x2): no ceiling found above, placed on level",
+                "DUP: already in the model at this spot, skipped",
+            }, r.Warnings);
+            Assert.DoesNotContain(r.Warnings, w => w.Contains("123") || w.Contains("DEBUG") || w.Contains("mm"));
+        }
+
+        [Theory]
+        [InlineData("WARNING: no slab above this point within 3500 mm (slab opening or no slab) - hosted on a reference plane at 3200 mm (underside of the slab above)",
+                    "no slab above (slab opening or no slab), hosted on a reference plane")]
+        [InlineData("failed - not hosted on linked slab: Host is Reference Plane", "not hosted on linked slab: Host is Reference Plane")]
+        [InlineData("host: linked ceiling, slope 12.5 deg", "host: linked ceiling")]
+        [InlineData("DEBUG linked=no host=none", null)]
+        [InlineData("", null)]
+        public void PlainReason(string message, string expected) =>
+            Assert.Equal(expected, SimpleReport.PlainReason(message));
+    }
+
     public class SettingsTests
     {
         [Fact]

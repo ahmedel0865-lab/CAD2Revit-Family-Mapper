@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.2] - 2026-09-28
+### Changed: simpler results window after Place Families
+- **Headline**: "Placed X of Y families" ("Would place ..." in Preview), green when every block was placed, amber otherwise.
+- **What was placed**: one line per family with the number placed.
+- **Warnings**, shown only when there are any: one plain line per block and problem, worst first, e.g. `LIGHT (x2): no ceiling found above, placed on level`. Element ids, slopes, distances and DEBUG text are left out.
+- **Show details** reveals the previous full report (tables, timings, log path) with Copy, Open log and Log folder links. There is one **Close** button.
+- The window stays attached to Revit and cannot be minimized.
+
 ## [0.15.1] - 2026-09-28
 ### Fixed: Revit looks frozen after a CAD2Revit window is closed or hidden
 - Every CAD2Revit dialog (DWG picker, mapping window, results, lists) is now **owned by Revit's main window**, so it always stays on top of Revit. Before, the DWG picker, the result window and the list pickers had no owner and could drop behind Revit. Revit stays locked while a dialog is open, so it looked frozen and the dialog could not be found.
