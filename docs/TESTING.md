@@ -41,11 +41,10 @@ In the mapping window (Place Families > Next), set the rows as below (or save th
 
 ## 4. Checklist
 
-Run **List Blocks** first, then **Place Families** > pick the DWG > mapping window > **Preview**, then **Run**.
+Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run**.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | List Blocks | 5 names; T-SMOKE shows 1 mirrored |
 | 2 | Mapping window | 5 rows (one per block name) with counts, e.g. `T-LIGHT (4)`; `T-TEXT` stays (Skip). Typing part of a family name filters the dropdown; a non-numeric elevation turns red and blocks Preview |
 | 2b | Preview | 10 would be placed, 1 unmapped (`T-TEXT`), nothing changed in the model; closing the result returns to the mapping window |
 | 3 | Run: position | Each family's origin sits on its CAD insertion point in plan (zoom in, turn on the DWG) |

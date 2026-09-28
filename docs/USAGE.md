@@ -9,7 +9,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
    - It installs the add-in for every Revit **2022 / 2023 / 2024 / 2025 / 2026** found on the PC.
    - Per Windows user, so no administrator rights are needed. Files go to `%AppData%\Autodesk\Revit\Addins\<version>\`.
 3. Start Revit. When Revit asks about loading the unsigned add-in *CAD2Revit Family Mapper*, click **Always Load**.
-4. A **CAD2Revit** tab appears with two panels: **Mapper** (**List Blocks**, **Place Families**) and **Tools** (**Settings**, **Help**).
+4. A **CAD2Revit** tab appears with two panels: **Mapper** (**Place Families**) and **Tools** (**Settings**, **Help**).
 
 - **Manual install** (if IT policy blocks `Install.bat`): copy `<version>\CAD2Revit.addin` and the folder `<version>\CAD2Revit` into `%AppData%\Autodesk\Revit\Addins\<version>\`. Then right-click `CAD2Revit\CAD2Revit.dll` > *Properties* > tick **Unblock**.
 - **Update:** close Revit and run `Install.bat` from the new zip.
@@ -97,9 +97,9 @@ The elevation is also the fallback height if a ceiling is not found.
 - **Use reference planes for all rows** (checkbox above the grid) sets every row's Host Type to *Reference Plane (auto-create)* in one click. Untick it to restore the previous Host Types.
 - For choosing between **Ceiling** and **Reference Plane**, see the table in the [README](../README.md#ceiling-vs-reference-plane-which-host-to-use).
 
-## 4. Mapping file format (Load / Save, List Blocks template)
+## 4. Mapping file format (Load / Save)
 
-**List Blocks** lists every block name with counts (and mirrored counts), and **Export template...** saves a mapping file you can fill in Excel. The mapping window reads and writes the same format:
+The mapping window lists every block name with its count. **Save** writes the mapping as a file you can fill in or share in Excel, and **Load** reads it back:
 
 | Column | Example | Notes |
 |---|---|---|

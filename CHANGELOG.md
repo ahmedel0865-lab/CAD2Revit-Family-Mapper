@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.15.0] - 2026-09-28
+### Removed
+- The **List Blocks** button and command. The mapping window (Place Families) already lists every block with its count, and **Save** writes the same mapping file for Excel. The ribbon now has **Place Families**, **Settings** and **Help**.
+
 ## [0.14.0] - 2026-09-28
 ### Fixed: face hosting on slabs and ceilings in Revit links
 - Families could end up hosted on a **Reference Plane** instead of the slab in a linked model (*Properties > Host* showed Reference Plane).

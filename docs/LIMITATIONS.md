@@ -8,7 +8,7 @@ Planned approach: export attributes from AutoCAD (`DATAEXTRACTION`, or a small A
 Exploded symbols are just lines/arcs, and there is nothing to identify them as devices. Re-block them in AutoCAD (e.g. `BLOCK` + `QSELECT`/`SELECTSIMILAR`) before linking.
 
 ## Dynamic blocks
-A dynamic block whose parameters were changed (stretched, flipped, visibility state...) becomes an **anonymous block** (`*U123`). Revit reports that anonymous name, not the dynamic block's real name, so these cannot be mapped reliably. List Blocks warns about them and leaves them out of the template.
+A dynamic block whose parameters were changed (stretched, flipped, visibility state...) becomes an **anonymous block** (`*U123`). Revit reports that anonymous name, not the dynamic block's real name, so these cannot be mapped reliably. They show up as their own rows (e.g. `*U123`) in the mapping window; leave them on (Skip).
 Fix in AutoCAD: use plain blocks for devices, or convert each variant to a named block (`BCONVERT`, or `EXPLODE` once and re-`BLOCK` under a real name). Unmodified dynamic blocks usually keep their name.
 
 ## Nested blocks

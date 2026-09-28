@@ -52,6 +52,6 @@ if ($changed.Count -eq 0) {
 $verb = if ($Uninstall) { 'Removed from' } else { 'Installed for' }
 Write-Host ("$verb Revit " + ($changed -join ', ')) -ForegroundColor Green
 if (-not $Uninstall) {
-    Write-Host 'Start Revit: a "CAD2Revit" tab with "List Blocks" and "Place Families" appears.'
+    Write-Host 'Start Revit: a "CAD2Revit" tab with "Place Families" appears.'
     Write-Host 'If Revit asks about loading an unsigned add-in, choose "Always Load".'
 }

@@ -6,7 +6,7 @@ using Autodesk.Revit.UI;
 
 namespace CAD2Revit
 {
-    /// <summary>Revit start-up: creates the CAD2Revit ribbon tab with its two buttons.</summary>
+    /// <summary>Revit start-up: creates the CAD2Revit ribbon tab with its buttons.</summary>
     public class App : IExternalApplication
     {
         public const string TabName = "CAD2Revit";
@@ -18,8 +18,6 @@ namespace CAD2Revit
             var dll = Assembly.GetExecutingAssembly().Location;
             var version = Assembly.GetExecutingAssembly().GetName().Version;
 
-            AddButton(panel, "CAD2Revit.ListBlocks", "List\nBlocks", dll, typeof(Commands.ListBlocksCommand).FullName, "ListBlocks",
-                "List every block name in a linked/imported DWG (with counts) and export a mapping template (XLSX or CSV).");
             AddButton(panel, "CAD2Revit.PlaceFamilies", "Place\nFamilies", dll, typeof(Commands.PlaceFamiliesCommand).FullName, "PlaceFamilies",
                 "Pick a DWG, map each CAD block to a Revit family, level and host in one window, Preview, then Run. " +
                 $"(version {version.ToString(3)})");

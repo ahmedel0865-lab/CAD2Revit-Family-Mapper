@@ -53,8 +53,7 @@ namespace CAD2Revit.Commands
             {
                 MainInstruction = "CAD2Revit Family Mapper " + version,
                 MainContent =
-                    "1.  List Blocks: see every block in a DWG and export a mapping template.\n" +
-                    "2.  Place Families: pick the DWG, map each block to a family, level and host, " +
+                    "Place Families: pick the DWG, map each block to a family, level and host, " +
                     "Preview, then Run (one Ctrl+Z undoes a run).\n\n" +
                     "Tip: select several rows in the mapping window to set Host Type, Level or Elevation for all of them.",
                 FooterText = "Settings: " + Settings.DefaultPath,

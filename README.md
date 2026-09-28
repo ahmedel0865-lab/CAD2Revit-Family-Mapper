@@ -32,7 +32,6 @@ flowchart LR
 
 | Panel | Button | What it does |
 |---|---|---|
-| Mapper | **List Blocks** | Lists every block in a DWG by category, with counts, and exports a mapping template. |
 | Mapper | **Place Families** | Pick the DWG, then map, preview and place everything in the mapping window. |
 | Tools | **Settings** | Opens `settings.ini` (tolerances, host search distances, fallbacks) in Notepad. |
 | Tools | **Help** | Version, user guide, and quick links to the logs and the saved project mappings. |
@@ -108,7 +107,7 @@ Notes:
 - Reference planes are named `CAD2Revit_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
 
 ## Mapping file
-The mapping window can **Load / Save** the mapping as a file, to reuse it across projects or share it with the team. The format is the same one List Blocks exports (empty family = Skip):
+The mapping window can **Load / Save** the mapping as a file, to reuse it across projects or share it with the team. Empty family = Skip:
 
 | CAD_Block_Name | Revit_Family_Name | Revit_Type_Name | Offset_From_Level_mm | Rotation_Adjustment_deg | Host_Type |
 |---|---|---|---|---|---|
@@ -124,8 +123,8 @@ The mapping window can **Load / Save** the mapping as a file, to reuse it across
 ```
 addin/                            standalone Revit add-in (C#)  <- main product
   src/CAD2Revit/                  Revit add-in
-    App.cs                        ribbon: Mapper (List Blocks, Place Families), Tools (Settings, Help)
-    Commands/                     the four ribbon commands
+    App.cs                        ribbon: Mapper (Place Families), Tools (Settings, Help)
+    Commands/                     the three ribbon commands
     Revit/                        DWG reader, host finder, reference/vertical planes, placer
     UI/                           mapping window (WPF), step-1 dialog, result window
   src/CAD2Revit.Core/             Revit-free logic (unit tested): CSV/XLSX, mapping, name

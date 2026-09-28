@@ -9,7 +9,7 @@ INSTALL
      on this PC, for your Windows user only (no administrator rights needed).
   4. Start Revit. When Revit asks about loading an unsigned add-in
      ("CAD2Revit Family Mapper"), click "Always Load".
-  5. A new "CAD2Revit" tab appears with "List Blocks" and "Place Families".
+  5. A new "CAD2Revit" tab appears with "Place Families".
 
   Manual install (if Install.bat is blocked by IT policy):
     Copy  <version>\CAD2Revit.addin  and the folder  <version>\CAD2Revit
