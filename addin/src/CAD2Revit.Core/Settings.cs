@@ -25,6 +25,7 @@ namespace CAD2Revit.Core
         public double SlabSearchToleranceMm = 500.0;   // Slab (above): level-to-level height + this
         public bool SearchRevitLinks = true;
         public bool FallbackToUnhosted = true;
+        public bool DebugHosting = false;              // per-point hosting details in the log
         // Output
         public bool WriteBlockNameToComments = true;
         // Remembered between runs
@@ -72,6 +73,7 @@ namespace CAD2Revit.Core
                 case "slabsearchtolerancemm": SlabSearchToleranceMm = D(SlabSearchToleranceMm); break;
                 case "searchrevitlinks": SearchRevitLinks = B(SearchRevitLinks); break;
                 case "fallbacktounhosted": FallbackToUnhosted = B(FallbackToUnhosted); break;
+                case "debughosting": DebugHosting = B(DebugHosting); break;
                 case "writeblocknametocomments": WriteBlockNameToComments = B(WriteBlockNameToComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
             }
@@ -103,6 +105,9 @@ namespace CAD2Revit.Core
             sb.AppendLine("SearchRevitLinks = " + Bo(SearchRevitLinks));
             sb.AppendLine("# No host found: true = place unhosted at the row offset; false = report as failed.");
             sb.AppendLine("FallbackToUnhosted = " + Bo(FallbackToUnhosted));
+            sb.AppendLine("# true: add a DEBUG line per point to the log (linked yes/no, link, host element id and");
+            sb.AppendLine("# category, face normal, final Host of the placed instance).");
+            sb.AppendLine("DebugHosting = " + Bo(DebugHosting));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
             sb.AppendLine("WriteBlockNameToComments = " + Bo(WriteBlockNameToComments));
             sb.AppendLine();

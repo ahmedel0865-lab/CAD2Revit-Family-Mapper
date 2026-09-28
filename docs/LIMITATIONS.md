@@ -21,7 +21,7 @@ Revit families are placed with the CAD rotation only; mirroring is not applied. 
 Block scale is recorded in the log (`Block_Scale`) but not applied. Family size comes from the family type.
 
 ## Hosting
-- **Face-based families** host on ceilings, walls, slabs and beams in this model **and in linked Revit models**.
+- **Face-based families** host on ceilings, walls, slabs and beams in this model **and in linked Revit models**. After placing, the tool checks that *Host* is the link (or the element) and not a reference plane or level. Otherwise the block is `failed`, not `placed`. Level-based families on ceiling/face/slab rows are `failed` ("family is not face-based").
 - **Legacy wall-/ceiling-based families** (non face-based) can only host on elements in the **same** model. If their host is in a link, they are reported as failed. Use face-based families where possible.
 - Wall search looks up to 500 mm from the CAD point (`WallSearchDistanceMm` in settings.ini). If the block's insertion point is inside the wall thickness, the device goes on the nearest face.
 - Curtain walls and in-place families are searched like any other wall/ceiling, but results can vary.

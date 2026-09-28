@@ -63,6 +63,12 @@ Run **List Blocks** first, then **Place Families** > pick the DWG > mapping wind
 | 12d | Slab (below) | Floor slab at Level 1, a floor box row set to *Slab (below)*: hosted on the slab top, facing up |
 | 12e | Progress + Cancel | On a large DWG, click Run, then Cancel in the progress window: "Cancelled... nothing was changed", nothing added to the model, back in the mapping window |
 | 12f | Timings | The result window ends with a Timings table, and the CSV log has `timing` rows |
+| 12g | Linked flat slab | Structural model with a flat slab at Level 2, linked. Face-based light, Host *Slab (above)* (and again with *Face*), on Level 1, `DebugHosting = true`. Run: select a light, *Properties > Host* = the link (`STR.rvt`), not *Reference Plane*. Light sits on the soffit, facing down. Log: `placed`, `DEBUG linked=yes link=STR.rvt element=<id> (Floors) normal=(0.000,0.000,-1.000); host=Revit link STR.rvt, host face ok` |
+| 12h | Linked sloped slab | Slope the linked slab (slope arrow, or a sloped roof-like slab) and run again: Host = the link, the light follows the slope, and the DEBUG normal is tilted (Z between -1 and -0.5) |
+| 12i | Linked ceiling | Architectural model with a ceiling, linked; Host *Ceiling*. Host = the link, DEBUG category `Ceilings` |
+| 12j | Slab in host model | Same slab modelled in this model (no link); Host *Slab (above)*. Host = the Floor, DEBUG `linked=no ... (Floors)`, `host=element of this model (Floors <id>), host face ok` |
+| 12k | No slab above | A light outside the slab outline (or under a shaft opening). *Slab (above)*: placed on a reference plane with a WARNING, DEBUG `no host face found; host=Reference Plane ...`. *Face* with `FallbackToUnhosted = false`: `failed`, "no face found" |
+| 12l | Not face-based | Map a level-based (non face-based) family to *Slab (above)*: `failed`, "family is not face-based (placement type OneLevelBased)" and nothing placed |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

@@ -82,6 +82,7 @@ namespace CAD2Revit.Revit
             public Facing PlaneFacing;
             public List<string> Notes;
             public double Angle;
+            public string FinalHost;     // what the placed instance is hosted on (DebugHosting)
             public PlacementResult Fail(PlacementResult r)
             {
                 Failed = r;
@@ -374,8 +375,8 @@ namespace CAD2Revit.Revit
                 double maxDist = above ? ctx.SlabUp : ctx.SlabDown;
                 if (ptype == FamilyPlacementType.OneLevelBased)
                 {
-                    notes.Add($"WARNING: family is not face-based/work-plane-based, so it cannot be hosted on a slab - " +
-                              $"placed level-based at Elevation From Level {row.OffsetMm:0} mm");
+                    plan.Fail(Result(b, row, Status.Failed, Notes(HostCheck.NotFaceBased(ptype.ToString(), "slab")), b.Point, angle));
+                    return plan;
                 }
                 else
                 {
@@ -425,6 +426,13 @@ namespace CAD2Revit.Revit
             else if (row.Host != HostMode.None)
             {
                 string hostWord = row.Host.ToString().ToLowerInvariant();
+                if (ptype == FamilyPlacementType.OneLevelBased && row.Host != HostMode.Wall)
+                {
+                    // Ceiling / face: only a face-based family can sit on the face.
+                    plan.Fail(Result(b, row, Status.Failed, Notes(HostCheck.NotFaceBased(ptype.ToString(), HostCheck.What(row.Host))),
+                                     b.Point, angle));
+                    return plan;
+                }
                 if (ptype == FamilyPlacementType.OneLevelBased)
                 {
                     notes.Add("family is not face/wall-hosted - placed level-based");
@@ -479,7 +487,7 @@ namespace CAD2Revit.Revit
             Plan plan;
             using (_timer.Time(Phases.HostQuery))
                 plan = Decide(b, row, sym, level, finder, ctx);
-            if (plan.Failed != null) return plan.Failed;
+            if (plan.Failed != null) return WithDebug(plan.Failed, plan);
 
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
@@ -501,7 +509,7 @@ namespace CAD2Revit.Revit
             long dupKey = DupKey(sym.Id, familyOfType);
             using (_timer.Time(Phases.DupQuery))
                 if (dups.Contains(dupKey, target.X, target.Y, ctx.BandMin, ctx.BandMax))
-                    return Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle);
+                    return WithDebug(Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle), plan);
 
             // 3a. Level-based without a host: batched (created after the loop).
             if (hit == null && !plan.OnLevelPlane && !plan.OnVertical && ptype == FamilyPlacementType.OneLevelBased)
@@ -515,7 +523,8 @@ namespace CAD2Revit.Revit
                 var pending = Result(b, row, Status.Placed, Notes(), target, angle);
                 list.Add(new Pending { Block = b, Result = pending, Base = new XYZ(x, y, levelZ), Angle = angle });
                 dups.Add(dupKey, target.X, target.Y, target.Z);
-                return pending;
+                plan.FinalHost = "Level " + level.Name + " (level-based, no host)";
+                return WithDebug(pending, plan);
             }
 
             // 3b. Everything else: one by one, each in its own sub-transaction.
@@ -540,6 +549,32 @@ namespace CAD2Revit.Revit
                     res = Result(b, row, Status.Failed, Notes(ex.Message.Trim()), b.Point, angle);
                 }
             }
+            return WithDebug(res, plan);
+        }
+
+        /// <summary>DebugHosting: appends one DEBUG line (linked yes/no, link, host element id and
+        /// category, face normal, final Host) to the block's log message.</summary>
+        PlacementResult WithDebug(PlacementResult res, Plan plan)
+        {
+            if (!_settings.DebugHosting || res == null) return res;
+            var h = plan.Hit;
+            long? id = null;
+            string cat = null;
+            try
+            {
+                if (h?.Element != null)
+                {
+                    id = Compat.IdValue(h.Element.Id);
+                    cat = h.Element.Category?.Name;
+                }
+            }
+            catch (Exception) { }
+            var n = h?.FaceNormal;
+            string final = res.Status == Status.Placed ? plan.FinalHost ?? res.Host
+                         : "not placed" + (plan.FinalHost != null ? " (Revit hosted it on: " + plan.FinalHost + ")" : "");
+            var line = HostCheck.DebugLine(h != null, h?.IsLinked ?? false, h?.LinkName, id, cat,
+                                           n != null ? new[] { n.X, n.Y, n.Z } : null, final);
+            res.Message = res.Message.Length > 0 ? res.Message + "; " + line : line;
             return res;
         }
 
@@ -579,6 +614,7 @@ namespace CAD2Revit.Revit
                     else notes.Add("WARNING: could not flip the family to face " + plan.PlaneFacing.ToString().ToLowerInvariant());
                 }
                 hostText = "Reference plane " + rp.Name;
+                plan.FinalHost = "Reference Plane " + rp.Name + " (no face host)";
             }
             else if (plan.OnVertical)
             {
@@ -603,25 +639,46 @@ namespace CAD2Revit.Revit
                         : cadDir.Subtract(n.Multiply(cadDir.DotProduct(n)));       // CAD angle, in the face plane
                     return d.Normalize();
                 }
-                using (_timer.Time(Phases.Create))
+                FamilyInstance Place(HostHit h)
                 {
-                    try
+                    using (_timer.Time(Phases.Create))
+                        return _doc.Create.NewFamilyInstance(h.Reference, h.Point, RefDir(h), sym);
+                }
+                // Place, then check the instance really is on the face found (for a linked
+                // slab: Host = the Revit link, HostFace set - not a reference plane or level).
+                Exception error = null;
+                string problem = null;
+                try
+                {
+                    inst = Place(hit);
+                    problem = HostProblem(inst, hit, row.Host, plan);
+                }
+                catch (Exception ex) { error = ex; }
+                if ((error != null || problem != null) && hit.FromIndex && finder != null)
+                {
+                    // The indexed face could not host: find it again by ray (stable link reference).
+                    var z = row.Host == HostMode.Wall ? levelZ + Math.Max(offset, Ft(10)) : levelZ;
+                    double dist = row.Host == HostMode.Wall ? Ft(_settings.WallSearchDistanceMm) : Math.Max(hit.Distance + 1, 1);
+                    var again = finder.Recast(row.Host, x, y, levelZ, z, dist, b.Rotation);
+                    if (again != null)
                     {
-                        inst = _doc.Create.NewFamilyInstance(hit.Reference, hit.Point, RefDir(hit), sym);
-                    }
-                    catch (Exception) when (hit.FromIndex && finder != null)
-                    {
-                        // The indexed face could not host (unusual face reference): find it again by ray.
-                        var z = row.Host == HostMode.Wall ? levelZ + Math.Max(offset, Ft(10)) : levelZ;
-                        double dist = row.Host == HostMode.Wall ? Ft(_settings.WallSearchDistanceMm) : Math.Max(hit.Distance + 1, 1);
-                        var again = finder.Recast(row.Host, x, y, levelZ, z, dist, b.Rotation);
-                        if (again == null) throw;
-                        hit = again;
-                        inst = _doc.Create.NewFamilyInstance(hit.Reference, hit.Point, RefDir(hit), sym);
+                        if (inst != null && inst.IsValidObject) _doc.Delete(inst.Id);
+                        inst = null;
+                        error = null;
+                        problem = null;
+                        hit = plan.Hit = again;
                         target = hit.Point;
                         hostText = hit.Describe();
+                        try
+                        {
+                            inst = Place(hit);
+                            problem = HostProblem(inst, hit, row.Host, plan);
+                        }
+                        catch (Exception ex) { error = ex; }
                     }
                 }
+                if (error != null) throw error;
+                if (problem != null) return Result(b, row, Status.Failed, Notes(problem), target, angle, null, hostText);
             }
             else if (hit != null && ptype == FamilyPlacementType.OneLevelBasedHosted)
             {
@@ -646,6 +703,7 @@ namespace CAD2Revit.Revit
                 using (_timer.Time(Phases.Create))
                     inst = _doc.Create.NewFamilyInstance(level.GetPlaneReference(), new XYZ(x, y, levelZ), cadDir, sym);
                 instOffset = offset;
+                plan.FinalHost = "Level " + level.Name + " (no face host)";
             }
             else if (ptype == FamilyPlacementType.OneLevelBased)
             {
@@ -662,6 +720,46 @@ namespace CAD2Revit.Revit
                 return Result(b, row, Status.Failed, Notes($"placement type '{ptype}' is not supported"), b.Point, angle);
             }
             return Result(b, row, Status.Placed, Notes(), target, angle, inst.Id, hostText);
+        }
+
+        /// <summary>Null if <paramref name="inst"/> is hosted on the face of <paramref name="hit"/>
+        /// (Host = the Revit link for a linked face, HostFace set), else why not. Also records
+        /// the final host in plan.FinalHost.</summary>
+        string HostProblem(FamilyInstance inst, HostHit hit, HostMode mode, Plan plan)
+        {
+            string Check()
+            {
+                Element host = null;
+                Reference face = null;
+                try { host = inst.Host; } catch (Exception) { }
+                try { face = inst.HostFace; } catch (Exception) { }
+                var kind = host == null ? HostKind.None
+                         : host is ReferencePlane ? HostKind.ReferencePlane
+                         : host is Level ? HostKind.Level
+                         : host is RevitLinkInstance ? HostKind.LinkInstance
+                         : HostKind.Element;
+                string name = "";
+                try
+                {
+                    name = host is RevitLinkInstance link ? _doc.GetElement(link.GetTypeId())?.Name ?? link.Name
+                         : host is ReferencePlane || host is Level ? host.Name
+                         : host != null ? $"{host.Category?.Name} {Compat.IdValue(host.Id)}" : "";
+                }
+                catch (Exception) { }
+                plan.FinalHost = HostCheck.KindText(kind) + (name.Length > 0 && kind != HostKind.Element ? " " + name : "")
+                               + (kind == HostKind.Element ? " (" + name + ")" : "")
+                               + ", host face " + (face != null ? "ok" : "none");
+                return HostCheck.Problem(kind, hit.IsLinked, face != null, HostCheck.What(mode));
+            }
+            var problem = Check();
+            if (problem != null)
+            {
+                // Host / HostFace can be filled in only by a regeneration: check once more
+                // before calling it a failure (rare, so the cost does not matter).
+                _doc.Regenerate();
+                problem = Check();
+            }
+            return problem;
         }
 
         FamilyInstance CreateLevelBased(FamilySymbol sym, Level level, XYZ basePt, double angle)

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.14.0] - 2026-09-28
+### Fixed: face hosting on slabs and ceilings in Revit links
+- Families could end up hosted on a **Reference Plane** instead of the slab in a linked model (*Properties > Host* showed Reference Plane).
+- **Stable link references.**
+  - When the ray-cast fallback hits a face in a link, the tool now takes the linked element (`LinkedElementId` in the link's document) and walks its own geometry, with `ComputeReferences` on.
+  - It picks the face that contains the hit point, converted into link coordinates with the inverse link transform, and that faces the ray: the **soffit** (normal down) for Slab (above), Ceiling and Face, or the top face for Slab (below).
+  - It hosts on `face.Reference.CreateLinkReference(linkInstance)`, with the hit point in host coordinates. The CAD rotation is projected onto the face plane, using the normal transformed by the link transform.
+  - The face index already used references built this way.
+- **The temporary 3D view shows the links**: the Revit Links, Floors, Ceilings, Roofs, Structural Framing and Walls categories are visible, hidden link instances are unhidden, and all worksets are visible. It still has no section box or view template.
+- **Verify after placing.** Each face-hosted instance is checked:
+  - *Host* must be the `RevitLinkInstance` for a linked face, or the element for a face in this model, and *Host Face* must be set.
+  - If Revit hosted it on a reference plane, a level or nothing, the placement is retried once by ray with a stable reference.
+  - If it still isn't on the face, the block is **failed** (`failed - not hosted on linked slab: Host is Reference Plane`) and rolled back, never reported as placed.
+- **Family must be face-based**: `ceiling`, `face`, `slab above` and `slab below` rows with a level-based family (`OneLevelBased`) are now **failed** with "family is not face-based". Before, they were placed level-based with a warning. `wall` rows are unchanged.
+- **`DebugHosting`** setting (`settings.ini`, default false). Adds a `DEBUG` line per block to the log: linked yes/no, link name, host element id and category, face normal, and final Host.
+
 ## [0.13.0] - 2026-09-28
 ### Changed: one tool
 - The repository now contains **only the standalone Revit add-in**. The pyRevit extension (`CAD2Revit.extension/`) and its Python tests are removed.

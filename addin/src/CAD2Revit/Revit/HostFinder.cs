@@ -76,8 +76,41 @@ namespace CAD2Revit.Revit
             try { view.IsSectionBoxActive = false; } catch (Exception) { }
             try { view.DetailLevel = ViewDetailLevel.Fine; } catch (Exception) { }
             try { view.Name = TempViewName; } catch (Exception) { }   // name clash from a crashed run: harmless
+            ShowHostsAndLinks(doc, view);
             doc.Regenerate();
             return view;
+        }
+
+        /// <summary>The ray-cast fallback only sees what the view shows: make sure Revit links,
+        /// floors, ceilings, roofs, framing and walls are visible, link instances are not hidden,
+        /// and every workset (links are often on their own workset) is visible.</summary>
+        static void ShowHostsAndLinks(Document doc, View3D view)
+        {
+            foreach (var bic in new[] { BuiltInCategory.OST_RvtLinks, BuiltInCategory.OST_Floors, BuiltInCategory.OST_Ceilings,
+                                        BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming, BuiltInCategory.OST_Walls })
+            {
+                try
+                {
+                    var id = new ElementId(bic);
+                    if (view.CanCategoryBeHidden(id) && view.GetCategoryHidden(id)) view.SetCategoryHidden(id, false);
+                }
+                catch (Exception) { }
+            }
+            try
+            {
+                var hidden = new FilteredElementCollector(doc).OfClass(typeof(RevitLinkInstance))
+                    .Where(e => e.IsHidden(view)).Select(e => e.Id).ToList();
+                if (hidden.Count > 0) view.UnhideElements(hidden);
+            }
+            catch (Exception) { }
+            if (doc.IsWorkshared)
+                try
+                {
+                    foreach (var ws in new FilteredWorksetCollector(doc).OfKind(WorksetKind.UserWorkset))
+                        if (view.GetWorksetVisibility(ws.Id) != WorksetVisibility.Visible)
+                            view.SetWorksetVisibility(ws.Id, WorksetVisibility.Visible);
+                }
+                catch (Exception) { }
         }
 
         ReferenceIntersector Intersector(HostMode mode)
@@ -106,7 +139,20 @@ namespace CAD2Revit.Revit
         {
             var reference = ctx.GetReference();
             var pt = reference.GlobalPoint;
-            var normal = FaceNormal(reference, pt) ?? direction.Negate();
+            XYZ normal = null;
+            if (reference.LinkedElementId != ElementId.InvalidElementId)
+            {
+                // A linked hit: host on a reference built from the linked element's own
+                // geometry, which NewFamilyInstance resolves reliably (the ray's reference can
+                // end up hosting the instance on a reference plane instead of the link).
+                var stable = StableLinkFace(reference, pt, direction);
+                if (stable != null)
+                {
+                    reference = stable.Item1;
+                    normal = stable.Item2;
+                }
+            }
+            normal = normal ?? FaceNormal(reference, pt) ?? direction.Negate();
             var (elem, linked) = HostElement(reference);
             return new HostHit
             {
@@ -246,6 +292,49 @@ namespace CAD2Revit.Revit
             // only when the CAD point lies inside the wall thickness).
             hit.RoomNormal = n.DotProduct(bestDir) > 0 ? n.Negate() : n;
             return hit;
+            }
+        }
+
+        const double FaceMatchToleranceFt = 5.0 / 304.8;   // 5 mm
+
+        /// <summary>
+        /// For a ray hit in a Revit link: the face of the linked element (walked from its own
+        /// geometry, ComputeReferences on) that contains the hit point and faces the ray - the
+        /// soffit (normal down) for an upward ray, the top face for a downward ray - as a link
+        /// reference, with its normal in host coordinates. Null if no face matches.
+        /// </summary>
+        Tuple<Reference, XYZ> StableLinkFace(Reference reference, XYZ hostPoint, XYZ direction)
+        {
+            try
+            {
+                if (!(_doc.GetElement(reference.ElementId) is RevitLinkInstance link)) return null;
+                var elem = link.GetLinkDocument()?.GetElement(reference.LinkedElementId);
+                if (elem == null) return null;
+                var tf = link.GetTotalTransform();
+                var local = tf.Inverse.OfPoint(hostPoint);
+                var localDir = tf.Inverse.OfVector(direction);
+                Face best = null;
+                XYZ bestNormal = null;
+                double bestDist = FaceMatchToleranceFt;
+                foreach (var solid in Solids(elem.get_Geometry(GeoOptions)))
+                    foreach (Face face in solid.Faces)
+                    {
+                        if (face.Reference == null) continue;
+                        IntersectionResult ir;
+                        try { ir = face.Project(local); } catch (Exception) { continue; }
+                        if (ir == null || ir.Distance > bestDist) continue;
+                        var n = face.ComputeNormal(ir.UVPoint);
+                        if (n.DotProduct(localDir) > -1e-3) continue;   // must face the ray
+                        best = face;
+                        bestNormal = n;
+                        bestDist = ir.Distance;
+                    }
+                if (best == null) return null;
+                return Tuple.Create(best.Reference.CreateLinkReference(link), tf.OfVector(bestNormal).Normalize());
+            }
+            catch (Exception)
+            {
+                return null;
             }
         }
 
