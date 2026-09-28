@@ -4,7 +4,7 @@ from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol
 from cad2revit.utils import read_csv, elem_name
 
 REQUIRED_COLUMNS = ["CAD_Block_Name", "Revit_Family_Name", "Revit_Type_Name"]
-HOST_TYPES = ("none", "face")
+HOST_TYPES = ("none", "ceiling", "floor", "face")
 
 
 class MapRow(object):
@@ -48,7 +48,7 @@ def load_mapping(doc, path):
         rot = _num(r.get("Rotation_Adjustment_deg"))
         host = (r.get("Host_Type") or u"none").lower()
         if host not in HOST_TYPES:
-            errors.append(u"Row {}: Host_Type '{}' not supported (use none/face) - using none".format(i, host))
+            errors.append(u"Row {}: Host_Type '{}' not supported (use none/ceiling/floor/face) - using none".format(i, host))
             host = "none"
         if offset is None or rot is None:
             errors.append(u"Row {}: offset/rotation must be numbers - row skipped".format(i))

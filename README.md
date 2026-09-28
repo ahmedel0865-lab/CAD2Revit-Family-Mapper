@@ -9,7 +9,7 @@ Instead of manually placing hundreds of light fixtures, sockets, and detectors o
 - Exports a ready-to-fill mapping template (CSV / Excel)
 - Places families at block insertion points, keeping the CAD rotation
 - Handles link position and rotation automatically (reads Revit model coordinates)
-- Level-based placement with elevation offset, or face-based hosting on ceilings
+- Level-based placement with elevation offset, or face-based hosting on ceilings and slabs (flat or sloped, including linked models)
 - Preview mode that shows what will be placed without changing the model
 - Duplicate protection, so re-running does not double-place
 - One transaction: undo everything with a single Ctrl+Z
@@ -59,7 +59,7 @@ docs/USAGE.md
 ## Limitations
 - **Block attributes** (circuit number, panel name, etc.) are not readable through the Revit API, so they are not copied yet.
 - Wall-hosted families are placed as level-based, not hosted to walls.
-- Face hosting searches for ceilings only (in the model and in Revit links).
+- Face hosting searches ceiling and slab undersides straight above each block (in the model and in Revit links); walls are not searched.
 - Mirrored blocks are placed with rotation only; they are flagged in the log for review.
 - Nested blocks are ignored unless `INCLUDE_NESTED_BLOCKS = True` in `config.py`.
 

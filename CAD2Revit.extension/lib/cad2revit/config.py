@@ -10,8 +10,16 @@ INCLUDE_NESTED_BLOCKS = False
 # Write the source CAD block name into each placed element's "Comments" parameter.
 WRITE_BLOCK_NAME_TO_COMMENTS = True
 
-# Max search distance (mm) above the level when looking for a ceiling face to host on.
+# Max search distance (mm) above the level when looking for a face to host on.
 HOST_SEARCH_DISTANCE_MM = 6000.0
+
+# Categories searched for Host_Type = "face" (nearest underside above wins).
+# Allowed values: "ceiling", "floor" (floors = slabs, structural or architectural).
+HOST_CATEGORIES = ["ceiling", "floor"]
+
+# The upward ray starts this far (mm) above the level. Top faces (normal pointing up)
+# are always skipped, so the slab the level sits on is never used as the host.
+HOST_RAY_START_MM = 10.0
 
 MM_PER_FOOT = 304.8
 

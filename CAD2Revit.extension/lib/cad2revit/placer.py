@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 """Place Revit family instances at CAD block locations."""
 import math
+from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
     XYZ, Line, Transaction, FilteredElementCollector, FamilyInstance, View3D,
     ViewFamilyType, ViewFamily, ElementTransformUtils, BuiltInParameter,
-    ReferenceIntersector, ElementClassFilter, FindReferenceTarget, Ceiling,
+    ReferenceIntersector, ElementMulticategoryFilter, FindReferenceTarget,
+    BuiltInCategory, ElementId, PlanarFace, FamilyPlacementType,
 )
 from Autodesk.Revit.DB.Structure import StructuralType
-from cad2revit import config
+from cad2revit import config, hosting
+
+# Host category key -> Revit category.
+_CATEGORIES = {
+    "ceiling": BuiltInCategory.OST_Ceilings,
+    "floor": BuiltInCategory.OST_Floors,
+}
 
 
 class Result(object):
@@ -45,12 +53,104 @@ def _get_3d_view(doc):
     return View3D.CreateIsometric(doc, vft.Id)
 
 
-def _find_ceiling_face(intersector, pt, level_z):
-    origin = XYZ(pt.X, pt.Y, level_z + 0.01)
-    ctx = intersector.FindNearest(origin, XYZ.BasisZ)
-    if ctx is None or ctx.Proximity > config.mm_to_ft(config.HOST_SEARCH_DISTANCE_MM):
+class HostHit(object):
+    """A face found above a block: where to put the family and how the face is tilted."""
+    def __init__(self, reference, point, normal, kind, linked, element):
+        self.reference = reference  # usable by NewFamilyInstance (linked faces too)
+        self.point = point          # exact hit point on the (sloped) face, model coords
+        self.normal = normal        # XYZ, model coords, pointing down for undersides
+        self.kind = kind            # "ceiling" / "floor"
+        self.linked = linked
+        self.element = element      # host element (in its own document)
+
+    def describe(self):
+        return hosting.describe(self.kind, self.linked, _tup(self.normal))
+
+
+def _tup(v):
+    return (v.X, v.Y, v.Z)
+
+
+def _make_intersector(view3d, category_keys):
+    cats = List[BuiltInCategory]([_CATEGORIES[k] for k in category_keys])
+    ri = ReferenceIntersector(ElementMulticategoryFilter(cats), FindReferenceTarget.Face, view3d)
+    ri.FindReferencesInRevitLinks = True
+    return ri
+
+
+def _host_element(doc, ref):
+    """(element, face, transform, linked) for a reference from the intersector."""
+    if ref.LinkedElementId != ElementId.InvalidElementId:
+        link = doc.GetElement(ref.ElementId)
+        elem = link.GetLinkDocument().GetElement(ref.LinkedElementId)
+        face = elem.GetGeometryObjectFromReference(ref.CreateReferenceInLink())
+        return elem, face, link.GetTotalTransform(), True
+    elem = doc.GetElement(ref.ElementId)
+    return elem, elem.GetGeometryObjectFromReference(ref), None, False
+
+
+def _face_normal(face, transform, point):
+    """Normal of the face at the hit point, in model coordinates (linked faces are
+    transformed by the link instance's transform). None if it cannot be computed."""
+    try:
+        local = transform.Inverse.OfPoint(point) if transform is not None else point
+        proj = face.Project(local)
+        if proj is not None:
+            n = face.ComputeNormal(proj.UVPoint)
+        elif isinstance(face, PlanarFace):
+            n = face.FaceNormal
+        else:
+            return None
+        if transform is not None:
+            n = transform.OfVector(n)
+        return n.Normalize()
+    except Exception:
         return None
-    return ctx.GetReference()
+
+
+def _kind_of(elem):
+    """"ceiling" / "floor" for the host element (works for linked elements too)."""
+    try:
+        cid = elem.Category.Id
+    except Exception:
+        return None
+    for key, bic in _CATEGORIES.items():
+        if cid == ElementId(bic):
+            return key
+    return None
+
+
+def _find_host_face(doc, intersector, pt, level_z):
+    """Nearest ceiling/slab UNDERSIDE straight above (x, y) of the block, within
+    HOST_SEARCH_DISTANCE_MM. The ray starts just above the level; faces whose normal
+    points up (e.g. the top of the slab the level sits on) are skipped."""
+    origin = XYZ(pt.X, pt.Y, level_z + config.mm_to_ft(config.HOST_RAY_START_MM))
+    max_dist = config.mm_to_ft(config.HOST_SEARCH_DISTANCE_MM)
+    candidates = []
+    for ctx in intersector.Find(origin, XYZ.BasisZ):
+        if ctx.Proximity > max_dist:
+            continue
+        ref = ctx.GetReference()
+        try:
+            elem, face, tf, linked = _host_element(doc, ref)
+        except Exception:
+            continue
+        hit_pt = ref.GlobalPoint
+        n = _face_normal(face, tf, hit_pt)
+        if n is None:
+            n = XYZ(0, 0, -1)   # cannot evaluate: assume a flat underside
+        candidates.append((ctx.Proximity, _tup(n), HostHit(ref, hit_pt, n, _kind_of(elem), linked, elem)))
+    return hosting.pick_nearest_underside(candidates, max_dist)
+
+
+def _place_level_based(doc, sym, level, x, y, level_z, elevation_ft, angle):
+    pt = XYZ(x, y, level_z)
+    inst = doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
+    _set_param(inst, BuiltInParameter.INSTANCE_ELEVATION_PARAM, elevation_ft)
+    if abs(angle) > 1e-9:
+        axis = Line.CreateBound(pt, pt + XYZ.BasisZ)
+        ElementTransformUtils.RotateElement(doc, inst.Id, axis, angle)
+    return inst
 
 
 def _set_param(elem, bip, value):
@@ -86,12 +186,13 @@ def place_all(doc, blocks, mapping, level):
     t.Start()
     try:
         idx = _existing_points(doc)
-        intersector = None
-        if any(r.host == "face" for _, r in mapped):
-            view3d = _get_3d_view(doc)
-            intersector = ReferenceIntersector(
-                ElementClassFilter(Ceiling), FindReferenceTarget.Face, view3d)
-            intersector.FindReferencesInRevitLinks = True
+        view3d = None
+        intersectors = {}   # Host_Type -> ReferenceIntersector (built once per run)
+        for host in set(r.host for _, r in mapped):
+            keys = hosting.categories_for(host, config.HOST_CATEGORIES)
+            if keys:
+                view3d = view3d or _get_3d_view(doc)
+                intersectors[host] = _make_intersector(view3d, keys)
 
         for b, row in mapped:
             sym = row.symbol
@@ -107,24 +208,51 @@ def place_all(doc, blocks, mapping, level):
                     doc.Regenerate()
                 angle = b.rotation + math.radians(row.rot_deg)
                 inst, msg = None, u""
+                ptype = sym.Family.FamilyPlacementType
 
-                if row.host == "face" and intersector is not None:
-                    ref = _find_ceiling_face(intersector, b.point, level_z)
-                    if ref is not None:
-                        ref_dir = XYZ(math.cos(angle), math.sin(angle), 0)
-                        inst = doc.Create.NewFamilyInstance(ref, ref.GlobalPoint, ref_dir, sym)
-                        msg = u"hosted on ceiling"
+                intersector = intersectors.get(row.host)
+                if intersector is not None:
+                    hit = _find_host_face(doc, intersector, b.point, level_z)
+                    if hit is None:
+                        msg = u"host: none - no {} found within {:.0f} mm above the level; " \
+                              u"placed on level at CSV offset".format(
+                                  u"ceiling/slab" if row.host == "face" else row.host,
+                                  config.HOST_SEARCH_DISTANCE_MM)
+                    elif ptype == FamilyPlacementType.WorkPlaneBased:
+                        # Face-based / work-plane-based: host on the face at the exact hit
+                        # point, CAD rotation projected into the (sloped) face plane.
+                        rd = hosting.ref_direction(angle, _tup(hit.normal))
+                        inst = doc.Create.NewFamilyInstance(
+                            hit.reference, hit.point, XYZ(rd[0], rd[1], rd[2]), sym)
+                        msg = hit.describe()
+                    elif ptype == FamilyPlacementType.OneLevelBasedHosted and not hit.linked:
+                        # Legacy ceiling-hosted family: host element in this model only.
+                        inst = doc.Create.NewFamilyInstance(
+                            hit.point, sym, hit.element, level, StructuralType.NonStructural)
+                        if abs(angle) > 1e-9:
+                            axis = Line.CreateBound(hit.point, hit.point + XYZ.BasisZ)
+                            ElementTransformUtils.RotateElement(doc, inst.Id, axis, angle)
+                        msg = hit.describe() + u" (legacy hosted family)"
+                    elif ptype == FamilyPlacementType.OneLevelBased:
+                        # Level-based family under a (sloped) face: keep it level-based but
+                        # take the height from the face at this point, not the CSV offset.
+                        elev = hit.point.Z - level_z
+                        inst = _place_level_based(doc, sym, level, b.point.X, b.point.Y,
+                                                  level_z, elev, angle)
+                        msg = hit.describe() + u"; level-based family: elevation {:.0f} mm " \
+                              u"from face (CSV offset ignored)".format(config.ft_to_mm(elev))
                     else:
-                        msg = u"no ceiling found - placed on level"
+                        raise Exception(u"{}: family placement type {} cannot be hosted on "
+                                        u"this face - use a face-based family".format(
+                                            hit.describe(), ptype))
 
                 if inst is None:
-                    pt = XYZ(b.point.X, b.point.Y, level_z)
-                    inst = doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
-                    _set_param(inst, BuiltInParameter.INSTANCE_ELEVATION_PARAM,
-                               config.mm_to_ft(row.offset_mm))
-                    if abs(angle) > 1e-9:
-                        axis = Line.CreateBound(pt, pt + XYZ.BasisZ)
-                        ElementTransformUtils.RotateElement(doc, inst.Id, axis, angle)
+                    try:
+                        inst = _place_level_based(doc, sym, level, b.point.X, b.point.Y, level_z,
+                                                  config.mm_to_ft(row.offset_mm), angle)
+                    except Exception as ex:
+                        # Keep the host information in the log (e.g. face-based family, no host).
+                        raise Exception((msg + u"; " if msg else u"") + u"{}".format(ex))
 
                 if b.mirrored:
                     msg = (msg + u"; " if msg else u"") + u"CAD block is mirrored - check orientation"
