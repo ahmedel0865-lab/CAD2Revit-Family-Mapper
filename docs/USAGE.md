@@ -6,7 +6,13 @@
 3. Make a copy of the model for your first test.
 
 ## 2. List the blocks
-Click **CAD2Revit > Mapper > List Blocks**, pick the DWG, and export the template.
+Click **CAD2Revit > Mapper > List Blocks**, select the DWG, and export the template.
+
+### Selecting the DWG
+Both buttons let you choose which CAD to use:
+- **Already selected:** select one CAD link/import in the view *before* clicking the button, and it is used directly with no dialog.
+- **Pick in view:** click the CAD in the current view. Only CAD links/imports can be picked; press Esc to cancel.
+- **Choose from list:** pick it by name from every CAD in the project.
 Always copy block names from this list, since Revit may report them slightly differently from AutoCAD.
 
 ## 3. Fill the mapping CSV
@@ -22,7 +28,7 @@ Always copy block names from this list, since Revit may report them slightly dif
 Rows with a blank family name are ignored.
 
 ## 4. Preview, then run
-Click **Place Families**, choose the DWG, the CSV, the level, then **Preview**.
+Click **Place Families**, select the DWG, the CSV, the level, then **Preview**.
 When the counts look right, run again with **Run**. Everything is one transaction, so a single Ctrl+Z undoes it.
 
 ## 5. Check the log

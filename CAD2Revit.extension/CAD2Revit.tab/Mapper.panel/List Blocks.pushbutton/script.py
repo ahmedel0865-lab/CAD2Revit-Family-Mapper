@@ -9,7 +9,7 @@ from cad2revit.utils import write_csv
 doc = revit.doc
 output = script.get_output()
 
-imp = ui.pick_import_instance(doc)
+imp = ui.pick_import_instance(doc, revit.uidoc)
 if imp is None:
     script.exit()
 
