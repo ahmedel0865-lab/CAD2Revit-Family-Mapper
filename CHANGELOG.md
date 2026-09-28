@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0] - 2026-09-28
+### Changed: one tool
+- The repository now contains **only the standalone Revit add-in**. The pyRevit extension (`CAD2Revit.extension/`) and its Python tests are removed.
+  - Everything the pyRevit version did is in the add-in, including face hosting on **sloped** ceilings and slabs (PR #3 was the pyRevit fix for this, now superseded).
+  - The add-in already hosts on the exact point of the face with the CAD rotation projected into the face plane, for ceilings, slabs, roofs and beams, in linked models too.
+  - If you had installed the pyRevit version, remove it (`pyrevit extend remove CAD2Revit`) so only one CAD2Revit tab remains.
+- CI builds and tests only the add-in. Build output (`bin/`, `obj/`, `dist/`) is git-ignored.
+
 ## [0.12.0] - 2026-09-27
 ### Performance
 - **Timings**: every Preview/Run measures each phase with a Stopwatch: reading the DWG, loading the mapping, host detection (index build, per block, ray fallback), duplicate check, family creation (single and batched), rotation, planes, parameter setting, and commit/rollback.

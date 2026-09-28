@@ -132,10 +132,8 @@ addin/                            standalone Revit add-in (C#)  <- main product
   tests/CAD2Revit.Core.Tests/     unit tests (run without Revit)
   package/                        .addin manifest, Install.bat, install.ps1
   tools/package.sh                build all Revit versions + zip
-CAD2Revit.extension/              optional pyRevit version of the same tool
 templates/                        mapping_template.xlsx / .csv
 docs/                             USAGE.md, TESTING.md, LIMITATIONS.md
-tests/                            unit tests for the pyRevit version
 ```
 
 ## Building from source
@@ -147,13 +145,6 @@ dotnet build src/CAD2Revit -c Release -p:RevitVersion=2024   # one Revit version
 bash tools/package.sh                           # all versions -> dist/CAD2Revit-<version>.zip
 ```
 Or open `addin/CAD2Revit.sln` in Visual Studio 2022. Pushing a tag like `v0.4.0` makes CI publish the zip as a GitHub Release.
-
-## Optional: pyRevit version
-If you already use pyRevit, the placement engine is also available as a pyRevit extension in `CAD2Revit.extension/`. It uses a mapping file instead of the mapping window.
-```
-pyrevit extend ui CAD2Revit https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper.git
-```
-You only need one of the two. Don't install both, or you'll get two CAD2Revit tabs.
 
 ## Performance
 

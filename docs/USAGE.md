@@ -15,7 +15,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 - **Update:** close Revit and run `Install.bat` from the new zip.
 - **Uninstall:** close Revit and run `Uninstall.bat`.
 
-> A pyRevit version of the same tool is also kept in this repository (`CAD2Revit.extension/`). It is optional; see the README.
+> Earlier versions also shipped a pyRevit extension. It was removed in 0.13.0; everything it did (including face hosting on sloped ceilings and slabs) is in the add-in. If you installed it, remove it with `pyrevit extend remove CAD2Revit` (or delete the extension folder), so only one CAD2Revit tab remains.
 
 ## 1. Prepare the drawing (AutoCAD)
 
@@ -148,4 +148,3 @@ Click **CAD2Revit > Tools > Settings** to open it in Notepad. Settings are store
 | `WriteBlockNameToComments` | true | Write `CAD: <block>` into Comments. |
 | `LastMappingPath` | | Remembered automatically. |
 
-(The pyRevit version uses the same settings in `CAD2Revit.extension/lib/cad2revit/config.py`.)

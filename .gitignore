@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 cad2revit_log_*.csv
 cad2revit_preview_*.csv
+
+# Build output
+addin/**/bin/
+addin/**/obj/
+addin/dist/
