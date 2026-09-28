@@ -13,9 +13,10 @@ namespace CAD2Revit.UI
         public ResultForm(string title, string text, string logPath = null, string actionText = null, Action action = null)
         {
             Text = title;
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(860, 560);
             ShowInTaskbar = false;
+            MinimizeBox = false;
             Font = new Font("Segoe UI", 9f);
             var box = new TextBox
             {

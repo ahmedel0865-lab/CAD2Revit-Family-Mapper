@@ -34,7 +34,7 @@ namespace CAD2Revit.UI
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
             ShowInTaskbar = false;
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.CenterParent;
             Font = new System.Drawing.Font("Segoe UI", 9f);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(560, 215);

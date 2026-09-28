@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.1] - 2026-09-28
+### Fixed: Revit looks frozen after a CAD2Revit window is closed or hidden
+- Every CAD2Revit dialog (DWG picker, mapping window, results, lists) is now **owned by Revit's main window**, so it always stays on top of Revit. Before, the DWG picker, the result window and the list pickers had no owner and could drop behind Revit. Revit stays locked while a dialog is open, so it looked frozen and the dialog could not be found.
+- The mapping window and the result window can no longer be **minimized**. They have no taskbar button, so a minimized window could not be brought back while Revit stayed locked.
+- **Ribbon tab**: start-up never fails. If a *Mapper* or *Tools* panel already exists on the CAD2Revit tab (a second copy of the add-in, or the old pyRevit extension), it is reused or a separate panel is added, instead of the add-in failing to load and the buttons disappearing.
+
 ## [0.15.0] - 2026-09-28
 ### Removed
 - The **List Blocks** button and command. The mapping window (Place Families) already lists every block with its count, and **Save** writes the same mapping file for Excel. The ribbon now has **Place Families**, **Settings** and **Help**.

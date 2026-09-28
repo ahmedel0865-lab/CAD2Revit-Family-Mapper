@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Windows.Interop;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -26,6 +25,7 @@ namespace CAD2Revit.Commands
         {
             var uiapp = data.Application;
             var doc = uiapp.ActiveUIDocument.Document;
+            RevitOwner.MainHandle = uiapp.MainWindowHandle;
             try
             {
                 var settings = Core.Settings.Load();
@@ -39,7 +39,7 @@ namespace CAD2Revit.Commands
                 PlaceOptions opts;
                 using (var dlg = new PlaceDialog(doc, settings))
                 {
-                    if (dlg.ShowDialog() != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
+                    if (dlg.ShowDialog(RevitOwner.Win32) != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
                     opts = dlg.Result;
                 }
                 if (opts.Level == null)
@@ -68,7 +68,7 @@ namespace CAD2Revit.Commands
                 while (true)
                 {
                     var win = new MappingWindow(session);
-                    new WindowInteropHelper(win).Owner = uiapp.MainWindowHandle;
+                    RevitOwner.Attach(win);
                     if (startupNotes != null)
                     {
                         var notes = startupNotes;
@@ -132,7 +132,7 @@ namespace CAD2Revit.Commands
                         text += "\r\nUndo the whole run with a single Ctrl+Z (\"CAD2Revit: Place families\").";
 
                     using (var form = new ResultForm(preview ? "CAD2Revit - Preview" : "CAD2Revit - Done", text, logPath))
-                        form.ShowDialog();
+                        form.ShowDialog(RevitOwner.Win32);
                     if (!preview) return Result.Succeeded;
                 }
             }

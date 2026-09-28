@@ -13,7 +13,7 @@ namespace CAD2Revit.UI
             if (items.Count == 1) return items[0];
             using (var form = new Form
             {
-                Text = title, StartPosition = FormStartPosition.CenterScreen, ClientSize = new Size(520, 320),
+                Text = title, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(520, 320),
                 MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, Font = new Font("Segoe UI", 9f),
             })
             {
@@ -29,7 +29,7 @@ namespace CAD2Revit.UI
                 form.Controls.Add(buttons);
                 form.AcceptButton = ok;
                 form.CancelButton = cancel;
-                return form.ShowDialog() == DialogResult.OK ? list.SelectedItem as T : null;
+                return form.ShowDialog(RevitOwner.Win32) == DialogResult.OK ? list.SelectedItem as T : null;
             }
         }
     }
