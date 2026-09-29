@@ -85,6 +85,7 @@ namespace CAD2Revit.Revit
             public string FinalHost;     // what the placed instance is hosted on (DebugHosting)
             public double? LevelElevMm;  // level-based: Elevation From Level instead of the row's (Slab above)
             public bool SlabFallback;    // Slab (above): no slab in range, fallback plane / height used
+            public SlabHost SlabHost;    // Slab (above): what the block ends up on
             public PlacementResult Fail(PlacementResult r)
             {
                 Failed = r;
@@ -274,7 +275,10 @@ namespace CAD2Revit.Revit
                             var inst = _doc.GetElement(c.Id);
                             if (inst == null) continue;
                             SetParam(inst, BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM, c.Level.Id);
-                            if (_settings.WriteBlockNameToComments)
+                            if (c.Result.SlabFallback)   // findable later with a filter or schedule on Comments
+                                SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS,
+                                         NeedsReview.CommentText + (_settings.WriteBlockNameToComments ? " | CAD: " + c.BlockName : ""));
+                            else if (_settings.WriteBlockNameToComments)
                                 SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, "CAD: " + c.BlockName);
                             if (c.Offset.HasValue && !SetOffset(inst, c.Offset.Value) && Math.Abs(c.Offset.Value) > 1e-9)
                                 c.Result.Message = (c.Result.Message.Length > 0 ? c.Result.Message + "; " : "") + "could not set offset";
@@ -382,17 +386,20 @@ namespace CAD2Revit.Revit
                     { plan.Fail(Result(b, row, Status.Failed,
                         Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
                               "use a face-based family"), b.Point, angle)); return plan; }
+                string what = hit != null && Compat.IsCategory(hit.Element, BuiltInCategory.OST_StructuralFraming) ? "beam" : "slab";
+                if (hit != null) plan.SlabHost = what == "beam" ? SlabHost.Beam : SlabHost.Slab;
                 if (hit != null && ptype == FamilyPlacementType.OneLevelBased)
                 {
                     // A level-based family cannot sit on the face: same height, level-based.
                     plan.LevelElevMm = Math.Round((hit.Point.Z - levelZ) * MmPerFoot, 1);
-                    notes.Add($"family is not face-based - placed level-based at the slab underside ({plan.LevelElevMm:0} mm)");
+                    plan.SlabHost = SlabHost.LevelBased;
+                    notes.Add($"family is not face-based - placed level-based at the {what} underside ({plan.LevelElevMm:0} mm)");
                     hit = null;
                 }
                 else if (hit == null)
                 {
                     if (ptype == FamilyPlacementType.OneLevelBasedHosted)
-                        { plan.Fail(Result(b, row, Status.Failed, Notes($"No slab within {rangeMm:0} mm - " +
+                        { plan.Fail(Result(b, row, Status.Failed, Notes(SlabSearch.FallbackReason(rangeMm) + " - " +
                                                                        "legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
                     plan.SlabFallback = true;
                     if (ptype == FamilyPlacementType.WorkPlaneBased)
@@ -400,11 +407,13 @@ namespace CAD2Revit.Revit
                         planeElevMm = planeMm;
                         planeFacing = Facing.Down;
                         onLevelPlane = true;
+                        plan.SlabHost = SlabHost.Plane;
                         notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: false));
                     }
                     else
                     {
                         plan.LevelElevMm = planeMm;
+                        plan.SlabHost = SlabHost.LevelBased;
                         notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: true));
                     }
                 }
@@ -523,6 +532,7 @@ namespace CAD2Revit.Revit
             if (plan.Failed != null) return WithDebug(plan.Failed, plan);
             var res0 = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created, plan);
             if (plan.SlabFallback) res0.SlabFallback = true;
+            if (res0.Status == Status.Placed) res0.SlabHost = plan.SlabHost;
             return res0;
         }
 

@@ -84,9 +84,9 @@ namespace CAD2Revit.Core.Tests
         [Fact]
         public void FallbackMessageAndPlaneName()
         {
-            Assert.Equal("No slab within 5000 mm - placed on reference plane at +3000 mm",
+            Assert.Equal("No slab/beam within 5000 mm - placed on reference plane at +3000 mm",
                          SlabSearch.FallbackMessage(5000, 3000, levelBased: false));
-            Assert.Equal("No slab within 4500 mm - placed level-based at +2750.5 mm",
+            Assert.Equal("No slab/beam within 4500 mm - placed level-based at +2750.5 mm",
                          SlabSearch.FallbackMessage(4500, 2750.5, levelBased: true));
             Assert.Equal("CAD2Revit_Level 1_+3000mm", RefPlaneNames.For("Level 1", 3000, Facing.Down));
         }

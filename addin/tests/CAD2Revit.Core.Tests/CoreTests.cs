@@ -336,13 +336,48 @@ namespace CAD2Revit.Core.Tests
             };
             var simple = SimpleReport.From(results, preview: true);
             Assert.Equal(2, simple.SlabFallbacks);
-            Assert.Equal(new[] { "No slab within 5000 mm - placed on reference plane at +3000 mm (2 families)" }, simple.SlabFallbackLines);
+            Assert.Equal(new[] { "No slab/beam within 5000 mm - placed on reference plane at +3000 mm (2 families)" }, simple.SlabFallbackLines);
             Assert.Empty(simple.Warnings);
             Assert.Equal("Would place 3 of 3 families", simple.Headline);
 
             var s = Report.Summarize(results);
             Assert.Equal(2, s.SlabFallbacks);
             Assert.Contains("2 Slab (above) would be placed at the fallback height", Report.SummaryText(s, true));
+        }
+    }
+
+    public class NeedsReviewTests
+    {
+        [Fact]
+        public void ListsOnlyFallbackElementsWithReasonAndIds()
+        {
+            var row = new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.SlabAbove };
+            var msg = SlabSearch.FallbackMessage(5000, 3000, false);
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 11, Point = new[] { 1.0, 2.0, 9.8 },
+                                      Message = "level 'X' not found - placed on Level 1; " + msg, SlabFallback = true, SlabHost = SlabHost.Plane },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 12, Point = new[] { 0.0, 0, 0 },
+                                      Message = SlabSearch.FallbackMessage(5000, 3000, true), SlabFallback = true, SlabHost = SlabHost.LevelBased },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 13, SlabHost = SlabHost.Beam },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 14, SlabHost = SlabHost.Slab },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Failed, ElementId = null, SlabFallback = true },
+            };
+            var items = NeedsReview.From(results);
+            Assert.Equal(new long?[] { 11, 12 }, items.Select(i => i.ElementId));
+            Assert.Equal("No slab/beam within 5000 mm", items[0].Reason);
+            Assert.Equal("Light : 600", items[0].FamilyType);
+            Assert.Equal("305, 610", items[0].XY);
+            Assert.Equal("11,12", NeedsReview.CopyIds(items));
+            var rows = NeedsReview.Rows(items);
+            Assert.Equal(NeedsReview.Header.Length, rows[0].Count);
+            Assert.Equal(11L, rows[0][0]);
+
+            var s = Report.Summarize(results);
+            Assert.Equal("Slab (above): 1 hosted on slab, 1 hosted on beam, 1 on reference plane, 1 level-based",
+                         Report.SlabHostCounts(s.SlabHosts));
+            Assert.Equal(Report.SlabHostCounts(s.SlabHosts), SimpleReport.From(results, false).SlabHostLine);
+            Assert.Equal("", SimpleReport.From(new[] { new PlacementResult { Status = Status.Placed } }, false).SlabHostLine);
         }
     }
 

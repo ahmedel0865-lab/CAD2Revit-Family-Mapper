@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.0] - 2026-09-29
+### Changed: Slab (above) hosts on slabs or beams, and a Needs Review list
+- **Nearest slab or beam.** Slab (above) now looks for Floors, Roofs **and Structural Framing (beams)**, in this model and in links, within the search range above the level. The nearest bottom face straight above the block wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. Hosts are still collected once into the face index, with no ray per block.
+- **Hosting** on the found slab/beam: bottom face, facing down, CAD rotation (unchanged).
+- **Fallback** (no slab or beam in range): unchanged, one reference plane per level at the fallback height (`CAD2Revit_<Level>_+3000mm`), or level-based at that height. The log text is now `No slab/beam within 5000 mm - placed on reference plane at +3000 mm`.
+- **Comments.** Every fallback element's Comments is set to `CAD2Revit: Host = Reference Plane` (followed by ` | CAD: <block>` when writing block names is on), so it can be found with a filter or schedule.
+- **Needs Review window** after a run, when there are fallback elements: Element ID, Family : Type, CAD Block, X, Y (mm), Reason. Clicking a row selects and zooms to the element in Revit. Buttons: **Select All in Revit**, **Copy IDs** (comma-separated, for Manage > Select by ID), **Export to Excel** (.xlsx or .csv) and Close.
+- **Counts** in Preview and in the result window: `Slab (above): N hosted on slab, N hosted on beam, N on reference plane, N level-based`.
+
 ## [0.16.0] - 2026-09-29
 ### Changed: Slab (above) search range and fallback plane
 - **Search range.** Slab (above) looks for a slab from the row's level up to the **Slab search range** (default 5000 mm), and ignores anything higher, even when the level above is higher. It replaces "next level + `SlabSearchToleranceMm`", and the 0.15.3 extra search of sloped faces up to `HostSearchDistanceMm`. Floors and roofs, in this model and in links, are still collected once and looked up in memory: there is no ray per block.

@@ -45,7 +45,7 @@ namespace CAD2Revit.Revit
 
     public partial class HostFinder
     {
-        const string Floors = "floors", Ceilings = "ceilings", AnyFace = "face";
+        const string Floors = "floors", Ceilings = "ceilings", AnyFace = "face", SlabsAndBeams = "slabsbeams";
         const double MaxWallHalfWidthFt = 2.0;   // wall location line to face, generous
 
         readonly Dictionary<string, FaceIndex<FaceSource>> _faceIndexes = new Dictionary<string, FaceIndex<FaceSource>>();
@@ -58,7 +58,8 @@ namespace CAD2Revit.Revit
         public int IndexedWalls => _walls?.Count ?? 0;
 
         static string GroupFor(HostMode mode) =>
-            mode == HostMode.SlabAbove || mode == HostMode.SlabBelow ? Floors
+            mode == HostMode.SlabAbove ? SlabsAndBeams
+            : mode == HostMode.SlabBelow ? Floors
             : mode == HostMode.Ceiling ? Ceilings
             : mode == HostMode.Face ? AnyFace : null;
 
@@ -66,6 +67,8 @@ namespace CAD2Revit.Revit
         {
             [Floors] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs },   // sloped slabs are often roofs
             [Ceilings] = new[] { BuiltInCategory.OST_Ceilings },
+            // Slab (above): nearest bottom face of a slab or a beam (a drop beam under the slab wins).
+            [SlabsAndBeams] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
             [AnyFace] = new[] { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
                                 BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
         };
@@ -267,15 +270,16 @@ namespace CAD2Revit.Revit
         /// <summary>
         /// Slab (above): the underside of the first floor slab straight above (x, y), searching
         /// up from the level - i.e. the slab of the level above. Slab (below): the top face of the
-        /// slab at the level, searching down from just above it. Only Floors and Roofs count (beams,
-        /// ceilings, ducts are ignored), in this model and in Revit links. Faces pointing the wrong
+        /// slab at the level, searching down from just above it. Floors and Roofs count, plus beams
+        /// (Structural Framing) for Slab (above): the nearest bottom face straight above the point wins,
+        /// so a beam is only used where the point is under its bottom face. In this model and in Revit links. Faces pointing the wrong
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the point is under an opening).
         /// </summary>
         public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt) =>
             Cached(above ? 100 : 101, x, y, levelZ, maxDistFt, () =>
             {
-                var idx = Faces(Floors);
+                var idx = Faces(above ? SlabsAndBeams : Floors);
                 double start = levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot);
                 var f = idx.Nearest(x, y, start, above, maxDistFt, face => above ? face.Nz < -0.5 : face.Nz > 0.5, out var z);
                 if (f != null) return FromFace(f, x, y, z, start);

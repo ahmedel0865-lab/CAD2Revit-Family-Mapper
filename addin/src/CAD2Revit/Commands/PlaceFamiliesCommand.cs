@@ -135,7 +135,23 @@ namespace CAD2Revit.Commands
 
                     using (var form = new ResultForm(simple, text, logPath, footnote))
                         form.ShowDialog(RevitOwner.Win32);
-                    if (!preview) return Result.Succeeded;
+                    if (!preview)
+                    {
+                        // Slab (above) blocks that found no slab/beam: list them so they can be fixed.
+                        var review = NeedsReview.From(results);
+                        if (review.Count > 0)
+                        {
+                            var uidoc = uiapp.ActiveUIDocument;
+                            using (var form = new NeedsReviewForm(review, ids =>
+                            {
+                                var elementIds = ids.Select(Compat.ToId).ToList();
+                                uidoc.Selection.SetElementIds(elementIds);
+                                uidoc.ShowElements(elementIds);
+                            }))
+                                form.ShowDialog(RevitOwner.Win32);
+                        }
+                        return Result.Succeeded;
+                    }
                 }
             }
             catch (Exception ex)

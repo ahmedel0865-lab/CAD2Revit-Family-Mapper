@@ -14,6 +14,9 @@ namespace CAD2Revit.Core
         Failed,     // Revit refused the placement / no host found
     }
 
+    /// <summary>What a Slab (above) block ended up on (None for other host types).</summary>
+    public enum SlabHost { None, Slab, Beam, Plane, LevelBased }
+
     /// <summary>The outcome for one CAD block (or one unmapped block name).</summary>
     public class PlacementResult
     {
@@ -32,6 +35,8 @@ namespace CAD2Revit.Core
         public int Count = 1;
         /// <summary>Slab (above) found no slab in range: placed on the fallback plane / height.</summary>
         public bool SlabFallback;
+        /// <summary>Slab (above): slab, beam, reference plane or level-based.</summary>
+        public SlabHost SlabHost;
     }
 
     public class Summary
@@ -44,6 +49,8 @@ namespace CAD2Revit.Core
         public List<PlacementResult> Warnings = new List<PlacementResult>();
         /// <summary>Slab (above) blocks with no slab in range, placed at the fallback height.</summary>
         public int SlabFallbacks;
+        /// <summary>Slab (above) blocks placed, by what they ended up on.</summary>
+        public Dictionary<SlabHost, int> SlabHosts = new Dictionary<SlabHost, int>();
 
         public int Get(Status s) => Status.TryGetValue(s, out var n) ? n : 0;
     }
@@ -70,6 +77,8 @@ namespace CAD2Revit.Core
             {
                 s.Status[r.Status] = s.Get(r.Status) + r.Count;
                 if (r.Status == Status.Placed && r.SlabFallback) s.SlabFallbacks += r.Count;
+                if (r.Status == Status.Placed && r.SlabHost != SlabHost.None)
+                    s.SlabHosts[r.SlabHost] = (s.SlabHosts.TryGetValue(r.SlabHost, out var k) ? k : 0) + r.Count;
                 if (r.Status == Status.Placed && r.Row != null)
                 {
                     byType[r.Row.Label] = (byType.TryGetValue(r.Row.Label, out var n) ? n : 0) + 1;
@@ -128,6 +137,14 @@ namespace CAD2Revit.Core
             return rows;
         }
 
+        /// <summary>"Slab (above): 12 hosted on slab, 3 hosted on beam, 2 on reference plane, 1 level-based".</summary>
+        public static string SlabHostCounts(IDictionary<SlabHost, int> counts)
+        {
+            int N(SlabHost h) => counts.TryGetValue(h, out var n) ? n : 0;
+            return $"Slab (above): {N(SlabHost.Slab)} hosted on slab, {N(SlabHost.Beam)} hosted on beam, " +
+                   $"{N(SlabHost.Plane)} on reference plane, {N(SlabHost.LevelBased)} level-based";
+        }
+
         /// <summary>Plain-text summary shown in the result window.</summary>
         public static string SummaryText(Summary s, bool preview)
         {
@@ -139,8 +156,9 @@ namespace CAD2Revit.Core
                 $"{s.Get(Status.Duplicate)} duplicates skipped, {s.Get(Status.Failed)} failed, " +
                 $"{s.Get(Status.Skipped)} not loaded, {s.Get(Status.Unmapped)} unmapped instances",
             };
+            if (s.SlabHosts.Count > 0) lines.Add(SlabHostCounts(s.SlabHosts));
             if (s.SlabFallbacks > 0)
-                lines.Add($"{s.SlabFallbacks} Slab (above) {(preview ? "would be placed" : "placed")} at the fallback height (no slab in range) - see the log");
+                lines.Add($"{s.SlabFallbacks} Slab (above) {(preview ? "would be placed" : "placed")} at the fallback height (no slab/beam in range) - see the log");
             if (s.ByType.Count > 0)
             {
                 lines.Add("");

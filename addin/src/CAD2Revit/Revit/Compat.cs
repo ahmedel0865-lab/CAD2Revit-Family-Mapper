@@ -15,5 +15,20 @@ namespace CAD2Revit.Revit
             return id.IntegerValue;
 #endif
         }
+
+        public static ElementId ToId(long value)
+        {
+#if REVIT2024_OR_GREATER
+            return new ElementId(value);
+#else
+            return new ElementId((int)value);
+#endif
+        }
+
+        public static bool IsCategory(Element e, BuiltInCategory bic)
+        {
+            try { return e?.Category != null && IdValue(e.Category.Id) == (long)bic; }
+            catch (System.Exception) { return false; }
+        }
     }
 }

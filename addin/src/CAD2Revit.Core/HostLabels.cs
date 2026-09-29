@@ -74,9 +74,12 @@ namespace CAD2Revit.Core
         public static double RangeFt(double rangeMm) => Math.Max(rangeMm, 1) / MmPerFoot;
 
         /// <summary>Log text for a Slab (above) block with no slab in range, e.g.
-        /// "No slab within 5000 mm - placed on reference plane at +3000 mm".</summary>
+        /// "No slab/beam within 5000 mm - placed on reference plane at +3000 mm".</summary>
         public static string FallbackMessage(double rangeMm, double planeMm, bool levelBased) =>
-            $"No slab within {Mm(rangeMm)} mm - placed {(levelBased ? "level-based" : "on reference plane")} at {(planeMm < 0 ? "-" : "+")}{Mm(Math.Abs(planeMm))} mm";
+            $"{FallbackReason(rangeMm)} - placed {(levelBased ? "level-based" : "on reference plane")} at {(planeMm < 0 ? "-" : "+")}{Mm(Math.Abs(planeMm))} mm";
+
+        /// <summary>"No slab/beam within 5000 mm" (the Needs Review reason).</summary>
+        public static string FallbackReason(double rangeMm) => $"No slab/beam within {Mm(rangeMm)} mm";
 
         static string Mm(double v) => Math.Round(v, 1).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     }

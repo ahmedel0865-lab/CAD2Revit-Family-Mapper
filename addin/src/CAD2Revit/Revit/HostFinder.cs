@@ -118,7 +118,9 @@ namespace CAD2Revit.Revit
             if (_intersectors.TryGetValue(mode, out var ri)) return ri;
             var cats = mode == HostMode.Wall
                 ? new List<BuiltInCategory> { BuiltInCategory.OST_Walls }
-                : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow
+                : mode == HostMode.SlabAbove
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming }
+                : mode == HostMode.SlabBelow
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs }   // slabs (sloped ones are often roofs)
                 : mode == HostMode.Ceiling
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings }
@@ -191,7 +193,7 @@ namespace CAD2Revit.Revit
             {
             var dir = above ? XYZ.BasisZ : XYZ.BasisZ.Negate();
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
-            var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
+            var hits = Intersector(above ? HostMode.SlabAbove : HostMode.SlabBelow).Find(origin, dir);
             if (hits == null) return null;
             foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
             {
