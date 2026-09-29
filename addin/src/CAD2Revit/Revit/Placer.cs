@@ -380,7 +380,8 @@ namespace CAD2Revit.Revit
                 }
                 else
                 {
-                    hit = finder.FindSlab(above, x, y, levelZ, maxDist);
+                    hit = finder.FindSlab(above, x, y, levelZ, maxDist,
+                                          above ? SlabSearch.SlopedAboveDistanceFt(maxDist, _settings.HostSearchDistanceMm) : 0);
                     if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
                         { plan.Fail(Result(b, row, Status.Failed,
                             Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +

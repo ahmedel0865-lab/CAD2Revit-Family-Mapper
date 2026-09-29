@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.15.3] - 2026-09-29
+### Fixed: Slab (above) did not follow sloped slabs
+- **Roofs count as slabs.** Sloped slabs are often modelled as Roofs, which Slab (above) and Slab (below) ignored. The tool found no slab, and the family ended up flat on a reference plane below the slope. Roofs are now searched along with Floors, in this model and in links.
+- **High end of a sloped slab.** The search stopped at the next level + `SlabSearchToleranceMm`. Where a sloped underside rises above that, it was missed and the family was placed flat. Sloped faces (more than about 3 degrees) are now also searched up to `HostSearchDistanceMm`. A flat slab two floors up is still never used.
+
 ## [0.15.2] - 2026-09-28
 ### Changed: simpler results window after Place Families
 - **Headline**: "Placed X of Y families" ("Would place ..." in Preview), green when every block was placed, amber otherwise.

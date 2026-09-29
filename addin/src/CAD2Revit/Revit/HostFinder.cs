@@ -119,7 +119,7 @@ namespace CAD2Revit.Revit
             var cats = mode == HostMode.Wall
                 ? new List<BuiltInCategory> { BuiltInCategory.OST_Walls }
                 : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow
-                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors }   // structural + architectural slabs only
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs }   // slabs (sloped ones are often roofs)
                 : mode == HostMode.Ceiling
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings }
                     : new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
@@ -185,7 +185,7 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the ray passes through an opening).
         /// </summary>
-        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt)
+        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt, double slopedMaxDistFt = 0)
         {
             using (_timer.Time(Phases.HostRay))
             {
@@ -193,11 +193,14 @@ namespace CAD2Revit.Revit
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
             var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
             if (hits == null) return null;
-            foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
+            double limit = Math.Max(maxDistFt, slopedMaxDistFt);
+            foreach (var ctx in hits.Where(h => h.Proximity <= limit).OrderBy(h => h.Proximity))
             {
                 var hit = MakeHit(ctx, dir);
                 double nz = hit.FaceNormal.Z;
-                if (above ? nz < -0.5 : nz > 0.5) return hit;   // bottom face (faces down) / top face (faces up)
+                if (!(above ? nz < -0.5 : nz > 0.5)) continue;   // bottom face (faces down) / top face (faces up)
+                // Past maxDist only a sloped face counts (its high end can rise above the next level).
+                return ctx.Proximity <= maxDistFt || SlabSearch.IsSloped(nz) ? hit : null;
             }
             return null;
             }

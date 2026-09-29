@@ -64,7 +64,7 @@ namespace CAD2Revit.Revit
 
         static readonly Dictionary<string, BuiltInCategory[]> GroupCategories = new Dictionary<string, BuiltInCategory[]>
         {
-            [Floors] = new[] { BuiltInCategory.OST_Floors },
+            [Floors] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs },   // sloped slabs are often roofs
             [Ceilings] = new[] { BuiltInCategory.OST_Ceilings },
             [AnyFace] = new[] { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
                                 BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
@@ -267,19 +267,19 @@ namespace CAD2Revit.Revit
         /// <summary>
         /// Slab (above): the underside of the first floor slab straight above (x, y), searching
         /// up from the level - i.e. the slab of the level above. Slab (below): the top face of the
-        /// slab at the level, searching down from just above it. Only Floor elements count (beams,
+        /// slab at the level, searching down from just above it. Only Floors and Roofs count (beams,
         /// ceilings, ducts are ignored), in this model and in Revit links. Faces pointing the wrong
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the point is under an opening).
         /// </summary>
-        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt) =>
+        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt, double slopedMaxDistFt = 0) =>
             Cached(above ? 100 : 101, x, y, levelZ, maxDistFt, () =>
             {
                 var idx = Faces(Floors);
                 double start = levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot);
-                var f = idx.Nearest(x, y, start, above, maxDistFt, face => above ? face.Nz < -0.5 : face.Nz > 0.5, out var z);
+                var f = SlabSearch.Nearest(idx, x, y, start, above, maxDistFt, slopedMaxDistFt, out var z);
                 if (f != null) return FromFace(f, x, y, z, start);
-                return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt) : null;
+                return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt, slopedMaxDistFt) : null;
             });
 
         /// <summary>Nearest wall side face to (x, y) at height z, within maxDistFt: candidate walls
