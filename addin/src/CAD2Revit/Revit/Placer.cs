@@ -36,6 +36,10 @@ namespace CAD2Revit.Revit
         SlabOptions _slab = new SlabOptions();   // Slab (above) range / fallback, from the mapping
         PhaseTimer _timer = new PhaseTimer();
 
+        /// <summary>false = "Place anyway": elements already in the model are ignored (blocks
+        /// repeated at the same spot within this run are still placed once).</summary>
+        public bool CheckDuplicates = true;
+
         public Placer(Document doc, Settings settings)
         {
             _doc = doc;
@@ -192,18 +196,10 @@ namespace CAD2Revit.Revit
                     bool createdLevelPlanes = false;
 
                     // Duplicate check: one grid of all existing instances, built once.
-                    PointGrid dups;
+                    ExistingIndex dups;
                     var familyOfType = new Dictionary<long, long>();
                     using (_timer.Time(Phases.DupIndex))
-                    {
-                        dups = new PointGrid(Ft(_settings.DuplicateToleranceMm));
-                        foreach (var fi in new FilteredElementCollector(_doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
-                            if (fi.Location is LocationPoint lp)
-                            {
-                                var key = DupKey(fi.GetTypeId(), familyOfType);
-                                if (key != 0) dups.Add(key, lp.Point.X, lp.Point.Y, lp.Point.Z);
-                            }
-                    }
+                        dups = CheckDuplicates ? BuildExisting(familyOfType) : new ExistingIndex(Ft(_settings.DuplicateToleranceMm));
 
                     var contexts = new Dictionary<long, LevelContext>();
                     LevelContext ContextFor(Level level)
@@ -221,11 +217,8 @@ namespace CAD2Revit.Revit
                             MaxUp = maxUp,
                             NextZ = top,
                             SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
-                            BandMin = levelZ - Ft(300),
-                            // Up to the next level, and at least the Slab (above) / Ceiling range and
-                            // fallback plane, so re-runs still see those instances as duplicates.
-                            BandMax = Math.Max(top ?? levelZ + Math.Max(maxUp, Ft(3000)),
-                                               levelZ + Math.Max(SlabSearch.RangeFt(_slab.SearchRangeMm), Ft(_slab.FallbackPlaneMm)) + Ft(1)),
+                            BandMin = BandBottom(levelZ),
+                            BandMax = BandTop(levelZ, top, maxUp),
                             LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
                             VerticalPlanes = new VerticalPlanes(_doc, level),
                         };
@@ -315,6 +308,64 @@ namespace CAD2Revit.Revit
                 }
             }
             return results;
+        }
+
+        /// <summary>Every existing instance with a point location: family key, Comments and point.</summary>
+        ExistingIndex BuildExisting(Dictionary<long, long> familyOfType)
+        {
+            var index = new ExistingIndex(Ft(_settings.DuplicateToleranceMm));
+            foreach (var fi in new FilteredElementCollector(_doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
+                if (fi.Location is LocationPoint lp)
+                {
+                    var comments = fi.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
+                    index.Add(DupKey(fi.GetTypeId(), familyOfType), comments, lp.Point.X, lp.Point.Y, lp.Point.Z);
+                }
+            return index;
+        }
+
+        static double BandBottom(double levelZ) => levelZ - Ft(300);
+
+        /// <summary>Top of a level's duplicate-check band: up to the next level, and at least the
+        /// Slab (above) / Ceiling range and fallback plane, so re-runs still see those instances.</summary>
+        double BandTop(double levelZ, double? nextZ, double maxUp) =>
+            Math.Max(nextZ ?? levelZ + Math.Max(maxUp, Ft(3000)),
+                     levelZ + Math.Max(SlabSearch.RangeFt(_slab.SearchRangeMm), Ft(_slab.FallbackPlaneMm)) + Ft(1));
+
+        /// <summary>
+        /// Before Run: how many mapped blocks already have an instance at their location (same
+        /// family, or Comments "CAD: &lt;block&gt;"), using the same tolerance and height band as the
+        /// duplicate check. Read-only, no transaction.
+        /// </summary>
+        public int CountExisting(List<BlockRef> blocks, MappingResult mapping,
+                                 Dictionary<MapRow, FamilySymbol> symbols, Level defaultLevel)
+        {
+            _slab = mapping.Slab ?? new SlabOptions();
+            var levels = new FilteredElementCollector(_doc).OfClass(typeof(Level)).Cast<Level>().ToList();
+            var levelZs = levels.Select(l => l.ProjectElevation).ToList();
+            var byName = new Dictionary<string, Level>(StringComparer.OrdinalIgnoreCase);
+            foreach (var l in levels) if (!byName.ContainsKey(l.Name)) byName[l.Name] = l;
+            var familyOfType = new Dictionary<long, long>();
+            var index = BuildExisting(familyOfType);
+            if (index.Count == 0) return 0;
+            var bands = new Dictionary<long, (double, double)>();
+            int n = 0;
+            foreach (var b in blocks)
+            {
+                if (!mapping.Rows.TryGetValue(b.Name, out var row) || !symbols.TryGetValue(row, out var sym)) continue;
+                var level = !string.IsNullOrWhiteSpace(row.LevelName) && byName.TryGetValue(row.LevelName.Trim(), out var rl) ? rl : defaultLevel;
+                long lk = Compat.IdValue(level.Id);
+                if (!bands.TryGetValue(lk, out var band))
+                {
+                    double z = level.ProjectElevation;
+                    var above = levelZs.Where(v => v > z + 0.01).ToList();
+                    double? top = above.Count > 0 ? above.Min() : (double?)null;
+                    double maxUp = Ft(_settings.HostSearchDistanceMm);
+                    if (top.HasValue) maxUp = Math.Min(maxUp, top.Value - z);
+                    bands[lk] = band = (BandBottom(z), BandTop(z, top, maxUp));
+                }
+                if (index.Contains(DupKey(sym.Id, familyOfType), b.Name, b.Point.X, b.Point.Y, band.Item1, band.Item2)) n++;
+            }
+            return n;
         }
 
         /// <summary>Duplicate-grid key: the family (or, with DuplicateSameTypeOnly, the type).</summary>
@@ -525,7 +576,7 @@ namespace CAD2Revit.Revit
         }
 
         PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx,
-                                 PointGrid dups, Dictionary<long, long> familyOfType,
+                                 ExistingIndex dups, Dictionary<long, long> familyOfType,
                                  Dictionary<(MapRow, long), List<Pending>> batches,
                                  Dictionary<(MapRow, long), (Level, FamilySymbol)> batchLevel, List<Created> created)
         {
@@ -540,7 +591,7 @@ namespace CAD2Revit.Revit
         }
 
         PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx,
-                                 PointGrid dups, Dictionary<long, long> familyOfType,
+                                 ExistingIndex dups, Dictionary<long, long> familyOfType,
                                  Dictionary<(MapRow, long), List<Pending>> batches,
                                  Dictionary<(MapRow, long), (Level, FamilySymbol)> batchLevel, List<Created> created, Plan plan)
         {
@@ -563,8 +614,8 @@ namespace CAD2Revit.Revit
                        : new XYZ(x, y, levelZ + offset);
             long dupKey = DupKey(sym.Id, familyOfType);
             using (_timer.Time(Phases.DupQuery))
-                if (dups.Contains(dupKey, target.X, target.Y, ctx.BandMin, ctx.BandMax))
-                    return WithDebug(Result(b, row, Status.Duplicate, Notes("an instance of this family already exists here"), target, angle), plan);
+                if (dups.Contains(dupKey, b.Name, target.X, target.Y, ctx.BandMin, ctx.BandMax))
+                    return WithDebug(Result(b, row, Status.Duplicate, Notes("already in the model here (same family, or Comments \"CAD: " + b.Name + "\")"), target, angle), plan);
 
             // 3a. Level-based without a host: batched (created after the loop).
             if (hit == null && !plan.OnLevelPlane && !plan.OnVertical && ptype == FamilyPlacementType.OneLevelBased)
@@ -578,7 +629,7 @@ namespace CAD2Revit.Revit
                 var pending = Result(b, row, Status.Placed, Notes(), target, angle);
                 list.Add(new Pending { Block = b, Result = pending, Base = new XYZ(x, y, levelZ), Angle = angle,
                                        Offset = plan.LevelElevMm.HasValue ? offset : (double?)null });
-                dups.Add(dupKey, target.X, target.Y, target.Z);
+                dups.Add(dupKey, "CAD: " + b.Name, target.X, target.Y, target.Z);
                 plan.FinalHost = "Level " + level.Name + " (level-based, no host)";
                 return WithDebug(pending, plan);
             }
@@ -594,7 +645,7 @@ namespace CAD2Revit.Revit
                     if (res.Status == Status.Placed)
                     {
                         st.Commit();
-                        dups.Add(dupKey, target.X, target.Y, target.Z);
+                        dups.Add(dupKey, "CAD: " + b.Name, target.X, target.Y, target.Z);
                         created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res });
                     }
                     else st.RollBack();

@@ -227,8 +227,10 @@ namespace CAD2Revit.UI
             return opt;
         }
 
-        /// <summary>Apply a loaded mapping to the grid. Returns (rows applied, messages).</summary>
-        public (int applied, List<string> messages) Apply(MappingResult mapping)
+        /// <summary>Apply a loaded mapping to the grid. Returns (rows applied, messages).
+        /// families = false (opening the tool): every row stays on (Skip); only Elevation, Host
+        /// Type, Rotation, Facing, Level, Category and the Slab / Ceiling options are restored.</summary>
+        public (int applied, List<string> messages) Apply(MappingResult mapping, bool families = true)
         {
             int applied = 0;
             var messages = new List<string>(mapping.Errors);
@@ -237,7 +239,7 @@ namespace CAD2Revit.UI
             {
                 if (mapping.Rows.TryGetValue(row.BlockName, out var m))
                 {
-                    var opt = Resolve(m.Family, m.TypeName);
+                    var opt = families ? Resolve(m.Family, m.TypeName) : FamilyOption.Skip;
                     if (opt == null)
                         messages.Add($"'{row.BlockName}': family '{m.Family} : {m.TypeName}' is not loaded in this model - left as (Skip)");
                     row.Apply(m, opt);
@@ -257,6 +259,19 @@ namespace CAD2Revit.UI
                 if (mapping.Categories.TryGetValue(row.BlockName, out var cat)) row.Category = cat;
             }
             return (applied, messages);
+        }
+
+        /// <summary>"Clear All Families": every row back to (Skip). Returns how many rows changed.</summary>
+        public int ClearFamilies()
+        {
+            int n = 0;
+            foreach (var row in Rows)
+                if (!row.Family.IsSkip)
+                {
+                    row.Family = FamilyOption.Skip;
+                    n++;
+                }
+            return n;
         }
 
         /// <summary>Pre-select a family for every (Skip) row whose name closely matches

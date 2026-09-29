@@ -43,11 +43,11 @@ flowchart LR
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
 - **Find** box and **Show** filter; **Skip shown rows** hides e.g. all architectural blocks in one click.
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.
-- **Auto-selects** families whose names match the block name (`SMOKE-DET` → *Smoke Detector*), including common CAD abbreviations.
+- **Revit Family starts at `(Skip)`** every time the tool opens, so you pick the families for this run yourself. **Auto-match** pre-selects families whose names match the block name (`SMOKE-DET` → *Smoke Detector*, common CAD abbreviations included) when you click it, and **Clear All Families** sets every row back to `(Skip)`.
 - **Level + elevation per row**: different blocks can go on different levels in one run.
 - **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category together.
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
-- **Remembers the last mapping per project**; Load / Save mappings as **.xlsx or .csv**.
+- **Remembers per project** Elevation From Level, Host Type, Rotation, Facing, Level and the Slab (above) / Ceiling search range and fallback height, but not the families. Load / Save mappings as **.xlsx or .csv**; **Load...** is the only way families are filled in from a file.
 
 **Placement and hosting**
 - Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
@@ -62,7 +62,7 @@ flowchart LR
 
 **Safety and output**
 - **Preview** runs the full placement and undoes it, so its counts match a real run.
-- **Duplicate protection** per level: re-running only adds new blocks.
+- **Duplicate protection** per level: before a Run, if elements are already at the block locations (same family, or Comments `CAD: <block>`), the tool asks *"X elements already exist at these locations"*: **Skip them** (default), **Place anyway** or **Cancel**.
 - **One transaction**: a single Ctrl+Z undoes a whole run.
 - **Fast on big drawings**: hosts are found from face/wall indexes built once (not one ray per block), and level-based families are created in batches. A progress bar with **Cancel** is shown (Cancel rolls everything back), and a **Timings** table shows where the time went. See [Performance](#performance).
 - Summary per family type, unmapped blocks and failures with reasons; a **CSV log** of every block with Element ID, level, host, coordinates and rotation.
@@ -82,10 +82,10 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
 2. **CAD2Revit > Place Families** > pick the DWG > **Next**.
-3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
+3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select close matches, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
 4. **Preview** > check the result and the *Detected Host* column > **Run**. One Ctrl+Z undoes it all.
 
-Next time in the same project, the mapping window opens pre-filled.
+Next time in the same project, the mapping window remembers elevations, host types, rotation, facing and levels. Every Revit Family starts at `(Skip)`, so you only re-pick the families (or use **Load...**).
 
 - Full guide: [docs/USAGE.md](docs/USAGE.md)
 - Test on a small sample first: [docs/TESTING.md](docs/TESTING.md)

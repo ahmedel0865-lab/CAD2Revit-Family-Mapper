@@ -61,7 +61,7 @@ namespace CAD2Revit.Commands
                 }
 
                 sw.Restart();
-                var session = BuildSession(doc, opts, blocks, settings, out var startupNotes);
+                var session = BuildSession(doc, opts, blocks, settings);
                 var setupTime = sw.Elapsed;
 
                 // 3. Mapping window -> Preview / Run loop.
@@ -69,12 +69,6 @@ namespace CAD2Revit.Commands
                 {
                     var win = new MappingWindow(session);
                     RevitOwner.Attach(win);
-                    if (startupNotes != null)
-                    {
-                        var notes = startupNotes;
-                        win.ContentRendered += (s, e) => System.Windows.MessageBox.Show(win, notes, "CAD2Revit");
-                        startupNotes = null;
-                    }
                     win.ShowDialog();
                     if (win.Action == MappingAction.Cancel)
                         return Result.Cancelled;
@@ -101,12 +95,25 @@ namespace CAD2Revit.Commands
                         mapping = session.ToMapping();
                         symbols = Placer.ResolveSymbols(doc, mapping, errors);
                     }
+                    // Run: warn when elements were already placed at these locations.
+                    var placer = new Placer(doc, settings);
+                    if (!preview)
+                    {
+                        int existing;
+                        using (timer.Time(Phases.DupIndex)) existing = placer.CountExisting(blocks, mapping, symbols, opts.Level);
+                        if (existing > 0)
+                        {
+                            var choice = AskExisting(existing);
+                            if (choice == ExistingChoice.Cancel) continue;   // back to the mapping window
+                            placer.CheckDuplicates = choice == ExistingChoice.Skip;
+                        }
+                    }
                     List<PlacementResult> results;
                     try
                     {
                         using (var progress = new ProgressWindow(preview ? "CAD2Revit - Preview" : "CAD2Revit - Placing families",
                                                                  uiapp.MainWindowHandle))
-                            results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
+                            results = placer.PlaceAll(blocks, mapping, symbols, opts.Level, preview,
                                                                          progress.Report, DwgExtents(opts.Import), timer);
                     }
                     catch (OperationCanceledException)
@@ -162,12 +169,34 @@ namespace CAD2Revit.Commands
             }
         }
 
-        /// <summary>One grid row per unique block name, pre-filled from the project's last
-        /// mapping, then by name matching for blocks that were never mapped.</summary>
-        static MappingSession BuildSession(Document doc, PlaceOptions opts, List<BlockRef> blocks,
-                                           Core.Settings settings, out string notes)
+        enum ExistingChoice { Skip, PlaceAnyway, Cancel }
+
+        /// <summary>"X elements already exist at these locations": Skip them (default) / Place anyway / Cancel.</summary>
+        static ExistingChoice AskExisting(int count)
         {
-            notes = null;
+            var td = new TaskDialog("CAD2Revit - already placed")
+            {
+                MainInstruction = ExistingIndex.Warning(count),
+                MainContent = "An element of the same family, or one whose Comments say \"CAD: <block>\", is already " +
+                              "at these block locations (probably from an earlier run).",
+                AllowCancellation = true,
+                CommonButtons = TaskDialogCommonButtons.None,
+                DefaultButton = TaskDialogResult.CommandLink1,
+            };
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Skip them", "Place only the blocks that are not in the model yet (recommended)");
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Place anyway", "Place every block, even where an element already exists");
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "Cancel", "Go back to the mapping window");
+            var r = td.Show();
+            return r == TaskDialogResult.CommandLink1 ? ExistingChoice.Skip
+                 : r == TaskDialogResult.CommandLink2 ? ExistingChoice.PlaceAnyway
+                 : ExistingChoice.Cancel;
+        }
+
+        /// <summary>One grid row per unique block name. The project's last mapping restores
+        /// Elevation, Host Type, Rotation, Facing, Level and the Slab / Ceiling options, but every
+        /// Revit Family starts at (Skip): families are picked again, or come from Load... / Auto-match.</summary>
+        static MappingSession BuildSession(Document doc, PlaceOptions opts, List<BlockRef> blocks, Core.Settings settings)
+        {
             var session = new MappingSession
             {
                 DwgName = doc.GetElement(opts.Import.GetTypeId())?.Name ?? "DWG",
@@ -186,20 +215,8 @@ namespace CAD2Revit.Commands
                     Symbol = symbols.TryGetValue(kv.Key, out var sym) ? sym : null,
                 });
 
-            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (File.Exists(session.ProjectMappingPath))
-            {
-                var saved = Mapping.Load(session.ProjectMappingPath);
-                var (_, messages) = session.Apply(saved);
-                known.UnionWith(saved.Rows.Keys);
-                known.UnionWith(saved.SkippedBlocks);
-                var missing = messages.Where(m => m.Contains("is not loaded")).ToList();
-                if (missing.Count > 0)
-                    notes = "Some families from this project's last mapping are no longer loaded:\n\n" +
-                            string.Join("\n", missing.Take(15)) + (missing.Count > 15 ? "\n..." : "");
-            }
-            session.AutoMatch(row => !known.Contains(row.BlockName));
-            foreach (var row in session.Rows) MappingSession.UseFamilyCategory(row);
+                session.Apply(Mapping.Load(session.ProjectMappingPath), families: false);
             return session;
         }
 

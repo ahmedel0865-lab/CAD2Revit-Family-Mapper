@@ -135,6 +135,7 @@ namespace CAD2Revit.UI
             left.Children.Add(MakeButton("Load...", (s, e) => LoadMapping(), "Load a mapping (XLSX or CSV) into the grid"));
             left.Children.Add(MakeButton("Save...", (s, e) => SaveMapping(), "Save the grid as a mapping file (XLSX or CSV)"));
             left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch(), "Pre-select families whose names match the block names (rows still on Skip)"));
+            left.Children.Add(MakeButton("Clear All Families", (s, e) => ClearFamilies(), "Set the Revit Family of every row back to (Skip); the other columns stay"));
             left.Children.Add(_status);
             DockPanel.SetDock(left, Dock.Left);
             bottom.Children.Add(left);
@@ -781,6 +782,17 @@ namespace CAD2Revit.UI
                     ? "No further close matches found. Rows already mapped are not changed."
                     : $"Pre-selected a family for {n} block(s) whose names closely match. Please check them.",
                 "CAD2Revit");
+        }
+
+        void ClearFamilies()
+        {
+            CommitEdits();
+            int n = _s.Rows.Count(r => !r.Family.IsSkip);
+            if (n == 0) return;
+            if (MessageBox.Show(this, $"Set the Revit Family of all {n} mapped row(s) back to (Skip)?", "CAD2Revit",
+                    MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+            _s.ClearFamilies();
+            UpdateStatus();
         }
 
         void TrySetInitialDir(FileDialog dlg)

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.19.0] - 2026-09-29
+### Changed: the mapping window starts with no families picked, and a warning before placing twice
+- **Revit Family starts at (Skip) every time.** Opening Place Families no longer fills in the families from the last run, and no longer auto-selects families by name. Every row starts at `(Skip)`, so nothing is placed that you did not pick this time.
+- **The other columns are still remembered** per project: Elevation From Level, Host Type, Rotation, Facing, Level and Category, plus the Slab (above) / Ceiling *Search range* and *Fallback reference plane height*. You only re-pick the families.
+- **Families come back only when you ask**: **Load...** fills the grid from a mapping file (families included), and **Auto-match** still pre-selects by name when you click it. Preview keeps your picks when you return to the mapping window.
+- **Clear All Families** button (next to Load / Save / Auto-match): sets every row back to `(Skip)` and leaves the other columns as they are.
+- **Warning before Run when elements are already there.** Before a Run, the tool checks every block location for an element that is already in the model: an instance of the same family (the existing duplicate check, same tolerance and level band), or one whose Comments say `CAD: <block>` (placed by CAD2Revit, even with another family). If any are found, it asks: *"X elements already exist at these locations."* **Skip them** (default) / **Place anyway** / **Cancel** (back to the mapping window). Skipped blocks are listed as duplicates in the result window and the log.
+- The duplicate check during a run also counts elements whose Comments say `CAD: <block>` for the same block.
+
 ## [0.18.0] - 2026-09-29
 ### Changed: Ceiling uses the same search and fallback as Slab (above)
 - **One shared search.** Slab (above) and Ceiling now use the same code (`HostFinder.FindUnderside`, with the host type choosing the categories): the nearest bottom face straight above the block, from the level up to the search range, in this model and in links. Ceiling searches Ceilings; Slab (above) searches Floors, Roofs and beams. Hosts are still collected once into the face index, with no ray per block.
