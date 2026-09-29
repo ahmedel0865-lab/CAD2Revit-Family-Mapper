@@ -222,7 +222,10 @@ namespace CAD2Revit.Revit
                             NextZ = top,
                             SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
                             BandMin = levelZ - Ft(300),
-                            BandMax = top ?? levelZ + Math.Max(maxUp, Ft(3000)),
+                            // Up to the next level, and at least the Slab (above) / Ceiling range and
+                            // fallback plane, so re-runs still see those instances as duplicates.
+                            BandMax = Math.Max(top ?? levelZ + Math.Max(maxUp, Ft(3000)),
+                                               levelZ + Math.Max(SlabSearch.RangeFt(_slab.SearchRangeMm), Ft(_slab.FallbackPlaneMm)) + Ft(1)),
                             LevelPlanes = new LevelPlanes(_doc, level, extents, () => { createdLevelPlanes = true; return section ?? (View)TempView(); }),
                             VerticalPlanes = new VerticalPlanes(_doc, level),
                         };
@@ -375,19 +378,23 @@ namespace CAD2Revit.Revit
             bool onLevelPlane = false; // face/work-plane based family on a horizontal reference plane
             double planeElevMm = row.OffsetMm;   // plane height above the level, and which way it faces
             var planeFacing = row.Facing;
-            if (row.Host == HostMode.SlabAbove)
+            if (row.Host == HostMode.SlabAbove || row.Host == HostMode.Ceiling)
             {
-                // Floors (and roofs) from the level up to the search range - never higher, even if
-                // the level above is. No slab in range: one reference plane per level at the
-                // fallback height, facing down (level-based families: that Elevation From Level).
+                // Shared for Slab (above) and Ceiling: the nearest bottom face above the block
+                // (Slab: floors, roofs, beams; Ceiling: ceilings), from the level up to the search
+                // range - never higher, even if the level above is. Nothing in range: one reference
+                // plane per level at the fallback height, facing down (level-based families: that
+                // Elevation From Level).
+                bool ceiling = row.Host == HostMode.Ceiling;
                 double rangeMm = _slab.SearchRangeMm, planeMm = _slab.FallbackPlaneMm;
-                hit = finder.FindSlab(true, x, y, levelZ, SlabSearch.RangeFt(rangeMm));
+                hit = finder.FindUnderside(row.Host, x, y, levelZ, SlabSearch.RangeFt(rangeMm));
+                string what = ceiling ? "ceiling"
+                            : hit != null && Compat.IsCategory(hit.Element, BuiltInCategory.OST_StructuralFraming) ? "beam" : "slab";
                 if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
                     { plan.Fail(Result(b, row, Status.Failed,
-                        Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
+                        Notes($"{what} is in a Revit link; legacy hosted families can only be hosted in this model - " +
                               "use a face-based family"), b.Point, angle)); return plan; }
-                string what = hit != null && Compat.IsCategory(hit.Element, BuiltInCategory.OST_StructuralFraming) ? "beam" : "slab";
-                if (hit != null) plan.SlabHost = what == "beam" ? SlabHost.Beam : SlabHost.Slab;
+                if (hit != null) plan.SlabHost = ceiling ? SlabHost.Ceiling : what == "beam" ? SlabHost.Beam : SlabHost.Slab;
                 if (hit != null && ptype == FamilyPlacementType.OneLevelBased)
                 {
                     // A level-based family cannot sit on the face: same height, level-based.
@@ -399,23 +406,19 @@ namespace CAD2Revit.Revit
                 else if (hit == null)
                 {
                     if (ptype == FamilyPlacementType.OneLevelBasedHosted)
-                        { plan.Fail(Result(b, row, Status.Failed, Notes(SlabSearch.FallbackReason(rangeMm) + " - " +
-                                                                       "legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
+                        { plan.Fail(Result(b, row, Status.Failed, Notes(SlabSearch.FallbackReason(rangeMm, row.Host) + " - " +
+                                                                       $"legacy hosted family needs a real {(ceiling ? "ceiling" : "slab")}"), b.Point, angle)); return plan; }
                     plan.SlabFallback = true;
-                    if (ptype == FamilyPlacementType.WorkPlaneBased)
+                    bool onPlane = ptype == FamilyPlacementType.WorkPlaneBased;
+                    if (onPlane)
                     {
                         planeElevMm = planeMm;
                         planeFacing = Facing.Down;
                         onLevelPlane = true;
-                        plan.SlabHost = SlabHost.Plane;
-                        notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: false));
                     }
-                    else
-                    {
-                        plan.LevelElevMm = planeMm;
-                        plan.SlabHost = SlabHost.LevelBased;
-                        notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: true));
-                    }
+                    else plan.LevelElevMm = planeMm;
+                    plan.SlabHost = onPlane ? SlabHost.Plane : SlabHost.LevelBased;
+                    notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: !onPlane, row.Host));
                 }
             }
             else if (row.Host == HostMode.SlabBelow)

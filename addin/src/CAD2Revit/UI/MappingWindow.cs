@@ -657,16 +657,16 @@ namespace CAD2Revit.UI
 
         // ---- Slab (above) options ------------------------------------------------------
         readonly TextBox _slabRange = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
-            ToolTip = "Slab (above): look for a slab from the row's level up to this height (mm). Higher slabs are ignored." };
+            ToolTip = "Slab (above) and Ceiling: look for a slab/beam or ceiling from the row's level up to this height (mm). Higher hosts are ignored." };
         readonly TextBox _slabPlane = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Slab (above) with no slab in range: host on the reference plane CAD2Revit_<Level>_+<height>mm, facing down " +
+            ToolTip = "Slab (above) / Ceiling with no host in range: host on the reference plane CAD2Revit_<Level>_+<height>mm, facing down " +
                       "(level-based families: this Elevation From Level)." };
 
         UIElement BuildSlabOptions()
         {
             var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-            bar.Children.Add(new TextBlock { Text = "Slab (above):", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
-            bar.Children.Add(new TextBlock { Text = "Slab search range (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            bar.Children.Add(new TextBlock { Text = "Slab (above) and Ceiling:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+            bar.Children.Add(new TextBlock { Text = "Search range (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             bar.Children.Add(_slabRange);
             bar.Children.Add(new TextBlock { Text = "Fallback reference plane height (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             bar.Children.Add(_slabPlane);

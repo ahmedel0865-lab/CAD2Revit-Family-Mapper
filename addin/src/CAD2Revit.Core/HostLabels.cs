@@ -73,13 +73,18 @@ namespace CAD2Revit.Core
         /// height of the level above. A slab higher than that is ignored.</summary>
         public static double RangeFt(double rangeMm) => Math.Max(rangeMm, 1) / MmPerFoot;
 
-        /// <summary>Log text for a Slab (above) block with no slab in range, e.g.
+        /// <summary>Log text for a Slab (above) / Ceiling block with no host in range, e.g.
         /// "No slab/beam within 5000 mm - placed on reference plane at +3000 mm".</summary>
-        public static string FallbackMessage(double rangeMm, double planeMm, bool levelBased) =>
-            $"{FallbackReason(rangeMm)} - placed {(levelBased ? "level-based" : "on reference plane")} at {(planeMm < 0 ? "-" : "+")}{Mm(Math.Abs(planeMm))} mm";
+        public static string FallbackMessage(double rangeMm, double planeMm, bool levelBased, HostMode mode = HostMode.SlabAbove) =>
+            $"{FallbackReason(rangeMm, mode)} - placed {(levelBased ? "level-based" : "on reference plane")} at {(planeMm < 0 ? "-" : "+")}{Mm(Math.Abs(planeMm))} mm";
 
-        /// <summary>"No slab/beam within 5000 mm" (the Needs Review reason).</summary>
-        public static string FallbackReason(double rangeMm) => $"No slab/beam within {Mm(rangeMm)} mm";
+        /// <summary>"No slab/beam within 5000 mm" / "No ceiling within 5000 mm" (the Needs Review reason).</summary>
+        public static string FallbackReason(double rangeMm, HostMode mode = HostMode.SlabAbove) =>
+            $"No {(mode == HostMode.Ceiling ? "ceiling" : "slab/beam")} within {Mm(rangeMm)} mm";
+
+        /// <summary>True for the fallback part of a log message ("No slab/beam within ...", "No ceiling within ...").</summary>
+        public static bool IsFallbackText(string part) =>
+            part.StartsWith("No slab", StringComparison.Ordinal) || part.StartsWith("No ceiling within", StringComparison.Ordinal);
 
         static string Mm(double v) => Math.Round(v, 1).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     }

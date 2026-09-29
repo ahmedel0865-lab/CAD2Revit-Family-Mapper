@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0] - 2026-09-29
+### Changed: Ceiling uses the same search and fallback as Slab (above)
+- **One shared search.** Slab (above) and Ceiling now use the same code (`HostFinder.FindUnderside`, with the host type choosing the categories): the nearest bottom face straight above the block, from the level up to the search range, in this model and in links. Ceiling searches Ceilings; Slab (above) searches Floors, Roofs and beams. Hosts are still collected once into the face index, with no ray per block.
+- **Ceiling found**: the face-based family is hosted on the ceiling's bottom face, facing down, with the CAD rotation. Level-based families are placed level-based at the ceiling's underside height (before: failed).
+- **No ceiling in range**: same fallback as Slab (above). The family goes on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, or level-based at that height. It is logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm` and its Comments get `CAD2Revit: Host = Reference Plane`. Before, it was placed unhosted at the row's elevation, and the search was capped at the next level or `HostSearchDistanceMm`.
+- **Needs Review** lists Ceiling fallbacks too (reason `No ceiling within 5000 mm`), with the same select/zoom, Copy IDs and Export to Excel.
+- **Counts** in Preview and the result window: `Ceiling: N hosted on ceiling, N on reference plane, N level-based`, next to the Slab (above) line.
+- The mapping window's two values are now labelled **Slab (above) and Ceiling: Search range (mm) / Fallback reference plane height (mm)**. They are saved in the same `Slab_Search_Range_mm` / `Slab_Fallback_Plane_mm` columns, so existing mapping files keep working.
+- Duplicate check: re-runs now also see instances placed above the next level (up to the search range / fallback plane) as duplicates.
+
 ## [0.17.0] - 2026-09-29
 ### Changed: Slab (above) hosts on slabs or beams, and a Needs Review list
 - **Nearest slab or beam.** Slab (above) now looks for Floors, Roofs **and Structural Framing (beams)**, in this model and in links, within the search range above the level. The nearest bottom face straight above the block wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. Hosts are still collected once into the face index, with no ray per block.

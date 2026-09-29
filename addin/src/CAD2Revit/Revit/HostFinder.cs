@@ -187,13 +187,20 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the ray passes through an opening).
         /// </summary>
-        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt)
+        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt) =>
+            above ? FindUndersideRay(HostMode.SlabAbove, x, y, levelZ, maxDistFt) : FaceRay(HostMode.SlabBelow, false, x, y, levelZ, maxDistFt);
+
+        /// <summary>Ray version of <see cref="FindUnderside"/>: first face pointing down straight above.</summary>
+        public HostHit FindUndersideRay(HostMode mode, double x, double y, double levelZ, double maxDistFt) =>
+            FaceRay(mode, true, x, y, levelZ, maxDistFt);
+
+        HostHit FaceRay(HostMode mode, bool above, double x, double y, double levelZ, double maxDistFt)
         {
             using (_timer.Time(Phases.HostRay))
             {
             var dir = above ? XYZ.BasisZ : XYZ.BasisZ.Negate();
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
-            var hits = Intersector(above ? HostMode.SlabAbove : HostMode.SlabBelow).Find(origin, dir);
+            var hits = Intersector(mode).Find(origin, dir);
             if (hits == null) return null;
             foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
             {

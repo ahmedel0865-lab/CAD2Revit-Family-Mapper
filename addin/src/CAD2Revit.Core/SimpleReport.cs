@@ -20,8 +20,8 @@ namespace CAD2Revit.Core
         /// <summary>Slab (above) blocks placed at the fallback height, and that line's text.</summary>
         public int SlabFallbacks;
         public List<string> SlabFallbackLines = new List<string>();
-        /// <summary>"Slab (above): 12 hosted on slab, 3 hosted on beam, ..." or "" when no Slab (above) rows.</summary>
-        public string SlabHostLine = "";
+        /// <summary>"Slab (above): 12 hosted on slab, ..." / "Ceiling: ..." (empty when no such rows).</summary>
+        public List<string> HostCountLines = new List<string>();
 
         public bool AllPlaced => Total > 0 && Placed == Total;
 
@@ -44,12 +44,10 @@ namespace CAD2Revit.Core
             // Slab (above) fallbacks: one count line (every block is in the log).
             var fallbacks = list.Where(x => x.Status == Status.Placed && x.SlabFallback).ToList();
             r.SlabFallbacks = fallbacks.Sum(x => x.Count);
-            var hosts = list.Where(x => x.Status == Status.Placed && x.SlabHost != SlabHost.None)
-                .GroupBy(x => x.SlabHost).ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
-            r.SlabHostLine = hosts.Count > 0 ? Report.SlabHostCounts(hosts) : "";
+            r.HostCountLines = Report.HostCountLines(list);
             r.SlabFallbackLines = fallbacks
                 .GroupBy(x => (x.Message ?? "").Split(new[] { "; " }, StringSplitOptions.None)
-                                  .FirstOrDefault(m => m.StartsWith("No slab", StringComparison.Ordinal)) ?? "No slab/beam in range")
+                                  .FirstOrDefault(SlabSearch.IsFallbackText) ?? "No host in range")
                 .Select(g =>
                 {
                     int n = g.Sum(x => x.Count);

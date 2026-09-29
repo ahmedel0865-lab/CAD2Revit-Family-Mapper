@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace CAD2Revit.Core
 {
-    /// <summary>One Slab (above) block that found no slab/beam and went on the fallback plane/height.</summary>
+    /// <summary>One Slab (above) / Ceiling block that found no host and went on the fallback plane/height.</summary>
     public class ReviewItem
     {
         public long? ElementId;
@@ -17,7 +17,7 @@ namespace CAD2Revit.Core
         public string XY => Xmm.ToString("0", CultureInfo.InvariantCulture) + ", " + Ymm.ToString("0", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>The "Needs Review" list shown after a run: every Slab (above) fallback element.</summary>
+    /// <summary>The "Needs Review" list shown after a run: every Slab (above) / Ceiling fallback element.</summary>
     public static class NeedsReview
     {
         const double MmPerFoot = 304.8;
@@ -44,7 +44,7 @@ namespace CAD2Revit.Core
         public static string Reason(string message)
         {
             var part = (message ?? "").Split(new[] { "; " }, StringSplitOptions.None)
-                .FirstOrDefault(m => m.StartsWith("No slab", StringComparison.Ordinal)) ?? "No slab/beam in range";
+                .FirstOrDefault(SlabSearch.IsFallbackText) ?? "No host in range";
             int i = part.IndexOf(" - ", StringComparison.Ordinal);
             return i > 0 ? part.Substring(0, i) : part;
         }

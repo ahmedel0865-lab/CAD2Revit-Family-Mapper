@@ -277,13 +277,30 @@ namespace CAD2Revit.Revit
         /// (no slab, or the point is under an opening).
         /// </summary>
         public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt) =>
-            Cached(above ? 100 : 101, x, y, levelZ, maxDistFt, () =>
+            above ? FindUnderside(HostMode.SlabAbove, x, y, levelZ, maxDistFt) :
+            Cached(101, x, y, levelZ, maxDistFt, () =>
             {
-                var idx = Faces(above ? SlabsAndBeams : Floors);
+                var idx = Faces(Floors);
                 double start = levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot);
                 var f = idx.Nearest(x, y, start, above, maxDistFt, face => above ? face.Nz < -0.5 : face.Nz > 0.5, out var z);
                 if (f != null) return FromFace(f, x, y, z, start);
                 return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt) : null;
+            });
+
+        /// <summary>
+        /// Shared search for Slab (above) and Ceiling: the nearest bottom face (normal pointing down)
+        /// straight above (x, y), from just above the level up to maxDistFt, among the categories of
+        /// the host type (Ceiling: ceilings; Slab (above): floors, roofs and beams), in this model and
+        /// in Revit links. From the face index (built once); a ray only where faces could not be indexed.
+        /// </summary>
+        public HostHit FindUnderside(HostMode mode, double x, double y, double levelZ, double maxDistFt) =>
+            Cached(300 + (int)mode, x, y, levelZ, maxDistFt, () =>
+            {
+                var idx = Faces(GroupFor(mode));
+                double start = levelZ + 0.01;
+                var f = idx.Nearest(x, y, start, true, maxDistFt, face => face.Nz < -0.5, out var z);
+                if (f != null) return FromFace(f, x, y, z, start);
+                return idx.IsUnindexedAt(x, y) ? FindUndersideRay(mode, x, y, levelZ, maxDistFt) : null;
             });
 
         /// <summary>Nearest wall side face to (x, y) at height z, within maxDistFt: candidate walls
@@ -329,7 +346,8 @@ namespace CAD2Revit.Revit
         /// <summary>Ray-cast version of a lookup, used when a face from the index cannot host.</summary>
         public HostHit Recast(HostMode mode, double x, double y, double levelZ, double z, double maxDistFt, double startAngle) =>
             mode == HostMode.Wall ? FindWallRay(x, y, z, maxDistFt, startAngle)
-            : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow ? FindSlabRay(mode == HostMode.SlabAbove, x, y, levelZ, maxDistFt)
+            : mode == HostMode.SlabAbove || mode == HostMode.Ceiling ? FindUndersideRay(mode, x, y, levelZ, maxDistFt)
+            : mode == HostMode.SlabBelow ? FindSlabRay(false, x, y, levelZ, maxDistFt)
             : FindAboveRay(mode, x, y, levelZ, maxDistFt);
     }
 }

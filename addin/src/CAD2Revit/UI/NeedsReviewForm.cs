@@ -34,7 +34,7 @@ namespace CAD2Revit.UI
 
             var header = new Label
             {
-                Text = $"{items.Count} element(s) found no slab or beam above and were placed on the fallback " +
+                Text = $"{items.Count} element(s) found no slab/beam or ceiling above and were placed on the fallback " +
                        $"reference plane (or level-based). Click a row to select and zoom to it in Revit. " +
                        $"Their Comments say \"{NeedsReview.CommentText}\".",
                 Dock = DockStyle.Top, Height = 52, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,

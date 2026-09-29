@@ -342,7 +342,7 @@ namespace CAD2Revit.Core.Tests
 
             var s = Report.Summarize(results);
             Assert.Equal(2, s.SlabFallbacks);
-            Assert.Contains("2 Slab (above) would be placed at the fallback height", Report.SummaryText(s, true));
+            Assert.Contains("2 Slab (above) / Ceiling block(s) would be placed at the fallback height", Report.SummaryText(s, true));
         }
     }
 
@@ -374,10 +374,36 @@ namespace CAD2Revit.Core.Tests
             Assert.Equal(11L, rows[0][0]);
 
             var s = Report.Summarize(results);
-            Assert.Equal("Slab (above): 1 hosted on slab, 1 hosted on beam, 1 on reference plane, 1 level-based",
-                         Report.SlabHostCounts(s.SlabHosts));
-            Assert.Equal(Report.SlabHostCounts(s.SlabHosts), SimpleReport.From(results, false).SlabHostLine);
-            Assert.Equal("", SimpleReport.From(new[] { new PlacementResult { Status = Status.Placed } }, false).SlabHostLine);
+            Assert.Equal(new[] { "Slab (above): 1 hosted on slab, 1 hosted on beam, 1 on reference plane, 1 level-based" }, s.HostCounts);
+            Assert.Equal(s.HostCounts, SimpleReport.From(results, false).HostCountLines);
+            Assert.Empty(SimpleReport.From(new[] { new PlacementResult { Status = Status.Placed } }, false).HostCountLines);
+        }
+
+        [Fact]
+        public void CeilingFallbacksShareTheSameListAndCounts()
+        {
+            var slabRow = new MapRow { Block = "S", Family = "Smoke", TypeName = "Std", Host = HostMode.SlabAbove };
+            var ceilRow = new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.Ceiling };
+            var ceilMsg = SlabSearch.FallbackMessage(5000, 3000, false, HostMode.Ceiling);
+            Assert.Equal("No ceiling within 5000 mm - placed on reference plane at +3000 mm", ceilMsg);
+            Assert.Equal("No ceiling within 4000 mm - placed level-based at +3000 mm",
+                         SlabSearch.FallbackMessage(4000, 3000, true, HostMode.Ceiling));
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 1, SlabHost = SlabHost.Ceiling },
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 2, SlabHost = SlabHost.Ceiling },
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 3, Message = ceilMsg,
+                                      SlabFallback = true, SlabHost = SlabHost.Plane, Point = new[] { 0.0, 0, 0 } },
+                new PlacementResult { BlockName = "S", Row = slabRow, Status = Status.Placed, ElementId = 4, SlabHost = SlabHost.Slab },
+            };
+            Assert.Equal(new[]
+            {
+                "Slab (above): 1 hosted on slab, 0 hosted on beam, 0 on reference plane, 0 level-based",
+                "Ceiling: 2 hosted on ceiling, 1 on reference plane, 0 level-based",
+            }, Report.HostCountLines(results));
+            var review = NeedsReview.From(results);
+            Assert.Equal("No ceiling within 5000 mm", review.Single().Reason);
+            Assert.Equal(new[] { ceilMsg + " (1 family)" }, SimpleReport.From(results, false).SlabFallbackLines);
         }
     }
 

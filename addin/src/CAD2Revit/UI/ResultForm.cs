@@ -95,9 +95,9 @@ namespace CAD2Revit.UI
         {
             var nl = Environment.NewLine;
             var lines = new System.Collections.Generic.List<string>();
-            if (report.SlabHostLine.Length > 0) lines.Add(report.SlabHostLine);
+            lines.AddRange(report.HostCountLines);
             if (report.SlabFallbacks > 0) lines.AddRange(report.SlabFallbackLines);
-            if (report.SlabHostLine.Length > 0 || report.SlabFallbacks > 0) lines.Add("");
+            if (report.HostCountLines.Count > 0 || report.SlabFallbacks > 0) lines.Add("");
             lines.Add(report.Preview ? "What would be placed:" : "What was placed:");
             if (report.ByFamily.Count == 0) lines.Add("   nothing");
             int width = report.ByFamily.Count == 0 ? 0 : report.ByFamily.Max(kv => kv.Value.ToString().Length);
