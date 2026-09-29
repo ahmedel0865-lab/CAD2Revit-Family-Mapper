@@ -185,7 +185,7 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the ray passes through an opening).
         /// </summary>
-        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt, double slopedMaxDistFt = 0)
+        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt)
         {
             using (_timer.Time(Phases.HostRay))
             {
@@ -193,14 +193,11 @@ namespace CAD2Revit.Revit
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
             var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
             if (hits == null) return null;
-            double limit = Math.Max(maxDistFt, slopedMaxDistFt);
-            foreach (var ctx in hits.Where(h => h.Proximity <= limit).OrderBy(h => h.Proximity))
+            foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
             {
                 var hit = MakeHit(ctx, dir);
                 double nz = hit.FaceNormal.Z;
-                if (!(above ? nz < -0.5 : nz > 0.5)) continue;   // bottom face (faces down) / top face (faces up)
-                // Past maxDist only a sloped face counts (its high end can rise above the next level).
-                return ctx.Proximity <= maxDistFt || SlabSearch.IsSloped(nz) ? hit : null;
+                if (above ? nz < -0.5 : nz > 0.5) return hit;   // bottom face (faces down) / top face (faces up)
             }
             return null;
             }

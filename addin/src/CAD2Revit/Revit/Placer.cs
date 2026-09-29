@@ -33,6 +33,7 @@ namespace CAD2Revit.Revit
 
         readonly Document _doc;
         readonly Settings _settings;
+        SlabOptions _slab = new SlabOptions();   // Slab (above) range / fallback, from the mapping
         PhaseTimer _timer = new PhaseTimer();
 
         public Placer(Document doc, Settings settings)
@@ -65,7 +66,6 @@ namespace CAD2Revit.Revit
             public Level Level;
             public double MaxUp;
             public double? NextZ;       // elevation of the level above (null = top level)
-            public double SlabUp;       // Slab (above) search distance
             public double SlabDown;     // Slab (below) search distance
             public double BandMin, BandMax;   // duplicate-check height band of this level
             public LevelPlanes LevelPlanes;
@@ -83,6 +83,8 @@ namespace CAD2Revit.Revit
             public List<string> Notes;
             public double Angle;
             public string FinalHost;     // what the placed instance is hosted on (DebugHosting)
+            public double? LevelElevMm;  // level-based: Elevation From Level instead of the row's (Slab above)
+            public bool SlabFallback;    // Slab (above): no slab in range, fallback plane / height used
             public PlacementResult Fail(PlacementResult r)
             {
                 Failed = r;
@@ -97,6 +99,7 @@ namespace CAD2Revit.Revit
             public PlacementResult Result;
             public XYZ Base;     // on the level
             public double Angle;
+            public double? Offset;   // feet; overrides the row's Elevation From Level (Slab above)
         }
 
         /// <summary>An instance whose parameters are set in the final pass.</summary>
@@ -119,6 +122,7 @@ namespace CAD2Revit.Revit
                                               PhaseTimer timer = null)
         {
             _timer = timer ?? new PhaseTimer();
+            _slab = mapping.Slab ?? new SlabOptions();
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
             var unmapped = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -215,7 +219,6 @@ namespace CAD2Revit.Revit
                             Level = level,
                             MaxUp = maxUp,
                             NextZ = top,
-                            SlabUp = SlabSearch.AboveDistanceFt(levelZ, top, _settings.SlabSearchToleranceMm, _settings.HostSearchDistanceMm),
                             SlabDown = SlabSearch.BelowDistanceFt(_settings.SlabSearchToleranceMm),
                             BandMin = levelZ - Ft(300),
                             BandMax = top ?? levelZ + Math.Max(maxUp, Ft(3000)),
@@ -368,41 +371,70 @@ namespace CAD2Revit.Revit
             bool onLevelPlane = false; // face/work-plane based family on a horizontal reference plane
             double planeElevMm = row.OffsetMm;   // plane height above the level, and which way it faces
             var planeFacing = row.Facing;
-            if (row.Host == HostMode.SlabAbove || row.Host == HostMode.SlabBelow)
+            if (row.Host == HostMode.SlabAbove)
             {
-                bool above = row.Host == HostMode.SlabAbove;
-                string word = above ? "above" : "below";
-                double maxDist = above ? ctx.SlabUp : ctx.SlabDown;
+                // Floors (and roofs) from the level up to the search range - never higher, even if
+                // the level above is. No slab in range: one reference plane per level at the
+                // fallback height, facing down (level-based families: that Elevation From Level).
+                double rangeMm = _slab.SearchRangeMm, planeMm = _slab.FallbackPlaneMm;
+                hit = finder.FindSlab(true, x, y, levelZ, SlabSearch.RangeFt(rangeMm));
+                if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
+                    { plan.Fail(Result(b, row, Status.Failed,
+                        Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
+                              "use a face-based family"), b.Point, angle)); return plan; }
+                if (hit != null && ptype == FamilyPlacementType.OneLevelBased)
+                {
+                    // A level-based family cannot sit on the face: same height, level-based.
+                    plan.LevelElevMm = Math.Round((hit.Point.Z - levelZ) * MmPerFoot, 1);
+                    notes.Add($"family is not face-based - placed level-based at the slab underside ({plan.LevelElevMm:0} mm)");
+                    hit = null;
+                }
+                else if (hit == null)
+                {
+                    if (ptype == FamilyPlacementType.OneLevelBasedHosted)
+                        { plan.Fail(Result(b, row, Status.Failed, Notes($"No slab within {rangeMm:0} mm - " +
+                                                                       "legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
+                    plan.SlabFallback = true;
+                    if (ptype == FamilyPlacementType.WorkPlaneBased)
+                    {
+                        planeElevMm = planeMm;
+                        planeFacing = Facing.Down;
+                        onLevelPlane = true;
+                        notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: false));
+                    }
+                    else
+                    {
+                        plan.LevelElevMm = planeMm;
+                        notes.Add(SlabSearch.FallbackMessage(rangeMm, planeMm, levelBased: true));
+                    }
+                }
+            }
+            else if (row.Host == HostMode.SlabBelow)
+            {
+                double maxDist = ctx.SlabDown;
                 if (ptype == FamilyPlacementType.OneLevelBased)
                 {
                     plan.Fail(Result(b, row, Status.Failed, Notes(HostCheck.NotFaceBased(ptype.ToString(), "slab")), b.Point, angle));
                     return plan;
                 }
-                else
+                hit = finder.FindSlab(false, x, y, levelZ, maxDist);
+                if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
+                    { plan.Fail(Result(b, row, Status.Failed,
+                        Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
+                              "use a face-based family"), b.Point, angle)); return plan; }
+                if (hit == null)
                 {
-                    hit = finder.FindSlab(above, x, y, levelZ, maxDist,
-                                          above ? SlabSearch.SlopedAboveDistanceFt(maxDist, _settings.HostSearchDistanceMm) : 0);
-                    if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
-                        { plan.Fail(Result(b, row, Status.Failed,
-                            Notes("slab is in a Revit link; legacy hosted families can only be hosted in this model - " +
-                                  "use a face-based family"), b.Point, angle)); return plan; }
-                    if (hit == null)
-                    {
-                        string why = $"no slab {word} this point within {maxDist * MmPerFoot:0} mm (slab opening or no slab)";
-                        if (ptype != FamilyPlacementType.WorkPlaneBased)
-                            { plan.Fail(Result(b, row, Status.Failed, Notes(why + " - legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
-                        // Fallback: a reference plane at the slab height found for this level
-                        // (or the level above / the level itself if the level has no slab).
-                        var slabZ = finder.FallbackSlabZ(above, levelZ, maxDist);
-                        string source = slabZ.HasValue ? (above ? "underside of the slab above" : "top of the slab at this level")
-                                      : above ? (ctx.NextZ.HasValue ? "level above (no slab found for this level)" : "Elevation From Level (no level above)")
-                                      : "level (no slab found for this level)";
-                        double z = slabZ ?? (above ? ctx.NextZ ?? levelZ + offset : levelZ);
-                        planeElevMm = Math.Round((z - levelZ) * MmPerFoot, 1);
-                        planeFacing = above ? Facing.Down : Facing.Up;
-                        onLevelPlane = true;
-                        notes.Add($"WARNING: {why} - hosted on a reference plane at {planeElevMm:0} mm ({source})");
-                    }
+                    string why = $"no slab below this point within {maxDist * MmPerFoot:0} mm (slab opening or no slab)";
+                    if (ptype != FamilyPlacementType.WorkPlaneBased)
+                        { plan.Fail(Result(b, row, Status.Failed, Notes(why + " - legacy hosted family needs a real slab"), b.Point, angle)); return plan; }
+                    // Fallback: a reference plane at the top of this level's slab (or the level itself).
+                    var slabZ = finder.FallbackSlabZ(false, levelZ, maxDist);
+                    string source = slabZ.HasValue ? "top of the slab at this level" : "level (no slab found for this level)";
+                    double z = slabZ ?? levelZ;
+                    planeElevMm = Math.Round((z - levelZ) * MmPerFoot, 1);
+                    planeFacing = Facing.Up;
+                    onLevelPlane = true;
+                    notes.Add($"WARNING: {why} - hosted on a reference plane at {planeElevMm:0} mm ({source})");
                 }
             }
             else if (row.Host == HostMode.RefPlane)
@@ -489,10 +521,19 @@ namespace CAD2Revit.Revit
             using (_timer.Time(Phases.HostQuery))
                 plan = Decide(b, row, sym, level, finder, ctx);
             if (plan.Failed != null) return WithDebug(plan.Failed, plan);
+            var res0 = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created, plan);
+            if (plan.SlabFallback) res0.SlabFallback = true;
+            return res0;
+        }
 
+        PlacementResult PlaceOne(BlockRef b, MapRow row, FamilySymbol sym, Level level, HostFinder finder, LevelContext ctx,
+                                 PointGrid dups, Dictionary<long, long> familyOfType,
+                                 Dictionary<(MapRow, long), List<Pending>> batches,
+                                 Dictionary<(MapRow, long), (Level, FamilySymbol)> batchLevel, List<Created> created, Plan plan)
+        {
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
-            double offset = Ft(row.OffsetMm);
+            double offset = plan.LevelElevMm.HasValue ? Ft(plan.LevelElevMm.Value) : Ft(row.OffsetMm);
             double x = b.Point.X, y = b.Point.Y;
             double angle = plan.Angle;
             var notes = plan.Notes;
@@ -522,7 +563,8 @@ namespace CAD2Revit.Revit
                     batchLevel[key] = (level, sym);
                 }
                 var pending = Result(b, row, Status.Placed, Notes(), target, angle);
-                list.Add(new Pending { Block = b, Result = pending, Base = new XYZ(x, y, levelZ), Angle = angle });
+                list.Add(new Pending { Block = b, Result = pending, Base = new XYZ(x, y, levelZ), Angle = angle,
+                                       Offset = plan.LevelElevMm.HasValue ? offset : (double?)null });
                 dups.Add(dupKey, target.X, target.Y, target.Z);
                 plan.FinalHost = "Level " + level.Name + " (level-based, no host)";
                 return WithDebug(pending, plan);
@@ -585,7 +627,7 @@ namespace CAD2Revit.Revit
         {
             var ptype = sym.Family.FamilyPlacementType;
             double levelZ = level.ProjectElevation;
-            double offset = Ft(row.OffsetMm);
+            double offset = plan.LevelElevMm.HasValue ? Ft(plan.LevelElevMm.Value) : Ft(row.OffsetMm);
             double x = b.Point.X, y = b.Point.Y;
             double angle = plan.Angle;
             var notes = plan.Notes;
@@ -820,7 +862,7 @@ namespace CAD2Revit.Revit
                         var inst = CreateLevelBased(sym, level, it.Base, it.Angle);
                         st.Commit();
                         it.Result.ElementId = Compat.IdValue(inst.Id);
-                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = it.Block.Name, Offset = offset, Result = it.Result });
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result });
                     }
                     catch (Exception ex)
                     {
@@ -860,7 +902,7 @@ namespace CAD2Revit.Revit
             void Attach(Pending it, ElementId id)
             {
                 it.Result.ElementId = Compat.IdValue(id);
-                created.Add(new Created { Id = id, Level = level, BlockName = it.Block.Name, Offset = offset, Result = it.Result });
+                created.Add(new Created { Id = id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result });
             }
         }
 

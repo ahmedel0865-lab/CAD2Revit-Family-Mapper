@@ -70,52 +70,25 @@ namespace CAD2Revit.Core.Tests
             Assert.Equal("", HostLabels.Summarize(new PlacementResult[0]));
         }
 
-        const double Mm = 304.8;
-
-        /// <summary>Square 10 x 10 ft underside, z = baseMm + x * risePerFt (mm), normal pointing down.</summary>
-        static void AddUnderside(FaceIndex<string> idx, string name, double baseMm, double risePerFtMm)
+        [Fact]
+        public void SlabAboveRangeIgnoresTheLevelAbove()
         {
-            double b = risePerFtMm / Mm, len = System.Math.Sqrt(b * b + 1);
-            var loop = new[] { 0.0, 0, 10, 0, 10, 10, 0, 10 };
-            idx.Add(new List<double[]> { loop }, b / len, 0, -1 / len, 0, 0, baseMm / Mm, name);
+            Assert.Equal(5000 / 304.8, SlabSearch.RangeFt(5000), 9);
+            // A slab at 5500 mm is outside the default 5000 mm range, even with the level above at 7000.
+            var idx = new FaceIndex<string>();
+            idx.Add(new List<double[]> { new[] { 0.0, 0, 10, 0, 10, 10, 0, 10 } }, 0, 0, -1, 0, 0, 5500 / 304.8, "high slab");
+            Assert.Null(idx.Nearest(5, 5, 0.01, true, SlabSearch.RangeFt(5000), f => f.Nz < -0.5, out _));
+            Assert.NotNull(idx.Nearest(5, 5, 0.01, true, SlabSearch.RangeFt(6000), f => f.Nz < -0.5, out _));
         }
 
         [Fact]
-        public void SlabAboveFollowsASlopedUndersideAboveTheNextLevel()
+        public void FallbackMessageAndPlaneName()
         {
-            // Level 0, next level 3500: the normal window is 3500 + 500 = 4000 mm.
-            double window = SlabSearch.AboveDistanceFt(0, 3500 / Mm, 500, 6000);
-            double sloped = SlabSearch.SlopedAboveDistanceFt(window, 6000);
-            var idx = new FaceIndex<string>();
-            AddUnderside(idx, "sloped", 3000, 160);   // 3000 mm at x=0 up to 4600 mm at x=10 ft
-
-            var low = SlabSearch.Nearest(idx, 1, 5, 0, true, window, sloped, out var zLow);
-            Assert.Equal("sloped", low.Payload);
-            Assert.Equal(3160, zLow * Mm, 3);
-
-            // High end is above the 4000 mm window: still found, at the sloped height.
-            var high = SlabSearch.Nearest(idx, 9, 5, 0, true, window, sloped, out var zHigh);
-            Assert.Equal("sloped", high?.Payload);
-            Assert.Equal(4440, zHigh * Mm, 3);
-            Assert.True(SlabSearch.IsSloped(high.Nz));
-
-            // Without the sloped window (old behaviour) the high end was missed.
-            Assert.Null(SlabSearch.Nearest(idx, 9, 5, 0, true, window, 0, out _));
-        }
-
-        [Fact]
-        public void FlatSlabTwoFloorsUpIsNeverUsed()
-        {
-            double window = SlabSearch.AboveDistanceFt(0, 3500 / Mm, 500, 6000);
-            double sloped = SlabSearch.SlopedAboveDistanceFt(window, 6000);
-            var idx = new FaceIndex<string>();
-            AddUnderside(idx, "flat two floors up", 5500, 0);
-            Assert.False(SlabSearch.IsSloped(-1));
-            Assert.Null(SlabSearch.Nearest(idx, 5, 5, 0, true, window, sloped, out _));
-
-            // A flat slab in front of a higher sloped one hides it (nearest face wins).
-            AddUnderside(idx, "sloped above it", 5800, 20);
-            Assert.Null(SlabSearch.Nearest(idx, 5, 5, 0, true, window, sloped, out _));
+            Assert.Equal("No slab within 5000 mm - placed on reference plane at +3000 mm",
+                         SlabSearch.FallbackMessage(5000, 3000, levelBased: false));
+            Assert.Equal("No slab within 4500 mm - placed level-based at +2750.5 mm",
+                         SlabSearch.FallbackMessage(4500, 2750.5, levelBased: true));
+            Assert.Equal("CAD2Revit_Level 1_+3000mm", RefPlaneNames.For("Level 1", 3000, Facing.Down));
         }
     }
 }

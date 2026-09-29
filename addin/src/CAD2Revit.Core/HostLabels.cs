@@ -69,29 +69,15 @@ namespace CAD2Revit.Core
         /// tolerance below the level (covers slabs with a finish offset or a small drop).</summary>
         public static double BelowDistanceFt(double toleranceMm) => (BelowStartMm + toleranceMm) / MmPerFoot;
 
-        /// <summary>|normal Z| below this = a sloped face (more than about 3 degrees from flat).</summary>
-        public const double SlopedNzMax = 0.9986;
+        /// <summary>Slab (above) window: from the level up to the search range (mm), whatever the
+        /// height of the level above. A slab higher than that is ignored.</summary>
+        public static double RangeFt(double rangeMm) => Math.Max(rangeMm, 1) / MmPerFoot;
 
-        public static bool IsSloped(double nz) => Math.Abs(nz) < SlopedNzMax;
+        /// <summary>Log text for a Slab (above) block with no slab in range, e.g.
+        /// "No slab within 5000 mm - placed on reference plane at +3000 mm".</summary>
+        public static string FallbackMessage(double rangeMm, double planeMm, bool levelBased) =>
+            $"No slab within {Mm(rangeMm)} mm - placed {(levelBased ? "level-based" : "on reference plane")} at {(planeMm < 0 ? "-" : "+")}{Mm(Math.Abs(planeMm))} mm";
 
-        /// <summary>Slab (above) on a sloped slab: its underside can rise past the next level + tolerance
-        /// at high points, so sloped faces are searched up to the host search distance too.</summary>
-        public static double SlopedAboveDistanceFt(double slabUpFt, double hostSearchMm) =>
-            Math.Max(slabUpFt, hostSearchMm / MmPerFoot);
-
-        /// <summary>
-        /// Nearest slab face straight above/below (x, y): first within maxDist (any slope), then, if
-        /// nothing, the nearest face within slopedMaxDist - kept only if that face is sloped, so a flat
-        /// slab two floors up is never used.
-        /// </summary>
-        public static IndexedFace<T> Nearest<T>(FaceIndex<T> idx, double x, double y, double start, bool above,
-                                                double maxDist, double slopedMaxDist, out double z)
-        {
-            bool Faces(IndexedFace<T> f) => above ? f.Nz < -0.5 : f.Nz > 0.5;
-            var f0 = idx.Nearest(x, y, start, above, maxDist, Faces, out z);
-            if (f0 != null || slopedMaxDist <= maxDist) return f0;
-            var f1 = idx.Nearest(x, y, start, above, slopedMaxDist, Faces, out z);
-            return f1 != null && IsSloped(f1.Nz) ? f1 : null;
-        }
+        static string Mm(double v) => Math.Round(v, 1).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

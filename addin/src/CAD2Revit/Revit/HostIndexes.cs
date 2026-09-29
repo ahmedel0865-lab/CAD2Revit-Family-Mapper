@@ -272,14 +272,14 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the point is under an opening).
         /// </summary>
-        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt, double slopedMaxDistFt = 0) =>
+        public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt) =>
             Cached(above ? 100 : 101, x, y, levelZ, maxDistFt, () =>
             {
                 var idx = Faces(Floors);
                 double start = levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot);
-                var f = SlabSearch.Nearest(idx, x, y, start, above, maxDistFt, slopedMaxDistFt, out var z);
+                var f = idx.Nearest(x, y, start, above, maxDistFt, face => above ? face.Nz < -0.5 : face.Nz > 0.5, out var z);
                 if (f != null) return FromFace(f, x, y, z, start);
-                return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt, slopedMaxDistFt) : null;
+                return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt) : null;
             });
 
         /// <summary>Nearest wall side face to (x, y) at height z, within maxDistFt: candidate walls

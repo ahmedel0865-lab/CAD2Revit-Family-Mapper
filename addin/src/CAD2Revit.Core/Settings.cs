@@ -22,7 +22,7 @@ namespace CAD2Revit.Core
         // Hosting
         public double HostSearchDistanceMm = 6000.0;   // never searches past the next level
         public double WallSearchDistanceMm = 500.0;
-        public double SlabSearchToleranceMm = 500.0;   // Slab (above): level-to-level height + this
+        public double SlabSearchToleranceMm = 500.0;   // Slab (below): search this far below the level
         public bool SearchRevitLinks = true;
         public bool FallbackToUnhosted = true;
         public bool DebugHosting = false;              // per-point hosting details in the log
@@ -99,7 +99,7 @@ namespace CAD2Revit.Core
             sb.AppendLine("HostSearchDistanceMm = " + F(HostSearchDistanceMm));
             sb.AppendLine("# Max distance (mm) from the CAD point to a wall face for Host_Type = wall.");
             sb.AppendLine("WallSearchDistanceMm = " + F(WallSearchDistanceMm));
-            sb.AppendLine("# Slab (above) searches up to the next level + this (mm); Slab (below) searches this far below the level.");
+            sb.AppendLine("# Slab (below) searches this far below the level (mm). Slab (above) uses the range set in the mapping window.");
             sb.AppendLine("SlabSearchToleranceMm = " + F(SlabSearchToleranceMm));
             sb.AppendLine("# Also host on faces in linked Revit models.");
             sb.AppendLine("SearchRevitLinks = " + Bo(SearchRevitLinks));

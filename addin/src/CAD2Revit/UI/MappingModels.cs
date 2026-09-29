@@ -215,6 +215,8 @@ namespace CAD2Revit.UI
         /// <summary>All level names in the model (Level dropdown), lowest first.</summary>
         public List<string> LevelNames = new List<string>();
         public Settings Settings;
+        /// <summary>Slab (above) search range and fallback plane height (top of the mapping window).</summary>
+        public SlabOptions Slab = new SlabOptions();
 
         /// <summary>Find a family type by name; adds non-electrical types to the dropdown on demand.</summary>
         public FamilyOption Resolve(string family, string type)
@@ -230,6 +232,7 @@ namespace CAD2Revit.UI
         {
             int applied = 0;
             var messages = new List<string>(mapping.Errors);
+            if (mapping.HasSlabOptions) Slab = mapping.Slab.Clone();
             foreach (var row in Rows)
             {
                 if (mapping.Rows.TryGetValue(row.BlockName, out var m))
@@ -304,7 +307,7 @@ namespace CAD2Revit.UI
 
         public MappingResult ToMapping()
         {
-            var result = new MappingResult();
+            var result = new MappingResult { Slab = Slab.Clone(), HasSlabOptions = true };
             foreach (var row in Rows)
             {
                 var m = row.ToMapRow();

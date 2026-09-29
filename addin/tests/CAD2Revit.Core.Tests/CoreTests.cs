@@ -279,6 +279,73 @@ namespace CAD2Revit.Core.Tests
             Assert.Equal(expected, SimpleReport.PlainReason(message));
     }
 
+    public class SlabOptionsTests : IDisposable
+    {
+        readonly string _dir = Path.Combine(Path.GetTempPath(), "c2r_slab_" + Guid.NewGuid().ToString("N"));
+        public SlabOptionsTests() => Directory.CreateDirectory(_dir);
+        public void Dispose() { try { Directory.Delete(_dir, true); } catch (Exception) { } }
+
+        static MapRow Row() => new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.SlabAbove };
+
+        [Theory]
+        [InlineData("m.csv")]
+        [InlineData("m.xlsx")]
+        public void SavedWithTheMapping(string file)
+        {
+            var path = Path.Combine(_dir, file);
+            Mapping.Save(path, new[] { Row() }, new SlabOptions { SearchRangeMm = 4200, FallbackPlaneMm = 2750 });
+            var m = Mapping.Load(path);
+            Assert.Empty(m.Errors);
+            Assert.True(m.HasSlabOptions);
+            Assert.Equal(4200, m.Slab.SearchRangeMm);
+            Assert.Equal(2750, m.Slab.FallbackPlaneMm);
+            Assert.Equal(HostMode.SlabAbove, m.Rows["L"].Host);
+        }
+
+        [Fact]
+        public void OldFilesUseTheDefaults()
+        {
+            var path = Path.Combine(_dir, "old.csv");
+            File.WriteAllText(path, "CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Host_Type\nL,Light,600,slab above\n");
+            var m = Mapping.Load(path);
+            Assert.False(m.HasSlabOptions);
+            Assert.Equal(5000, m.Slab.SearchRangeMm);
+            Assert.Equal(3000, m.Slab.FallbackPlaneMm);
+        }
+
+        [Fact]
+        public void InvalidRangeFallsBackToDefault()
+        {
+            var path = Path.Combine(_dir, "bad.csv");
+            File.WriteAllText(path, "CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Slab_Search_Range_mm\nL,Light,600,-5\n");
+            var m = Mapping.Load(path);
+            Assert.Equal(5000, m.Slab.SearchRangeMm);
+            Assert.Single(m.Errors);
+        }
+
+        [Fact]
+        public void FallbacksAreCountedNotListedAsWarnings()
+        {
+            var row = Row();
+            var msg = SlabSearch.FallbackMessage(5000, 3000, false);
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, Message = msg, SlabFallback = true },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, Message = msg, SlabFallback = true },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed },
+            };
+            var simple = SimpleReport.From(results, preview: true);
+            Assert.Equal(2, simple.SlabFallbacks);
+            Assert.Equal(new[] { "No slab within 5000 mm - placed on reference plane at +3000 mm (2 families)" }, simple.SlabFallbackLines);
+            Assert.Empty(simple.Warnings);
+            Assert.Equal("Would place 3 of 3 families", simple.Headline);
+
+            var s = Report.Summarize(results);
+            Assert.Equal(2, s.SlabFallbacks);
+            Assert.Contains("2 Slab (above) would be placed at the fallback height", Report.SummaryText(s, true));
+        }
+    }
+
     public class SettingsTests
     {
         [Fact]

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.0] - 2026-09-29
+### Changed: Slab (above) search range and fallback plane
+- **Search range.** Slab (above) looks for a slab from the row's level up to the **Slab search range** (default 5000 mm), and ignores anything higher, even when the level above is higher. It replaces "next level + `SlabSearchToleranceMm`", and the 0.15.3 extra search of sloped faces up to `HostSearchDistanceMm`. Floors and roofs, in this model and in links, are still collected once and looked up in memory: there is no ray per block.
+- **Slab found**: the face-based family is hosted on the slab's bottom face, facing down, with the CAD rotation (unchanged).
+- **No slab in range**: the family is hosted on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). The plane is reused by every block that falls back and by later runs. Before, the plane height came from the biggest slab above or the level above.
+- **Level-based families**: with no slab, they are placed level-based with Elevation From Level = the fallback height (still batch-created). Under a slab, they are placed level-based at the slab underside height; before, they failed. Legacy ceiling-hosted families with no slab still fail.
+- **Log and counts**: every fallback block is logged as `No slab within 5000 mm - placed on reference plane at +3000 mm` (or `placed level-based at +3000 mm`). Preview and the result window show the number of fallback blocks, and the full report lists it too.
+- **Mapping window**: *Slab search range (mm)* and *Fallback reference plane height (mm)* are at the top of the window. They are saved with the mapping (the project's remembered mapping and Save...) as the `Slab_Search_Range_mm` and `Slab_Fallback_Plane_mm` columns, and restored by Load.... Invalid values turn red and block Preview/Run.
+- `SlabSearchToleranceMm` in settings.ini now only affects Slab (below).
+
 ## [0.15.3] - 2026-09-29
 ### Fixed: Slab (above) did not follow sloped slabs
 - **Roofs count as slabs.** Sloped slabs are often modelled as Roofs, which Slab (above) and Slab (below) ignored. The tool found no slab, and the family ended up flat on a reference plane below the slope. Roofs are now searched along with Floors, in this model and in links.

@@ -28,8 +28,22 @@ namespace CAD2Revit.Core
         public string Label => Family + " : " + TypeName;
     }
 
+    /// <summary>Slab (above) search range and fallback plane height, saved with the mapping.</summary>
+    public class SlabOptions
+    {
+        public const double DefaultSearchRangeMm = 5000, DefaultFallbackPlaneMm = 3000;
+        public double SearchRangeMm = DefaultSearchRangeMm;
+        public double FallbackPlaneMm = DefaultFallbackPlaneMm;
+
+        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm };
+    }
+
     public class MappingResult
     {
+        /// <summary>Slab (above) options (defaults when the file has no such columns).</summary>
+        public SlabOptions Slab = new SlabOptions();
+        /// <summary>True when the file had the slab columns (so loading it should change the window's values).</summary>
+        public bool HasSlabOptions;
         /// <summary>Case-insensitive: block name -> row.</summary>
         public Dictionary<string, MapRow> Rows = new Dictionary<string, MapRow>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Blocks listed in the file with an empty family ("do not place" / Skip).</summary>
@@ -48,6 +62,9 @@ namespace CAD2Revit.Core
             "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing", "Category",
         };
 
+        /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
+        public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm" };
+
         // Accepted header spellings, compared after lower-casing and removing
         // everything that is not a letter/digit ("Offset_From_Level (mm)" ==
         // "offset from level mm" == "offsetfromlevelmm").
@@ -62,6 +79,8 @@ namespace CAD2Revit.Core
             ["facing"] = new[] { "facing", "face direction", "facingdirection" },
             ["level"] = new[] { "level", "levelname", "targetlevel", "revitlevel" },
             ["category"] = new[] { "category", "discipline", "blockcategory" },
+            ["slabrange"] = new[] { "slabsearchrangemm", "slabsearchrange", "slabrangemm" },
+            ["slabplane"] = new[] { "slabfallbackplanemm", "slabfallbackplane", "fallbackreferenceplaneheightmm", "fallbackplanemm" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -128,12 +147,14 @@ namespace CAD2Revit.Core
 
         /// <summary>Writes rows in the standard mapping format (.xlsx or .csv).
         /// Rows with an empty Family are written as "do not place" (Skip).</summary>
-        public static void Save(string path, IEnumerable<MapRow> rows)
+        public static void Save(string path, IEnumerable<MapRow> rows, SlabOptions slab = null)
         {
-            Tables.WriteTable(path, TemplateHeader, rows.Select(r => (IList<object>)new object[]
+            slab = slab ?? new SlabOptions();
+            Tables.WriteTable(path, TemplateHeader.Concat(SlabHeader).ToArray(), rows.Select(r => (IList<object>)new object[]
             {
                 r.Block, r.Family ?? "", r.TypeName ?? "", r.LevelName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
+                slab.SearchRangeMm, slab.FallbackPlaneMm,
             }).ToList());
         }
 
@@ -188,6 +209,27 @@ namespace CAD2Revit.Core
 
             string Get(Dictionary<string, string> r, string field) =>
                 cols.TryGetValue(field, out var h) && r.TryGetValue(h, out var v) ? (v ?? "").Trim() : "";
+
+            // Slab (above) options: first row with a valid number wins.
+            double? First(string field, Func<double, bool> ok)
+            {
+                if (!cols.ContainsKey(field)) return null;
+                foreach (var r in rows)
+                {
+                    var t = Get(r, field);
+                    if (t.Length == 0) continue;
+                    var v = ParseNumber(t);
+                    if (v.HasValue && ok(v.Value)) return v;
+                    result.Errors.Add($"'{cols[field]}' value '{t}' is not valid - using the default");
+                    return null;
+                }
+                return null;
+            }
+            var range = First("slabrange", v => v > 0);
+            var plane = First("slabplane", v => true);
+            if (range.HasValue) result.Slab.SearchRangeMm = range.Value;
+            if (plane.HasValue) result.Slab.FallbackPlaneMm = plane.Value;
+            result.HasSlabOptions = range.HasValue || plane.HasValue;
 
             int line = 1;
             foreach (var r in rows)

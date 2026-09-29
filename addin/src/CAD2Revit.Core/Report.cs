@@ -30,6 +30,8 @@ namespace CAD2Revit.Core
         public bool Mirrored;
         public bool HasBlock = true;    // false for grouped "unmapped" rows
         public int Count = 1;
+        /// <summary>Slab (above) found no slab in range: placed on the fallback plane / height.</summary>
+        public bool SlabFallback;
     }
 
     public class Summary
@@ -40,6 +42,8 @@ namespace CAD2Revit.Core
         public List<PlacementResult> Problems = new List<PlacementResult>();
         /// <summary>Placed, but with a "WARNING:" message (e.g. placed level-based instead of on a plane).</summary>
         public List<PlacementResult> Warnings = new List<PlacementResult>();
+        /// <summary>Slab (above) blocks with no slab in range, placed at the fallback height.</summary>
+        public int SlabFallbacks;
 
         public int Get(Status s) => Status.TryGetValue(s, out var n) ? n : 0;
     }
@@ -65,6 +69,7 @@ namespace CAD2Revit.Core
             foreach (var r in results)
             {
                 s.Status[r.Status] = s.Get(r.Status) + r.Count;
+                if (r.Status == Status.Placed && r.SlabFallback) s.SlabFallbacks += r.Count;
                 if (r.Status == Status.Placed && r.Row != null)
                 {
                     byType[r.Row.Label] = (byType.TryGetValue(r.Row.Label, out var n) ? n : 0) + 1;
@@ -134,6 +139,8 @@ namespace CAD2Revit.Core
                 $"{s.Get(Status.Duplicate)} duplicates skipped, {s.Get(Status.Failed)} failed, " +
                 $"{s.Get(Status.Skipped)} not loaded, {s.Get(Status.Unmapped)} unmapped instances",
             };
+            if (s.SlabFallbacks > 0)
+                lines.Add($"{s.SlabFallbacks} Slab (above) {(preview ? "would be placed" : "placed")} at the fallback height (no slab in range) - see the log");
             if (s.ByType.Count > 0)
             {
                 lines.Add("");

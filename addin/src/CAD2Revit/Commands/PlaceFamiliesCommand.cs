@@ -84,7 +84,7 @@ namespace CAD2Revit.Commands
                     try
                     {
                         Directory.CreateDirectory(ProjectStore.Folder);
-                        Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()));
+                        Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()), session.Slab);
                     }
                     catch (Exception) { /* remembering is a convenience only */ }
 

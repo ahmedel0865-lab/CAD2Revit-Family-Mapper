@@ -52,7 +52,7 @@ flowchart LR
 **Placement and hosting**
 - Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
 - Hosts per row: **None (level-based)**, **Ceiling**, **Slab (above)**, **Slab (below)**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
-- **Slab (above)**: hosts on the **underside of the slab of the level above**, found straight up from each block. Only floor slabs count; beams, ceilings and ducts are ignored. Structural links are searched too, and the search is limited to the level-to-level height + 500 mm. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits under a slab opening, the family goes on a reference plane at the slab's height, with a warning.
+- **Slab (above)**: hosts on the **bottom face of the first slab above** each block, facing down, keeping the CAD rotation (sloped slabs included). Floors (and roofs, since sloped slabs are often modelled as roofs) count, in this model and in linked models; beams, ceilings and ducts are ignored. The search goes from the row's level up to the **Slab search range** (default 5000 mm), never higher, even if the level above is higher. **No slab in range** (open area, slab opening, missing structural link): the family goes on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). Level-based families are placed level-based at that Elevation From Level. Each such block is logged as `No slab within 5000 mm - placed on reference plane at +3000 mm`, and Preview and the result window show how many there are. Both values are at the top of the mapping window and are saved with the mapping. A level-based family under a slab is placed level-based at the slab's underside height. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits over a slab opening, the family goes on a reference plane at the slab's height, with a warning.
 - **Detected Host (Preview)** column: after Preview, every row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
 - **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up.
 - If no host is found, falls back to unhosted placement (or reports a failure, your choice).
@@ -101,7 +101,7 @@ Next time in the same project, the mapping window opens pre-filled.
 | | Devices go on the **underside of a slab** or in **open ceilings** (car parks, plant rooms), or **face up** on the floor (floor boxes: set *Facing* = Up). |
 
 Notes:
-- All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window. On Ceiling / Face / Slab rows it is not placed ("family is not face-based").
+- All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window. On Slab (above) rows it is placed level-based at the slab underside height, or at the fallback height when there is no slab. On Ceiling / Face / Slab (below) rows it is not placed ("family is not face-based").
 - For hosts in **linked models**, each placed instance is checked: *Host* must be the link, not a reference plane. Otherwise the block is reported as failed. Set `DebugHosting = true` in `settings.ini` to get a per-block DEBUG line (link, element, normal, final host) in the log.
 - Ceiling hosting looks straight up from each block and needs a ceiling within the search distance. Anything without a ceiling above it falls back to the row's elevation, unhosted.
 - Reference planes are named `CAD2Revit_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
@@ -118,6 +118,8 @@ The mapping window can **Load / Save** the mapping as a file, to reuse it across
 | FLOOR-BOX | Floor Box | Standard | 0 | 0 | slab below |
 
 `Host_Type` values: `non-hosted`, `ceiling`, `slab above`, `slab below`, `wall`, `reference plane`, `face` or `vertical`. The window's labels are accepted too.
+
+Saved mappings also carry two columns, `Slab_Search_Range_mm` and `Slab_Fallback_Plane_mm`, with the same value on every row (the Slab (above) values from the top of the mapping window). Files without them use 5000 and 3000.
 
 ## Project structure
 ```

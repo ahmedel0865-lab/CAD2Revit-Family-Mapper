@@ -80,6 +80,7 @@ namespace CAD2Revit.UI
                        "Elevation is measured from the row's Level. Select several rows to edit them together.",
                 Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0),
             });
+            titles.Children.Add(BuildSlabOptions());
             var stats = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             stats.Children.Add(Chip("Mapped", _statMapped));
             stats.Children.Add(Chip("Instances to place", _statInstances));
@@ -654,9 +655,58 @@ namespace CAD2Revit.UI
             _grid.CommitEdit(DataGridEditingUnit.Row, true);
         }
 
+        // ---- Slab (above) options ------------------------------------------------------
+        readonly TextBox _slabRange = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
+            ToolTip = "Slab (above): look for a slab from the row's level up to this height (mm). Higher slabs are ignored." };
+        readonly TextBox _slabPlane = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "Slab (above) with no slab in range: host on the reference plane CAD2Revit_<Level>_+<height>mm, facing down " +
+                      "(level-based families: this Elevation From Level)." };
+
+        UIElement BuildSlabOptions()
+        {
+            var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            bar.Children.Add(new TextBlock { Text = "Slab (above):", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+            bar.Children.Add(new TextBlock { Text = "Slab search range (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            bar.Children.Add(_slabRange);
+            bar.Children.Add(new TextBlock { Text = "Fallback reference plane height (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            bar.Children.Add(_slabPlane);
+            ShowSlabOptions();
+            _slabRange.TextChanged += (o, e) => ReadSlabOptions();
+            _slabPlane.TextChanged += (o, e) => ReadSlabOptions();
+            return bar;
+        }
+
+        void ShowSlabOptions()
+        {
+            _slabRange.Text = _s.Slab.SearchRangeMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            _slabPlane.Text = _s.Slab.FallbackPlaneMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
+        string ReadSlabOptions()
+        {
+            var range = Mapping.ParseNumber(_slabRange.Text);
+            var plane = Mapping.ParseNumber(_slabPlane.Text);
+            bool rangeOk = range.HasValue && range.Value > 0 && _slabRange.Text.Trim().Length > 0;
+            bool planeOk = plane.HasValue && _slabPlane.Text.Trim().Length > 0;
+            if (rangeOk) _s.Slab.SearchRangeMm = range.Value;
+            if (planeOk) _s.Slab.FallbackPlaneMm = plane.Value;
+            _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
+            _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
+            return !rangeOk ? "Slab search range must be a number of mm greater than 0."
+                 : !planeOk ? "Fallback reference plane height must be a number of mm."
+                 : null;
+        }
+
         void Finish(MappingAction action)
         {
             CommitEdits();
+            var slabProblem = ReadSlabOptions();
+            if (slabProblem != null)
+            {
+                MessageBox.Show(this, slabProblem, "CAD2Revit", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             var bad = _s.Rows.Where(r => r.Error != null).ToList();
             if (bad.Count > 0)
             {
@@ -688,6 +738,7 @@ namespace CAD2Revit.UI
             if (dlg.ShowDialog(this) != true) return;
             var mapping = Mapping.Load(dlg.FileName);
             var (applied, messages) = _s.Apply(mapping);
+            ShowSlabOptions();
             RememberFolder(dlg.FileName);
             UpdateStatus();
             var text = $"Applied {applied} of {_s.Rows.Count} blocks from\n{dlg.FileName}";
@@ -711,7 +762,7 @@ namespace CAD2Revit.UI
             if (dlg.ShowDialog(this) != true) return;
             try
             {
-                Mapping.Save(dlg.FileName, _s.Rows.Select(r => r.ToMapRow()));
+                Mapping.Save(dlg.FileName, _s.Rows.Select(r => r.ToMapRow()), _s.Slab);
                 RememberFolder(dlg.FileName);
                 MessageBox.Show(this, "Mapping saved:\n" + dlg.FileName, "CAD2Revit");
             }

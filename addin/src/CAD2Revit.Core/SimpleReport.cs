@@ -17,6 +17,9 @@ namespace CAD2Revit.Core
         public bool Preview;
         public List<KeyValuePair<string, int>> ByFamily = new List<KeyValuePair<string, int>>();
         public List<string> Warnings = new List<string>();
+        /// <summary>Slab (above) blocks placed at the fallback height, and that line's text.</summary>
+        public int SlabFallbacks;
+        public List<string> SlabFallbackLines = new List<string>();
 
         public bool AllPlaced => Total > 0 && Placed == Total;
 
@@ -36,8 +39,22 @@ namespace CAD2Revit.Core
                 .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            // Slab (above) fallbacks: one count line (every block is in the log).
+            var fallbacks = list.Where(x => x.Status == Status.Placed && x.SlabFallback).ToList();
+            r.SlabFallbacks = fallbacks.Sum(x => x.Count);
+            r.SlabFallbackLines = fallbacks
+                .GroupBy(x => (x.Message ?? "").Split(new[] { "; " }, StringSplitOptions.None)
+                                  .FirstOrDefault(m => m.StartsWith("No slab within", StringComparison.Ordinal)) ?? "No slab in range")
+                .Select(g =>
+                {
+                    int n = g.Sum(x => x.Count);
+                    return $"{g.Key} ({n} {(n == 1 ? "family" : "families")})";
+                })
+                .ToList();
+
             // One line per (block, problem); worst problems first.
             r.Warnings = list
+                .Where(x => !(x.Status == Status.Placed && x.SlabFallback))
                 .Select(x => new { x.BlockName, x.Status, x.Count, Text = Problem(x, preview) })
                 .Where(x => x.Text != null)
                 .GroupBy(x => new { x.BlockName, x.Text, x.Status })
