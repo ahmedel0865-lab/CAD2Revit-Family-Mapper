@@ -154,5 +154,6 @@ Click **CAD2Revit > Tools > Settings** to open it in Notepad. Settings are store
 | `FallbackToUnhosted` | true | If no host is found, place unhosted at the row offset (`true`), or report as failed (`false`). |
 | `WriteBlockNameToComments` | true | Write `CAD: <block>` into Comments. |
 | `DebugHosting` | false | `true`: each block's log *Message* gets a `DEBUG` line: linked yes/no, link name, host element id and category, face normal, and the final *Host* of the placed instance. Example: `DEBUG linked=yes link=STR.rvt element=412233 (Floors) normal=(0.000,0.000,-1.000); host=Revit link STR.rvt, host face ok`. Existing `settings.ini` files don't have this line; add `DebugHosting = true` yourself. |
+| `CenterFamiliesOnCadPoint` | true | Vertical planes: if a family's origin is more than 10 mm from its geometric centre (along the plane), shift it so its centre sits on the CAD insertion point. `false`: the family's origin sits on the point. |
 | `LastMappingPath` | | Remembered automatically. |
 

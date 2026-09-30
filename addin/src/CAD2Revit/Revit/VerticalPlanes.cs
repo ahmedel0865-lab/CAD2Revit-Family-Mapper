@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using CAD2Revit.Core;
 
 namespace CAD2Revit.Revit
 {
@@ -20,6 +21,7 @@ namespace CAD2Revit.Revit
     {
         public const string NamePrefix = "CAD2Revit vertical";
         const double HalfLengthFt = 0.5;   // drawn length only; work planes are infinite
+        static readonly double CosMaxTurn = Math.Cos(0.01 * Math.PI / 180);   // reuse planes turned by < 0.01 deg
 
         readonly Document _doc;
         readonly View _view;
@@ -57,29 +59,51 @@ namespace CAD2Revit.Revit
                    ?? plans.FirstOrDefault();
         }
 
+        static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+        static XYZ X(V3 p) => new XYZ(p.X, p.Y, p.Z);
+
         /// <summary>A vertical plane through <paramref name="point"/> whose normal is the
         /// horizontal <paramref name="facing"/> direction. <paramref name="onPlane"/> is the
-        /// point moved onto the plane (differs by &lt; 1 mm when a plane is reused).</summary>
-        public Reference Get(XYZ point, XYZ facing, out XYZ onPlane)
+        /// point projected onto the plane (at most 0.5 mm away: a shared plane is only reused
+        /// when the point is that close to it) and <paramref name="normal"/> the plane's
+        /// actual normal (= facing).</summary>
+        public Reference Get(XYZ point, XYZ facing, out XYZ onPlane, out XYZ normal)
         {
             facing = new XYZ(facing.X, facing.Y, 0).Normalize();
             var key = Key(facing, point);
             // A plane created for a block whose sub-transaction was rolled back no longer exists.
-            if (!_planes.TryGetValue(key, out var rp) || !rp.IsValidObject)
+            // A plane found under the same key can still be slightly turned or shifted (the key
+            // is rounded): reuse it only if it faces the same way and passes through the point.
+            if (!_planes.TryGetValue(key, out var rp) || !rp.IsValidObject ||
+                rp.Normal.DotProduct(facing) < CosMaxTurn ||
+                Math.Abs(VerticalPlacement.Distance(V(point), V(rp.BubbleEnd), V(rp.Normal))) * VerticalPlacement.MmPerFoot > VerticalPlacement.PlaneReuseMm)
             {
-                if (_view == null) throw new InvalidOperationException("no floor plan view found to create a vertical work plane");
-                var along = new XYZ(-facing.Y, facing.X, 0);
-                rp = _doc.Create.NewReferencePlane(point.Subtract(along.Multiply(HalfLengthFt)),
-                                                   point.Add(along.Multiply(HalfLengthFt)), XYZ.BasisZ, _view);
-                if (rp.Normal.DotProduct(facing) < 0) rp.Flip();
-                try { rp.Name = NamePrefix + " " + Compat.IdValue(rp.Id); } catch (Exception) { }
+                rp = Create(point, facing);
                 _planes[key] = rp;
             }
-            // Project onto the (possibly shared) plane.
-            var n = rp.Normal;
-            double off = n.DotProduct(point.Subtract(rp.BubbleEnd));
-            onPlane = point.Subtract(n.Multiply(off));
+            normal = rp.Normal;
+            onPlane = X(VerticalPlacement.Project(V(point), V(rp.BubbleEnd), V(normal)));
             return rp.GetReference();
+        }
+
+        /// <summary>New plane through the point, normal = facing. The end points are ordered so
+        /// the normal already points the right way; no Flip() (which would need a regeneration
+        /// before the normal can be trusted).</summary>
+        ReferencePlane Create(XYZ point, XYZ facing)
+        {
+            if (_view == null) throw new InvalidOperationException("no floor plan view found to create a vertical work plane");
+            var along = X(VerticalPlacement.Along(V(facing)));
+            ReferencePlane Make(double sign) => _doc.Create.NewReferencePlane(
+                point.Subtract(along.Multiply(sign * HalfLengthFt)), point.Add(along.Multiply(sign * HalfLengthFt)), XYZ.BasisZ, _view);
+            var rp = Make(1);
+            if (rp.Normal.DotProduct(facing) < 0)
+            {
+                _doc.Delete(rp.Id);
+                rp = Make(-1);
+            }
+            if (rp.Normal.DotProduct(facing) < 0) rp.Flip();   // not expected
+            try { rp.Name = NamePrefix + " " + Compat.IdValue(rp.Id); } catch (Exception) { }
+            return rp;
         }
     }
 }

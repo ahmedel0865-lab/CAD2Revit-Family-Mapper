@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0] - 2026-09-30
+### Fixed: offset of families on vertical planes
+- Families on a **vertical plane** (Host Type *Vertical plane*, or *Wall* with no wall found) could land shifted from the CAD block insertion point, depending on the direction the plane faced.
+- **Exact point.** The CAD insertion point is projected perpendicularly onto the plane, at the row's elevation, and the family is placed there.
+  - A shared plane from an earlier block is reused only if it faces the same way (within 0.01°) and passes within 0.5 mm of the point. Otherwise a new plane is made. Before, planes were shared by a rounded key, and a slightly turned plane moved the family along the wall.
+- **Orientation.** The reference direction is horizontal along the plane (Z × normal), and the facing comes from the CAD block rotation (+Y of the block).
+  - New planes get their end points in the order that makes the normal point the right way. There is no `Flip()`, whose effect can't be trusted before a regeneration.
+  - If the placed family faces the back of the plane, its work plane is flipped back.
+- **Family origin.** With `CenterFamiliesOnCadPoint = true` (new setting, default), a family whose origin is more than 10 mm from its geometric centre along the plane is shifted so its centre sits on the CAD point. The log notes the offset.
+- **Check after placing.** The family's position is measured against the CAD point.
+  - More than **10 mm** off: it is moved back onto the point, and a **WARNING** is shown in the result window ("family landed N mm from the CAD point - moved back onto it").
+  - The position is measured again after the move.
+- The timing table has a new phase, *Position check + snap (vertical planes)*. The check regenerates the model for each vertical-plane block, which makes these rows a little slower.
+- New Core class `VerticalPlacement`, with tests for planes facing north, south, east, west and at angles.
+
 ## [0.15.0] - 2026-09-28
 ### Removed
 - The **List Blocks** button and command. The mapping window (Place Families) already lists every block with its count, and **Save** writes the same mapping file for Excel. The ribbon now has **Place Families**, **Settings** and **Help**.

@@ -26,6 +26,7 @@ namespace CAD2Revit.Core
         public bool SearchRevitLinks = true;
         public bool FallbackToUnhosted = true;
         public bool DebugHosting = false;              // per-point hosting details in the log
+        public bool CenterFamiliesOnCadPoint = true;   // vertical planes: centre off-centre families on the CAD point
         // Output
         public bool WriteBlockNameToComments = true;
         // Remembered between runs
@@ -74,6 +75,7 @@ namespace CAD2Revit.Core
                 case "searchrevitlinks": SearchRevitLinks = B(SearchRevitLinks); break;
                 case "fallbacktounhosted": FallbackToUnhosted = B(FallbackToUnhosted); break;
                 case "debughosting": DebugHosting = B(DebugHosting); break;
+                case "centerfamiliesoncadpoint": CenterFamiliesOnCadPoint = B(CenterFamiliesOnCadPoint); break;
                 case "writeblocknametocomments": WriteBlockNameToComments = B(WriteBlockNameToComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
             }
@@ -108,6 +110,9 @@ namespace CAD2Revit.Core
             sb.AppendLine("# true: add a DEBUG line per point to the log (linked yes/no, link, host element id and");
             sb.AppendLine("# category, face normal, final Host of the placed instance).");
             sb.AppendLine("DebugHosting = " + Bo(DebugHosting));
+            sb.AppendLine("# Vertical planes: if a family's origin is not at its centre, shift it along the plane so");
+            sb.AppendLine("# its centre sits on the CAD insertion point (false: its origin sits on the point).");
+            sb.AppendLine("CenterFamiliesOnCadPoint = " + Bo(CenterFamiliesOnCadPoint));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
             sb.AppendLine("WriteBlockNameToComments = " + Bo(WriteBlockNameToComments));
             sb.AppendLine();

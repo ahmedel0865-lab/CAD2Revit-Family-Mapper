@@ -68,6 +68,8 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12j | Slab in host model | Same slab modelled in this model (no link); Host *Slab (above)*. Host = the Floor, DEBUG `linked=no ... (Floors)`, `host=element of this model (Floors <id>), host face ok` |
 | 12k | No slab above | A light outside the slab outline (or under a shaft opening). *Slab (above)*: placed on a reference plane with a WARNING, DEBUG `no host face found; host=Reference Plane ...`. *Face* with `FallbackToUnhosted = false`: `failed`, "no face found" |
 | 12l | Not face-based | Map a level-based (non face-based) family to *Slab (above)*: `failed`, "family is not face-based (placement type OneLevelBased)" and nothing placed |
+| 12m | Vertical plane, 4 directions + angle | Blocks rotated 0° (north), 90° (west), 180° (south), 270° (east) and 30°, Host *Vertical plane*, elevation 1200. Each family sits on its CAD insertion point (plan: centred on the block; elevation 1200), facing the block's +Y. No "landed N mm from the CAD point" warnings. Measure a few: within 10 mm |
+| 12n | Off-centre family origin | A face-based family whose origin is at one edge: with `CenterFamiliesOnCadPoint = true` it is centred on the block and the log notes "family origin is N mm from its centre"; with `false` its origin sits on the block |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

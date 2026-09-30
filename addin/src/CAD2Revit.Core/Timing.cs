@@ -21,6 +21,7 @@ namespace CAD2Revit.Core
         public const string DupQuery = "Duplicate check - per block";
         public const string Planes = "Reference/vertical planes";
         public const string Create = "Family creation";
+        public const string Verify = "Position check + snap (vertical planes)";
         public const string CreateBatch = "Family creation - batched (level-based)";
         public const string Rotate = "Rotation";
         public const string Params = "Parameter setting";
