@@ -727,14 +727,19 @@ namespace CAD2Revit.Revit
             {
                 // Device faces the CAD block's local +Y axis (turned by the row's Rotation):
                 // blocks drawn with the wall along X and the room on +Y face into the room.
-                var facing = new XYZ(-Math.Sin(angle), Math.Cos(angle), 0);
+                // It goes on the CAD insertion point (at the row's elevation) projected onto the
+                // plane, reference direction along the plane (upright, not mirrored).
+                var f = VerticalPlacement.Facing(angle);
+                var facing = new XYZ(f.X, f.Y, 0);
                 Reference planeRef;
-                XYZ onPlane;
-                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane);
+                XYZ onPlane, normal;
+                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane, out normal);
+                var along = XYZ.BasisZ.CrossProduct(normal).Normalize();
                 using (_timer.Time(Phases.Create))
-                    inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, XYZ.BasisZ.CrossProduct(facing).Normalize(), sym);
+                    inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, along, sym);
                 target = onPlane;
                 hostText = "Vertical plane";
+                using (_timer.Time(Phases.Verify)) SnapToPoint(inst, onPlane, normal, along, notes);
             }
             else if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
             {
@@ -867,6 +872,62 @@ namespace CAD2Revit.Revit
                 problem = Check();
             }
             return problem;
+        }
+
+        static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        /// <summary>
+        /// Vertical planes: makes sure the family really sits on <paramref name="point"/> (the CAD
+        /// insertion point on the plane). Revit can put a face-based family off the point (on the
+        /// back of the plane, or offset by the family's own origin), so after placing:
+        /// 1. if it faces away from the plane normal, its work plane is flipped back;
+        /// 2. with CenterFamiliesOnCadPoint, a family whose origin is more than 10 mm from its
+        ///    geometric centre (along the plane) is shifted so its centre is on the point;
+        /// 3. if its origin landed more than 10 mm from the point, it is moved back onto it and a
+        ///    WARNING is logged (shown in the result window).
+        /// </summary>
+        void SnapToPoint(FamilyInstance inst, XYZ point, XYZ normal, XYZ along, List<string> notes)
+        {
+            _doc.Regenerate();
+            try
+            {
+                if (inst.GetTransform().BasisZ.DotProduct(normal) < -0.5 && inst.CanFlipWorkPlane)
+                {
+                    inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
+                    _doc.Regenerate();
+                }
+            }
+            catch (Exception) { }
+            if (!(inst.Location is LocationPoint lp)) return;
+            var target = V(point);
+            var dir = V(along);
+            var loc = V(lp.Point);
+            double devMm = VerticalPlacement.DeviationMm(loc, target);
+            double centre = 0;
+            if (_settings.CenterFamiliesOnCadPoint)
+            {
+                BoundingBoxXYZ bb = null;
+                try { bb = inst.get_BoundingBox(null); } catch (Exception) { }
+                if (bb != null)
+                    centre = VerticalPlacement.CenterOffset(loc, V(bb.Min.Add(bb.Max).Multiply(0.5)), dir);
+            }
+            var move = target - VerticalPlacement.Anchor(loc, dir, centre);
+            if (move.Length * VerticalPlacement.MmPerFoot > 0.5)
+            {
+                ElementTransformUtils.MoveElement(_doc, inst.Id, new XYZ(move.X, move.Y, move.Z));
+                _doc.Regenerate();
+            }
+            if (devMm > VerticalPlacement.ToleranceMm)
+                notes.Add($"WARNING: family landed {devMm:0} mm from the CAD point - moved back onto it");
+            if (centre != 0)
+                notes.Add($"family origin is {Math.Abs(centre) * VerticalPlacement.MmPerFoot:0} mm from its centre along the plane - " +
+                          "shifted so its centre is on the CAD point");
+            if (inst.Location is LocationPoint after)
+            {
+                double leftMm = VerticalPlacement.DeviationMm(VerticalPlacement.Anchor(V(after.Point), dir, centre), target);
+                if (leftMm > VerticalPlacement.ToleranceMm)
+                    notes.Add($"WARNING: family is still {leftMm:0} mm from the CAD point after moving it - check it");
+            }
         }
 
         FamilyInstance CreateLevelBased(FamilySymbol sym, Level level, XYZ basePt, double angle)
