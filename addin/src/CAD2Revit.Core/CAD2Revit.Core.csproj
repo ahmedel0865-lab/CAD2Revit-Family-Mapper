@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure .NET logic (no Revit): CSV/XLSX, mapping, reports, settings.
+       The add-in compiles these same source files into its own DLL, so this
+       project only exists for the unit tests. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>CAD2Revit.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

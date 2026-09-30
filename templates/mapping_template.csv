@@ -1,4 +1,12 @@
 CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Offset_From_Level_mm,Rotation_Adjustment_deg,Host_Type
-LIGHT-600x600,Recessed Panel Light,600x600 40W,2800,0,face
-SOCKET-DOUBLE,Duplex Receptacle,Standard,300,0,none
-SMOKE-DET,Smoke Detector,Ceiling,2800,0,face
+LIGHT-600x600,Recessed Panel Light,600x600 40W,2800,0,ceiling
+LIGHT-DOWN,Downlight,150mm 12W,2800,0,ceiling
+EXIT-SIGN,Emergency Exit Sign,Ceiling Mounted,2800,0,face
+SOCKET-DOUBLE,Duplex Receptacle,Standard,300,0,wall
+SWITCH-1G,Lighting Switch,1 Gang,1200,0,wall
+SMOKE-DET,Smoke Detector,Ceiling,2800,0,ceiling
+MCP,Manual Call Point,Standard,1400,0,wall
+DB-PANEL,Lighting and Appliance Panelboard,400A,1500,180,non-hosted
+DATA-OUTLET,Data Outlet,Cat6 Double,300,0,wall
+CCTV-CAM,CCTV Camera,Dome,2800,0,ceiling
+TEXT-TAG,,,,,

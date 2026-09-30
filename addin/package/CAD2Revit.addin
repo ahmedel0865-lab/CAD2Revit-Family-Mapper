@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>CAD2Revit Family Mapper</Name>
+    <Assembly>CAD2Revit\CAD2Revit.dll</Assembly>
+    <AddInId>6f1c2a57-3b8e-4d0a-9c3e-2f7b5d9e8a41</AddInId>
+    <FullClassName>CAD2Revit.App</FullClassName>
+    <VendorId>CAD2Revit</VendorId>
+    <VendorDescription>CAD2Revit Family Mapper - https://github.com/ahmedel0865-lab/CAD2Revit-Family-Mapper</VendorDescription>
+  </AddIn>
+</RevitAddIns>
