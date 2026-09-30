@@ -181,11 +181,13 @@ namespace CAD2Revit.Commands
                               "at these block locations (probably from an earlier run).",
                 AllowCancellation = true,
                 CommonButtons = TaskDialogCommonButtons.None,
-                DefaultButton = TaskDialogResult.CommandLink1,
             };
             td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Skip them", "Place only the blocks that are not in the model yet (recommended)");
             td.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Place anyway", "Place every block, even where an element already exists");
             td.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "Cancel", "Go back to the mapping window");
+            // Only after the command links exist: Revit throws "Corresponding button not found"
+            // when DefaultButton names a button the dialog does not have yet.
+            td.DefaultButton = TaskDialogResult.CommandLink1;
             var r = td.Show();
             return r == TaskDialogResult.CommandLink1 ? ExistingChoice.Skip
                  : r == TaskDialogResult.CommandLink2 ? ExistingChoice.PlaceAnyway

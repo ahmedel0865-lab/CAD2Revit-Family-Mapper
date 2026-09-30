@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.19.2] - 2026-09-30
+### Fixed
+- **Place Families crashed** with `ArgumentException: Corresponding button not found (defaultButton)` when blocks were already placed. The "already placed" dialog set its default button before adding its buttons. The default (*Skip them*) is now set after the buttons are added.
+
 ## [0.19.1] - 2026-09-30
 ### Fixed: offset of families on vertical planes
 - Families on a **vertical plane** (Host Type *Vertical plane*, or *Wall* with no wall found) could land shifted from the CAD block insertion point, depending on the direction the plane faced.
