@@ -99,7 +99,7 @@ namespace CAD2Revit.Core
             sb.AppendLine("SimplifyBlockNames = " + Bo(SimplifyBlockNames));
             sb.AppendLine("# Max distance (mm) above the level to look for a ceiling/slab (never past the next level).");
             sb.AppendLine("HostSearchDistanceMm = " + F(HostSearchDistanceMm));
-            sb.AppendLine("# Max distance (mm) from the CAD point to a wall face for Host_Type = wall.");
+            sb.AppendLine("# Host_Type = wall: starting value of the window's Wall search distance (mm, plan distance to the wall).");
             sb.AppendLine("WallSearchDistanceMm = " + F(WallSearchDistanceMm));
             sb.AppendLine("# Slab (below) searches this far below the level (mm). Slab (above) uses the range set in the mapping window.");
             sb.AppendLine("SlabSearchToleranceMm = " + F(SlabSearchToleranceMm));

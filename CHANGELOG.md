@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0] - 2026-09-30
+### Fixed: wall hosting (Host Type "Wall")
+- **Family on the opposite face.** The old search projected the CAD point onto every wall side face and took the nearest projection. Where the near face had a door/window opening at that point (or the point was past the face edge), only the far face gave a projection, so the family went on the wrong side. A block with no wall found stood on a vertical plane through the point, rotated like the CAD block.
+- **Family rotated like the CAD block.** For wall hosting the CAD rotation is now ignored: the family uses the wall direction.
+### New wall logic, per block
+1. **Find the wall**: the nearest wall by plan distance to the wall body (location line and face offsets), within the **Wall search distance**. This is a new box above the grid, default 500 mm (from `WallSearchDistanceMm`), and it is saved with the mapping (`Wall_Search_Distance_mm`). Walls in this model and in links count, if they exist at the row's height.
+2. **Pick the face on the block's side**: the sign of the CAD point's offset from the location line, compared with the offsets of the two side faces. Inside the wall thickness, the side the block symbol is drawn on (its centre of geometry) decides.
+3. **Position**: the CAD point projected perpendicularly onto that face, at level + Elevation From Level.
+4. **Orientation**: the reference direction is the wall direction, so the family sits flat on the face and faces out towards the block.
+   - Face-based families facing into the wall are flipped after placing.
+   - Legacy wall-hosted families get *flip facing*, and *flip hand* if mirrored.
+5. **Straight and curved walls**: on a curved wall, the tangent at the projected point is used. Other curve types use `Curve.Project`.
+6. **Needs Review** now also lists wall blocks: *No wall within 500 mm* (then the vertical/reference-plane fallback, Comments `CAD2Revit: Host = Reference Plane`), *Moved more than 200 mm to reach the wall face*, and *Wall is in a linked model*.
+- Performance is unchanged: walls are collected once into the location-line index, face offsets are computed once per wall, and everything still runs in one transaction. No ray per block, except for walls that can't be indexed.
+- New Core class `WallPlacement`, with tests. They include: a block on the right face goes on the right face; a block drawn at an angle still sits flat on the wall; a point inside the wall; a location line on a face; past the wall end; curved walls (clockwise and counter-clockwise).
+
 ## [0.19.2] - 2026-09-30
 ### Fixed
 - **Place Families crashed** with `ArgumentException: Corresponding button not found (defaultButton)` when blocks were already placed. The "already placed" dialog set its default button before adding its buttons. The default (*Skip them*) is now set after the buttons are added.

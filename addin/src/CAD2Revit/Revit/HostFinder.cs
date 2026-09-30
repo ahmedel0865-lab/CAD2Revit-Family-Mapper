@@ -18,6 +18,10 @@ namespace CAD2Revit.Revit
         public string LinkName = "";  // e.g. "STR.rvt" when linked
         public double Distance;       // ray length, feet
         public bool FromIndex;        // found by the face/wall index (not a ray)
+        // Walls only:
+        public XYZ RefDir;            // along the wall at Point (family upright, flat on the face)
+        public double MovedFt;        // plan distance from the CAD point to Point
+        public bool InsideWall;       // the CAD point was inside the wall thickness
 
         /// <summary>e.g. "Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)".</summary>
         public string Describe()

@@ -102,6 +102,17 @@ namespace CAD2Revit.Revit
             }
         }
 
+        /// <summary>Centre of the block symbol's geometry (bounding box of its line work), in model
+        /// coordinates; null if it has none. Used to tell which side of a wall a symbol is drawn on.</summary>
+        public static XYZ SymbolCentre(BlockRef b)
+        {
+            var bb = b.Instance?.GetSymbolGeometry()?.GetBoundingBox();
+            if (bb == null) return null;
+            var c = (bb.Min + bb.Max) / 2;
+            if (bb.Transform != null) c = bb.Transform.OfPoint(c);
+            return b.Transform.OfPoint(c);
+        }
+
         /// <summary>Replace each block's Revit symbol name with its simplified name
         /// (see Core.BlockNames), so every instance of a block shares one name.</summary>
         public static void SimplifyNames(List<BlockRef> blocks)

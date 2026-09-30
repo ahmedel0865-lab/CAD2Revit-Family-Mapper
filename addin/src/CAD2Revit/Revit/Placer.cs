@@ -90,6 +90,7 @@ namespace CAD2Revit.Revit
             public double? LevelElevMm;  // level-based: Elevation From Level instead of the row's (Slab above)
             public bool SlabFallback;    // Slab (above): no slab in range, fallback plane / height used
             public SlabHost SlabHost;    // Slab (above): what the block ends up on
+            public List<string> Review = new List<string>();   // Needs Review reasons (walls)
             public PlacementResult Fail(PlacementResult r)
             {
                 Failed = r;
@@ -271,7 +272,8 @@ namespace CAD2Revit.Revit
                             var inst = _doc.GetElement(c.Id);
                             if (inst == null) continue;
                             SetParam(inst, BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM, c.Level.Id);
-                            if (c.Result.SlabFallback)   // findable later with a filter or schedule on Comments
+                            if (c.Result.SlabFallback ||   // findable later with a filter or schedule on Comments
+                                (c.Result.Review ?? "").StartsWith("No wall", StringComparison.Ordinal))
                                 SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS,
                                          NeedsReview.CommentText + (_settings.WriteBlockNameToComments ? " | CAD: " + c.BlockName : ""));
                             else if (_settings.WriteBlockNameToComments)
@@ -538,9 +540,22 @@ namespace CAD2Revit.Revit
                     string where;
                     if (row.Host == HostMode.Wall)
                     {
-                        double z = levelZ + Math.Max(offset, Ft(10));
-                        hit = finder.FindWall(x, y, z, Ft(_settings.WallSearchDistanceMm), b.Rotation);
-                        where = $"within {_settings.WallSearchDistanceMm:0} mm";
+                        // Walls that exist at the target height; the family goes at level + elevation.
+                        double searchZ = levelZ + Math.Max(offset, Ft(10));
+                        double wallMm = _slab.WallSearchMm;
+                        hit = finder.FindWall(x, y, searchZ, levelZ + offset, Ft(wallMm), b.Rotation, () => DwgReader.SymbolCentre(b));
+                        where = $"within {wallMm:0} mm";
+                        if (hit == null) plan.Review.Add(WallPlacement.NoWallReason(wallMm));
+                        else
+                        {
+                            if (hit.MovedFt * MmPerFoot > WallPlacement.MoveReviewMm)
+                            {
+                                plan.Review.Add(WallPlacement.MovedReason);
+                                notes.Add($"moved {hit.MovedFt * MmPerFoot:0} mm to reach the wall face");
+                            }
+                            if (hit.IsLinked) plan.Review.Add(WallPlacement.LinkedReason);
+                            if (hit.InsideWall) notes.Add("CAD point is inside the wall - side taken from the block symbol");
+                        }
                     }
                     else
                     {
@@ -586,6 +601,7 @@ namespace CAD2Revit.Revit
             if (plan.Failed != null) return WithDebug(plan.Failed, plan);
             var res0 = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created, plan);
             if (plan.SlabFallback) res0.SlabFallback = true;
+            if (res0.Status == Status.Placed && plan.Review.Count > 0) res0.Review = string.Join("; ", plan.Review.Distinct());
             if (res0.Status == Status.Placed) res0.SlabHost = plan.SlabHost;
             return res0;
         }
@@ -746,9 +762,11 @@ namespace CAD2Revit.Revit
                 XYZ RefDir(HostHit h)
                 {
                     var n = h.FaceNormal;
+                    // Walls: the wall direction (the CAD rotation is ignored), family upright, flat on
+                    // the face. Other faces: the CAD angle, in the face plane.
                     var d = row.Host == HostMode.Wall
-                        ? XYZ.BasisZ.CrossProduct(n)                               // family "up" = project up
-                        : cadDir.Subtract(n.Multiply(cadDir.DotProduct(n)));       // CAD angle, in the face plane
+                        ? h.RefDir ?? XYZ.BasisZ.CrossProduct(n)
+                        : cadDir.Subtract(n.Multiply(cadDir.DotProduct(n)));
                     return d.Normalize();
                 }
                 FamilyInstance Place(HostHit h)
@@ -770,8 +788,10 @@ namespace CAD2Revit.Revit
                 {
                     // The indexed face could not host: find it again by ray (stable link reference).
                     var z = row.Host == HostMode.Wall ? levelZ + Math.Max(offset, Ft(10)) : levelZ;
-                    double dist = row.Host == HostMode.Wall ? Ft(_settings.WallSearchDistanceMm) : Math.Max(hit.Distance + 1, 1);
+                    double dist = row.Host == HostMode.Wall ? Ft(_slab.WallSearchMm) : Math.Max(hit.Distance + 1, 1);
                     var again = finder.Recast(row.Host, x, y, levelZ, z, dist, b.Rotation);
+                    if (again != null && row.Host == HostMode.Wall)
+                        again.Point = new XYZ(again.Point.X, again.Point.Y, levelZ + offset);   // ray height -> placement height
                     if (again != null)
                     {
                         if (inst != null && inst.IsValidObject) _doc.Delete(inst.Id);
@@ -791,6 +811,7 @@ namespace CAD2Revit.Revit
                 }
                 if (error != null) throw error;
                 if (problem != null) return Result(b, row, Status.Failed, Notes(problem), target, angle, null, hostText);
+                if (row.Host == HostMode.Wall) CheckWallFacing(inst, hit, notes);
             }
             else if (hit != null && ptype == FamilyPlacementType.OneLevelBasedHosted)
             {
@@ -799,8 +820,11 @@ namespace CAD2Revit.Revit
                 if (row.Host == HostMode.Wall)
                 {
                     SetOffset(inst, offset);
+                    // Face out towards the CAD block; undo a mirror (hand) if Revit made one.
                     if (inst.CanFlipFacing && inst.FacingOrientation.DotProduct(hit.RoomNormal) < 0)
                         inst.flipFacing();
+                    if (inst.CanFlipHand && inst.HandOrientation.CrossProduct(inst.FacingOrientation).Z < 0)
+                        inst.flipHand();
                 }
                 else if (Math.Abs(angle) > 1e-9)
                 {
@@ -875,6 +899,22 @@ namespace CAD2Revit.Revit
         }
 
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        /// <summary>Face-based family on a wall: it must face out of the wall towards the CAD block
+        /// (its Z axis = the face normal on the block side). If not, flip its work plane; if that is
+        /// not possible, log a warning.</summary>
+        void CheckWallFacing(FamilyInstance inst, HostHit hit, List<string> notes)
+        {
+            try
+            {
+                if (inst.GetTransform().BasisZ.DotProduct(hit.FaceNormal) >= 0) return;
+                if (inst.CanFlipWorkPlane) inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
+                else if (inst.CanFlipFacing) inst.flipFacing();
+                else notes.Add("WARNING: the family faces into the wall and cannot be flipped - check it");
+            }
+            catch (Exception) { }
+        }
+
 
         /// <summary>
         /// Vertical planes: makes sure the family really sits on <paramref name="point"/> (the CAD

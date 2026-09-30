@@ -51,6 +51,10 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 4 | Run: rotation | The 45° light and the 90° panel match the CAD symbols. If a family is 90°/180° off, fix it with `Rotation_Adjustment_deg`, not in the family |
 | 5 | Ceiling hosting | Lights and detectors report host `Ceilings`, and their elevation = ceiling height |
 | 6 | Wall hosting | Sockets sit on the wall face at 300 mm, facing into the room, host `Walls` |
+| 6b | Wall: block on the right face | Straight wall running north–south. Put a socket block 150 mm to the **right** (east) of the wall, rotated 37° in CAD. The family goes on the **east** face, at the CAD point projected onto it, flat on the wall (rotation ignored), facing east. Put another block on the west side: it goes on the west face, facing west |
+| 6c | Wall: block inside the wall | Insertion point inside the wall thickness, symbol drawn on the west side: the family goes on the west face (log: "CAD point is inside the wall - side taken from the block symbol") |
+| 6d | Wall: curved wall | Block outside a curved wall: on the outer face, flat on the curve (tangent at that point), facing out. Block inside the curve: on the inner face |
+| 6e | Wall: Needs Review | A block 800 mm from any wall: vertical-plane fallback, Needs Review "No wall within 500 mm". A block 350 mm from the face (Wall search distance 500): placed, Needs Review "Moved more than 200 mm to reach the wall face". A block at a wall in a linked model: placed on the link, Needs Review "Wall is in a linked model" |
 | 7 | Mirrored | The mirrored detector has "CAD block is mirrored" in the log |
 | 8 | Log | `cad2revit_log_*.csv` has 11 rows with ElementIds for the 10 placed elements |
 | 9 | Duplicate check + memory | Run again: the grid is pre-filled with your last mapping; 0 placed, 10 duplicates |

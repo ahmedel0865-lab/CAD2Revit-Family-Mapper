@@ -207,6 +207,7 @@ namespace CAD2Revit.Commands
                 Settings = settings,
                 ProjectMappingPath = ProjectStore.MappingPathFor(ProjectStore.KeyFor(ModelPath(doc), doc.Title)),
             };
+            session.Slab.WallSearchMm = settings.WallSearchDistanceMm > 0 ? settings.WallSearchDistanceMm : SlabOptions.DefaultWallSearchMm;
             FamilyCatalog.Load(doc, session);
             session.LevelNames = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
                 .OrderBy(l => l.ProjectElevation).Select(l => l.Name).ToList();

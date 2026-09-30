@@ -8,8 +8,9 @@ using CAD2Revit.Core;
 namespace CAD2Revit.UI
 {
     /// <summary>
-    /// "Needs Review": every Slab (above) element that found no slab/beam and went on the fallback
-    /// reference plane (or level-based fallback). Clicking a row selects and zooms to it in Revit.
+    /// "Needs Review": every Slab (above) / Ceiling element that found no host and went on the fallback
+    /// reference plane (or level-based fallback), and wall-hosted elements to check (no wall in range,
+    /// moved more than 200 mm to the face, wall in a link). Clicking a row selects and zooms to it in Revit.
     /// </summary>
     public class NeedsReviewForm : Form
     {
@@ -29,14 +30,14 @@ namespace CAD2Revit.UI
             MaximizeBox = false;
             Font = new Font("Segoe UI", 9.5f);
             BackColor = Color.White;
-            ClientSize = new Size(900, 480);
+            ClientSize = new Size(1020, 480);
             MinimumSize = new Size(640, 320);
 
             var header = new Label
             {
-                Text = $"{items.Count} element(s) found no slab/beam or ceiling above and were placed on the fallback " +
-                       $"reference plane (or level-based). Click a row to select and zoom to it in Revit. " +
-                       $"Their Comments say \"{NeedsReview.CommentText}\".",
+                Text = $"{items.Count} element(s) to check: no slab/beam, ceiling or wall in range (placed on a fallback " +
+                       $"reference plane, or level-based), moved more than 200 mm to reach a wall face, or hosted on a wall in a " +
+                       $"linked model. Click a row to select and zoom to it in Revit. Fallback elements' Comments say \"{NeedsReview.CommentText}\".",
                 Dock = DockStyle.Top, Height = 52, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(14, 0, 14, 0), ForeColor = Color.FromArgb(166, 98, 0), BackColor = Color.FromArgb(255, 243, 224),
             };
@@ -50,7 +51,7 @@ namespace CAD2Revit.UI
             _list.Columns.Add("Family : Type", 250);
             _list.Columns.Add("CAD Block", 170);
             _list.Columns.Add("X, Y (mm)", 150);
-            _list.Columns.Add("Reason", 210);
+            _list.Columns.Add("Reason", 330);
             foreach (var it in items)
             {
                 var lvi = new ListViewItem(it.ElementId?.ToString() ?? "") { Tag = it };

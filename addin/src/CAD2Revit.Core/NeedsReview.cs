@@ -17,7 +17,8 @@ namespace CAD2Revit.Core
         public string XY => Xmm.ToString("0", CultureInfo.InvariantCulture) + ", " + Ymm.ToString("0", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>The "Needs Review" list shown after a run: every Slab (above) / Ceiling fallback element.</summary>
+    /// <summary>The "Needs Review" list shown after a run: every Slab (above) / Ceiling fallback element,
+    /// and wall-hosted elements to check (no wall in range, moved more than 200 mm, wall in a link).</summary>
     public static class NeedsReview
     {
         const double MmPerFoot = 304.8;
@@ -28,7 +29,7 @@ namespace CAD2Revit.Core
         public static readonly string[] Header = { "Element ID", "Family : Type", "CAD Block", "X (mm)", "Y (mm)", "Reason" };
 
         public static List<ReviewItem> From(IEnumerable<PlacementResult> results) =>
-            results.Where(r => r.Status == Status.Placed && r.SlabFallback)
+            results.Where(r => r.Status == Status.Placed && (r.SlabFallback || !string.IsNullOrEmpty(r.Review)))
                 .Select(r => new ReviewItem
                 {
                     ElementId = r.ElementId,
@@ -36,7 +37,8 @@ namespace CAD2Revit.Core
                     Block = r.BlockName,
                     Xmm = r.Point != null ? r.Point[0] * MmPerFoot : 0,
                     Ymm = r.Point != null ? r.Point[1] * MmPerFoot : 0,
-                    Reason = Reason(r.Message),
+                    Reason = string.Join("; ", new[] { r.SlabFallback ? Reason(r.Message) : null, r.Review }
+                                                .Where(t => !string.IsNullOrEmpty(t))),
                 })
                 .ToList();
 

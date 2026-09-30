@@ -37,6 +37,8 @@ namespace CAD2Revit.Core
         public bool SlabFallback;
         /// <summary>Slab (above): slab, beam, reference plane or level-based.</summary>
         public SlabHost SlabHost;
+        /// <summary>Needs Review reasons for walls ("No wall within 500 mm; ..."), "" = none.</summary>
+        public string Review = "";
     }
 
     public class Summary
