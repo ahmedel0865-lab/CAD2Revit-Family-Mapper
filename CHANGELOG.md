@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.21.0] - 2026-10-01
+### Fixed: families on vertical reference planes placed far from their CAD blocks
+- **Cause.** The 0.16 *centre on the CAD point* correction (`CenterFamiliesOnCadPoint`, on by default, and written as `true` into every settings.ini since then) shifted each family by its bounding box. A family with geometry far from its insertion point (nested annotation, hidden lines) was pushed far away. That correction is now **off**, under a new key `CenterGeometryOnCadPoint` (default false). The old key is ignored.
+- **One plane per block.** Each block gets a vertical reference plane through its insertion point.
+  - It runs along the block's X direction, with its normal on the block's +Y, drawn from the level up to level + 3000 mm (`NewReferencePlane2`), and is named `CAD2Revit_V_<Level>_<n>`.
+- **Reuse only if colinear.** An existing CAD2Revit vertical plane (this run, or an earlier one, including the old `CAD2Revit vertical ...` planes) is reused only if the block point lies on it (< 5 mm) and its direction matches (< 0.5°). It is never reused because it is the nearest plane or on the same level or elevation.
+- **Position.** The family goes on the block point at level + Elevation From Level, on the plane's reference, with the plane direction as its reference direction.
+- **Verify and correct.**
+  - After placing, a family that faces away from the block is flipped: work plane flip, or *flip facing* when `FacingOrientation` is opposite to the block.
+  - If its location point is more than 10 mm from the block point, it is moved there with `ElementTransformUtils.MoveElement`.
+  - If it still isn't within 10 mm, it goes to **Needs Review**: "Placed N mm away from CAD block".
+### Added: final distance check for all host types
+- After the run, with one regeneration, each placed element's location is compared with its CAD block in plan.
+  - Anything farther than **Review if farther than (mm)** (new box above the grid, default 50, saved as `Review_Distance_mm`) is listed in **Needs Review** with its Element ID, and gets a warning in the result window.
+- Everything still runs in one transaction. The plane search is a simple scan of the CAD2Revit vertical planes, with no rays.
+- New Core helpers (`VerticalPlacement.CanReuse`, `PlaneName`, `PlanDistanceMm`, `PlacedAwayReason`), with tests.
+
 ## [0.20.0] - 2026-09-30
 ### Fixed: wall hosting (Host Type "Wall")
 - **Family on the opposite face.** The old search projected the CAD point onto every wall side face and took the nearest projection. Where the near face had a door/window opening at that point (or the point was past the face edge), only the far face gave a projection, so the family went on the wrong side. A block with no wall found stood on a vertical plane through the point, rotated like the CAD block.

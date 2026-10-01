@@ -667,6 +667,9 @@ namespace CAD2Revit.UI
             ToolTip = "Host Type Wall: use the nearest wall (this model or a link) within this plan distance (mm) of the CAD point, " +
                       "on the side the block is drawn. No wall in range: vertical/reference plane fallback, listed in Needs Review." };
 
+        readonly TextBox _reviewDistance = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "All host types: after placing, any element farther than this (mm, in plan) from its CAD block is listed in Needs Review." };
+
         UIElement BuildSlabOptions()
         {
             var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -678,10 +681,13 @@ namespace CAD2Revit.UI
             bar.Children.Add(new TextBlock { Text = "Wall:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 10, 0) });
             bar.Children.Add(new TextBlock { Text = "Search distance (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             bar.Children.Add(_wallSearch);
+            bar.Children.Add(new TextBlock { Text = "Review if farther than (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 6, 0) });
+            bar.Children.Add(_reviewDistance);
             ShowSlabOptions();
             _slabRange.TextChanged += (o, e) => ReadSlabOptions();
             _slabPlane.TextChanged += (o, e) => ReadSlabOptions();
             _wallSearch.TextChanged += (o, e) => ReadSlabOptions();
+            _reviewDistance.TextChanged += (o, e) => ReadSlabOptions();
             return bar;
         }
 
@@ -690,6 +696,7 @@ namespace CAD2Revit.UI
             _slabRange.Text = _s.Slab.SearchRangeMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _slabPlane.Text = _s.Slab.FallbackPlaneMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _wallSearch.Text = _s.Slab.WallSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            _reviewDistance.Text = _s.Slab.ReviewDistanceMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
@@ -705,11 +712,16 @@ namespace CAD2Revit.UI
             bool wallOk = wall.HasValue && wall.Value > 0 && _wallSearch.Text.Trim().Length > 0;
             if (wallOk) _s.Slab.WallSearchMm = wall.Value;
             _wallSearch.BorderBrush = wallOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
+            var review = Mapping.ParseNumber(_reviewDistance.Text);
+            bool reviewOk = review.HasValue && review.Value > 0 && _reviewDistance.Text.Trim().Length > 0;
+            if (reviewOk) _s.Slab.ReviewDistanceMm = review.Value;
+            _reviewDistance.BorderBrush = reviewOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             return !rangeOk ? "Slab search range must be a number of mm greater than 0."
                  : !planeOk ? "Fallback reference plane height must be a number of mm."
                  : !wallOk ? "Wall search distance must be a number of mm greater than 0."
+                 : !reviewOk ? "Review distance must be a number of mm greater than 0."
                  : null;
         }
 

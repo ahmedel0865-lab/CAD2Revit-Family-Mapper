@@ -26,7 +26,7 @@ namespace CAD2Revit.Core
         public bool SearchRevitLinks = true;
         public bool FallbackToUnhosted = true;
         public bool DebugHosting = false;              // per-point hosting details in the log
-        public bool CenterFamiliesOnCadPoint = true;   // vertical planes: centre off-centre families on the CAD point
+        public bool CenterGeometryOnCadPoint = false;  // vertical planes: centre the family geometry on the CAD point (off: origin on the point)
         // Output
         public bool WriteBlockNameToComments = true;
         // Remembered between runs
@@ -75,7 +75,9 @@ namespace CAD2Revit.Core
                 case "searchrevitlinks": SearchRevitLinks = B(SearchRevitLinks); break;
                 case "fallbacktounhosted": FallbackToUnhosted = B(FallbackToUnhosted); break;
                 case "debughosting": DebugHosting = B(DebugHosting); break;
-                case "centerfamiliesoncadpoint": CenterFamiliesOnCadPoint = B(CenterFamiliesOnCadPoint); break;
+                // "CenterFamiliesOnCadPoint" (0.16-0.20, default true) is ignored on purpose: settings.ini files
+                // written by those versions all say true, and centring by bounding box could push families far away.
+                case "centergeometryoncadpoint": CenterGeometryOnCadPoint = B(CenterGeometryOnCadPoint); break;
                 case "writeblocknametocomments": WriteBlockNameToComments = B(WriteBlockNameToComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
             }
@@ -110,9 +112,9 @@ namespace CAD2Revit.Core
             sb.AppendLine("# true: add a DEBUG line per point to the log (linked yes/no, link, host element id and");
             sb.AppendLine("# category, face normal, final Host of the placed instance).");
             sb.AppendLine("DebugHosting = " + Bo(DebugHosting));
-            sb.AppendLine("# Vertical planes: if a family's origin is not at its centre, shift it along the plane so");
-            sb.AppendLine("# its centre sits on the CAD insertion point (false: its origin sits on the point).");
-            sb.AppendLine("CenterFamiliesOnCadPoint = " + Bo(CenterFamiliesOnCadPoint));
+            sb.AppendLine("# Vertical planes: false (default) = the family's origin (insertion point) sits on the CAD point;");
+            sb.AppendLine("# true = its geometry (bounding box) is centred on the point along the plane instead.");
+            sb.AppendLine("CenterGeometryOnCadPoint = " + Bo(CenterGeometryOnCadPoint));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
             sb.AppendLine("WriteBlockNameToComments = " + Bo(WriteBlockNameToComments));
             sb.AppendLine();

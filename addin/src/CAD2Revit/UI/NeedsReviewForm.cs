@@ -37,7 +37,7 @@ namespace CAD2Revit.UI
             {
                 Text = $"{items.Count} element(s) to check: no slab/beam, ceiling or wall in range (placed on a fallback " +
                        $"reference plane, or level-based), moved more than 200 mm to reach a wall face, or hosted on a wall in a " +
-                       $"linked model. Click a row to select and zoom to it in Revit. Fallback elements' Comments say \"{NeedsReview.CommentText}\".",
+                       $"linked model, or placed farther than the review distance from its CAD block. Click a row to select and zoom to it in Revit. Fallback elements' Comments say \"{NeedsReview.CommentText}\".",
                 Dock = DockStyle.Top, Height = 52, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(14, 0, 14, 0), ForeColor = Color.FromArgb(166, 98, 0), BackColor = Color.FromArgb(255, 243, 224),
             };

@@ -32,13 +32,15 @@ namespace CAD2Revit.Core
     /// range and fallback plane height, and the Wall search distance.</summary>
     public class SlabOptions
     {
-        public const double DefaultSearchRangeMm = 5000, DefaultFallbackPlaneMm = 3000, DefaultWallSearchMm = 500;
+        public const double DefaultSearchRangeMm = 5000, DefaultFallbackPlaneMm = 3000, DefaultWallSearchMm = 500, DefaultReviewDistanceMm = 50;
         public double SearchRangeMm = DefaultSearchRangeMm;
         public double FallbackPlaneMm = DefaultFallbackPlaneMm;
         /// <summary>Host Type Wall: max plan distance (mm) from the CAD point to the wall.</summary>
         public double WallSearchMm = DefaultWallSearchMm;
+        /// <summary>All host types: an element placed farther than this (mm, in plan) from its CAD block goes to Needs Review.</summary>
+        public double ReviewDistanceMm = DefaultReviewDistanceMm;
 
-        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm };
+        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm, ReviewDistanceMm = ReviewDistanceMm };
     }
 
     public class MappingResult
@@ -66,7 +68,7 @@ namespace CAD2Revit.Core
         };
 
         /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
-        public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm" };
+        public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm", "Review_Distance_mm" };
 
         // Accepted header spellings, compared after lower-casing and removing
         // everything that is not a letter/digit ("Offset_From_Level (mm)" ==
@@ -85,6 +87,7 @@ namespace CAD2Revit.Core
             ["slabrange"] = new[] { "slabsearchrangemm", "slabsearchrange", "slabrangemm" },
             ["slabplane"] = new[] { "slabfallbackplanemm", "slabfallbackplane", "fallbackreferenceplaneheightmm", "fallbackplanemm" },
             ["wallsearch"] = new[] { "wallsearchdistancemm", "wallsearchdistance", "wallsearchmm", "wallsearch" },
+            ["reviewdistance"] = new[] { "reviewdistancemm", "reviewdistance", "maxdistancemm" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -158,7 +161,7 @@ namespace CAD2Revit.Core
             {
                 r.Block, r.Family ?? "", r.TypeName ?? "", r.LevelName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
-                slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm,
+                slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm, slab.ReviewDistanceMm,
             }).ToList());
         }
 
@@ -235,7 +238,9 @@ namespace CAD2Revit.Core
             if (plane.HasValue) result.Slab.FallbackPlaneMm = plane.Value;
             var wall = First("wallsearch", v => v > 0);
             if (wall.HasValue) result.Slab.WallSearchMm = wall.Value;
-            result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue;
+            var review = First("reviewdistance", v => v > 0);
+            if (review.HasValue) result.Slab.ReviewDistanceMm = review.Value;
+            result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue || review.HasValue;
 
             int line = 1;
             foreach (var r in rows)

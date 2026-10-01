@@ -116,6 +116,7 @@ namespace CAD2Revit.Revit
             public string BlockName;
             public double? Offset;          // level-based: Elevation From Level (feet)
             public PlacementResult Result;
+            public XYZ CadPoint;            // the CAD block insertion point (final distance check)
         }
 
         /// <summary>Places every mapped block. Each row goes on its own Level (MapRow.LevelName,
@@ -281,6 +282,10 @@ namespace CAD2Revit.Revit
                             if (c.Offset.HasValue && !SetOffset(inst, c.Offset.Value) && Math.Abs(c.Offset.Value) > 1e-9)
                                 c.Result.Message = (c.Result.Message.Length > 0 ? c.Result.Message + "; " : "") + "could not set offset";
                         }
+
+                    // Final check, every host type: an element placed farther than the review distance
+                    // (50 mm by default, in plan) from its CAD block goes to Needs Review.
+                    using (_timer.Time(Phases.Verify)) CheckDistances(created);
 
                     if (view != null && view.IsValidObject)
                     {
@@ -662,7 +667,7 @@ namespace CAD2Revit.Revit
                     {
                         st.Commit();
                         dups.Add(dupKey, "CAD: " + b.Name, target.X, target.Y, target.Z);
-                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res });
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res, CadPoint = b.Point });
                     }
                     else st.RollBack();
                 }
@@ -747,15 +752,25 @@ namespace CAD2Revit.Revit
                 // plane, reference direction along the plane (upright, not mirrored).
                 var f = VerticalPlacement.Facing(angle);
                 var facing = new XYZ(f.X, f.Y, 0);
+                // The plane passes through the block point (or is colinear with it, < 5 mm); the
+                // family goes on the block point at level + Elevation From Level, reference
+                // direction = the plane direction (block X).
                 Reference planeRef;
                 XYZ onPlane, normal;
-                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane, out normal);
+                string planeName;
+                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane, out normal, out planeName);
                 var along = XYZ.BasisZ.CrossProduct(normal).Normalize();
                 using (_timer.Time(Phases.Create))
                     inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, along, sym);
                 target = onPlane;
-                hostText = "Vertical plane";
-                using (_timer.Time(Phases.Verify)) SnapToPoint(inst, onPlane, normal, along, notes);
+                hostText = "Vertical plane " + planeName;
+                plan.FinalHost = "Reference Plane " + planeName + " (vertical)";
+                using (_timer.Time(Phases.Verify))
+                {
+                    double leftMm = SnapToPoint(inst, onPlane, normal, along, facing, notes);
+                    if (leftMm > VerticalPlacement.ToleranceMm)
+                        plan.Review.Add(VerticalPlacement.PlacedAwayReason(leftMm));
+                }
             }
             else if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
             {
@@ -900,6 +915,29 @@ namespace CAD2Revit.Revit
 
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
 
+        /// <summary>Plan distance from each placed element's location point to its CAD block; more
+        /// than the review distance adds "Placed N mm away from CAD block" to Needs Review (with its
+        /// Element ID) and a warning to the result window. One regeneration for the whole run.</summary>
+        void CheckDistances(List<Created> created)
+        {
+            if (created.Count == 0) return;
+            _doc.Regenerate();
+            double limitMm = _slab.ReviewDistanceMm > 0 ? _slab.ReviewDistanceMm : VerticalPlacement.DefaultReviewDistanceMm;
+            foreach (var c in created)
+            {
+                if (c.CadPoint == null || c.Result == null) continue;
+                if (!(_doc.GetElement(c.Id) is FamilyInstance fi) || !(fi.Location is LocationPoint lp)) continue;
+                double mm = VerticalPlacement.PlanDistanceMm(V(lp.Point), V(c.CadPoint));
+                if (mm <= limitMm) continue;
+                var parts = (c.Result.Review ?? "").Split(new[] { "; " }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(t => !VerticalPlacement.IsPlacedAwayReason(t)).ToList();
+                parts.Add(VerticalPlacement.PlacedAwayReason(mm));
+                c.Result.Review = string.Join("; ", parts);
+                var warn = $"WARNING: placed {mm:0} mm away from its CAD block (more than {limitMm:0} mm) - see Needs Review";
+                c.Result.Message = c.Result.Message.Length > 0 ? c.Result.Message + "; " + warn : warn;
+            }
+        }
+
         /// <summary>Face-based family on a wall: it must face out of the wall towards the CAD block
         /// (its Z axis = the face normal on the block side). If not, flip its work plane; if that is
         /// not possible, log a warning.</summary>
@@ -921,14 +959,17 @@ namespace CAD2Revit.Revit
         /// insertion point on the plane). Revit can put a face-based family off the point (on the
         /// back of the plane, or offset by the family's own origin), so after placing:
         /// 1. if it faces away from the plane normal, its work plane is flipped back;
-        /// 2. with CenterFamiliesOnCadPoint, a family whose origin is more than 10 mm from its
+        /// 2. with CenterGeometryOnCadPoint, a family whose origin is more than 10 mm from its
         ///    geometric centre (along the plane) is shifted so its centre is on the point;
         /// 3. if its origin landed more than 10 mm from the point, it is moved back onto it and a
         ///    WARNING is logged (shown in the result window).
         /// </summary>
-        void SnapToPoint(FamilyInstance inst, XYZ point, XYZ normal, XYZ along, List<string> notes)
+        double SnapToPoint(FamilyInstance inst, XYZ point, XYZ normal, XYZ along, XYZ facing, List<string> notes)
         {
             _doc.Regenerate();
+            // Facing: the family must face the CAD block's direction. Its Z axis must be the plane
+            // normal (not the back of the plane), and a horizontal FacingOrientation must not point
+            // the opposite way of the block.
             try
             {
                 if (inst.GetTransform().BasisZ.DotProduct(normal) < -0.5 && inst.CanFlipWorkPlane)
@@ -936,15 +977,23 @@ namespace CAD2Revit.Revit
                     inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
                     _doc.Regenerate();
                 }
+                var fo = inst.FacingOrientation;
+                if (fo != null && Math.Abs(fo.Z) < 0.5 && fo.DotProduct(facing) < -0.5)
+                {
+                    if (inst.CanFlipFacing) inst.flipFacing();
+                    else if (inst.CanFlipWorkPlane) inst.IsWorkPlaneFlipped = !inst.IsWorkPlaneFlipped;
+                    else notes.Add("WARNING: the family faces away from the CAD block and cannot be flipped");
+                    _doc.Regenerate();
+                }
             }
             catch (Exception) { }
-            if (!(inst.Location is LocationPoint lp)) return;
+            if (!(inst.Location is LocationPoint lp)) return 0;
             var target = V(point);
             var dir = V(along);
             var loc = V(lp.Point);
             double devMm = VerticalPlacement.DeviationMm(loc, target);
             double centre = 0;
-            if (_settings.CenterFamiliesOnCadPoint)
+            if (_settings.CenterGeometryOnCadPoint)
             {
                 BoundingBoxXYZ bb = null;
                 try { bb = inst.get_BoundingBox(null); } catch (Exception) { }
@@ -967,7 +1016,9 @@ namespace CAD2Revit.Revit
                 double leftMm = VerticalPlacement.DeviationMm(VerticalPlacement.Anchor(V(after.Point), dir, centre), target);
                 if (leftMm > VerticalPlacement.ToleranceMm)
                     notes.Add($"WARNING: family is still {leftMm:0} mm from the CAD point after moving it - check it");
+                return leftMm;
             }
+            return 0;
         }
 
         FamilyInstance CreateLevelBased(FamilySymbol sym, Level level, XYZ basePt, double angle)
@@ -1027,7 +1078,7 @@ namespace CAD2Revit.Revit
                         var inst = CreateLevelBased(sym, level, it.Base, it.Angle);
                         st.Commit();
                         it.Result.ElementId = Compat.IdValue(inst.Id);
-                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result });
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result, CadPoint = it.Block.Point });
                     }
                     catch (Exception ex)
                     {
@@ -1067,7 +1118,7 @@ namespace CAD2Revit.Revit
             void Attach(Pending it, ElementId id)
             {
                 it.Result.ElementId = Compat.IdValue(id);
-                created.Add(new Created { Id = id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result });
+                created.Add(new Created { Id = id, Level = level, BlockName = it.Block.Name, Offset = it.Offset ?? offset, Result = it.Result, CadPoint = it.Block.Point });
             }
         }
 
