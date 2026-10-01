@@ -81,6 +81,11 @@ namespace CAD2Revit.Core
         /// 0 = north (+Y), 90 deg = west, 180 deg = south, 270 deg = east.</summary>
         public static V3 Facing(double angleRad) => new V3(-Math.Sin(angleRad), Math.Cos(angleRad), 0);
 
+        /// <summary>The angle whose <see cref="Facing"/> is the block's +Y axis (yx, yy) in plan:
+        /// equals the block rotation for a normal block, and is 180 deg off for a mirrored block
+        /// (its Y axis is flipped), so the family faces the side the symbol is drawn on.</summary>
+        public static double FacingAngleFromYAxis(double yx, double yy) => Math.Atan2(-yx, yy);
+
         /// <summary>Reference direction of the family: horizontal, along the plane
         /// (Z x normal), so the family stands upright and is not mirrored.</summary>
         public static V3 Along(V3 normal) => new V3(-normal.Y, normal.X, 0).Normalize();

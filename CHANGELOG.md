@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.22.0] - 2026-10-01
+### Fixed: one block type lands away from its CAD symbol
+When only one block goes wrong, the cause is usually in how that block was drawn:
+- **Base point away from the symbol.** For example, the base point is on the wall line and the circle is drawn in the room. The family went on the base point, so it looked away from the CAD symbol.
+  - New per-row **Place At** column: **Base point** (default) or **Symbol centre**. With Symbol centre, the family goes on the centre of the drawn symbol (bounding box of the block's line work, computed once per block).
+  - It is saved in the mapping as `Place_At`.
+  - Blocks whose base point is more than 150 mm from their symbol are listed in **Needs Review** with that hint. Wall rows are not, because their base point is often on the wall on purpose.
+- **Mirrored blocks faced the wrong way.** The facing was derived from the block's rotation, which is the block's X axis. For a mirrored block, the +Y axis is flipped, so devices faced the opposite side. The facing now comes from the block's real +Y axis.
+- Tests for Place At (parse, save/load) and for the facing of normal and mirrored blocks.
+
 ## [0.21.0] - 2026-10-01
 ### Fixed: families on vertical reference planes placed far from their CAD blocks
 - **Cause.** The 0.16 *centre on the CAD point* correction (`CenterFamiliesOnCadPoint`, on by default, and written as `true` into every settings.ini since then) shifted each family by its bounding box. A family with geometry far from its insertion point (nested annotation, hidden lines) was pushed far away. That correction is now **off**, under a new key `CenterGeometryOnCadPoint` (default false). The old key is ignored.

@@ -12,7 +12,11 @@ namespace CAD2Revit.Revit
         public Transform Transform;
         public int Depth;          // 1 = top-level block in the DWG
         public XYZ Point;          // insertion point, model internal coordinates (feet)
-        public double Rotation;    // radians, in plan
+        public double Rotation;    // radians, in plan (direction of the block's X axis)
+        /// <summary>Angle (radians) whose Facing() is the block's real +Y axis in plan. Equals
+        /// Rotation for normal blocks; differs by 180 deg for mirrored ones, whose +Y axis is
+        /// flipped - so devices drawn facing +Y face the right way even when mirrored.</summary>
+        public double FacingAngle;
         public bool Mirrored;
         public double ScaleX = 1, ScaleY = 1;
         /// <summary>The DWG block reference itself (for reading the symbol's line work).</summary>
@@ -74,6 +78,7 @@ namespace CAD2Revit.Revit
                     Depth = depth,
                     Point = tf.Origin,
                     Rotation = Math.Atan2(bx.Y, bx.X),
+                    FacingAngle = Core.VerticalPlacement.FacingAngleFromYAxis(tf.BasisY.X, tf.BasisY.Y),
                     Mirrored = tf.HasReflection,
                     ScaleX = bx.GetLength() / baseLen,
                     ScaleY = tf.BasisY.GetLength() / baseLen,

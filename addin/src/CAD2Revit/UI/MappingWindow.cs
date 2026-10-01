@@ -363,6 +363,15 @@ namespace CAD2Revit.UI
                 SelectedItemBinding = new Binding(nameof(BlockRow.Facing)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
                 Width = new DataGridLength(70),
             });
+            // Base point (block insertion point) or the centre of the drawn symbol, for blocks whose
+            // base point is away from the symbol (e.g. on the wall line).
+            _grid.Columns.Add(new DataGridComboBoxColumn
+            {
+                Header = "Place At",
+                ItemsSource = BlockRow.PlaceAtChoices,
+                SelectedItemBinding = new Binding(nameof(BlockRow.PlaceAt)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = new DataGridLength(105),
+            });
 
             // Filled by Preview: which host each block would use (check before Run).
             var detectedStyle = new Style(typeof(TextBlock));

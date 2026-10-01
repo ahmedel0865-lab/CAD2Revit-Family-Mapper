@@ -11,6 +11,11 @@ namespace CAD2Revit.Core
     /// <summary>Which side a family on a horizontal reference plane faces.</summary>
     public enum Facing { Down, Up }
 
+    /// <summary>Which point of the CAD block the family goes on: the block's base (insertion)
+    /// point, or the centre of the block symbol's geometry (for blocks drawn away from their base
+    /// point, e.g. base point on the wall line and the symbol in the room).</summary>
+    public enum PlaceAt { BasePoint, SymbolCentre }
+
     /// <summary>One row of the mapping table: CAD block -> Revit family type.</summary>
     public class MapRow
     {
@@ -23,6 +28,7 @@ namespace CAD2Revit.Core
         public Facing Facing = Facing.Down;   // used by HostMode.RefPlane
         public string LevelName = "";         // "" = the level chosen when running
         public string Category = "";          // Electrical / Architectural / ... ("" = auto)
+        public PlaceAt PlaceAt = PlaceAt.BasePoint;
         public int Line;   // row number in the source file (for messages)
 
         public string Label => Family + " : " + TypeName;
@@ -64,7 +70,7 @@ namespace CAD2Revit.Core
         public static readonly string[] TemplateHeader =
         {
             "CAD_Block_Name", "Revit_Family_Name", "Revit_Type_Name", "Level",
-            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing", "Category",
+            "Offset_From_Level_mm", "Rotation_Adjustment_deg", "Host_Type", "Facing", "Category", "Place_At",
         };
 
         /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
@@ -84,6 +90,7 @@ namespace CAD2Revit.Core
             ["facing"] = new[] { "facing", "face direction", "facingdirection" },
             ["level"] = new[] { "level", "levelname", "targetlevel", "revitlevel" },
             ["category"] = new[] { "category", "discipline", "blockcategory" },
+            ["placeat"] = new[] { "placeat", "insertat", "anchor", "anchorpoint", "placementpoint" },
             ["slabrange"] = new[] { "slabsearchrangemm", "slabsearchrange", "slabrangemm" },
             ["slabplane"] = new[] { "slabfallbackplanemm", "slabfallbackplane", "fallbackreferenceplaneheightmm", "fallbackplanemm" },
             ["wallsearch"] = new[] { "wallsearchdistancemm", "wallsearchdistance", "wallsearchmm", "wallsearch" },
@@ -152,6 +159,19 @@ namespace CAD2Revit.Core
             return null;
         }
 
+        /// <summary>"" / "base point" / "insertion point" -> BasePoint; "symbol centre" / "center" -> SymbolCentre; else null.</summary>
+        public static PlaceAt? ParsePlaceAt(string text)
+        {
+            var n = Norm(text);
+            if (n.Length == 0 || n == "basepoint" || n == "base" || n == "insertionpoint" || n == "insertion" || n == "origin")
+                return PlaceAt.BasePoint;
+            if (n == "symbolcentre" || n == "symbolcenter" || n == "centre" || n == "center" || n == "symbol" || n == "geometrycentre" || n == "geometrycenter")
+                return PlaceAt.SymbolCentre;
+            return null;
+        }
+
+        public static string PlaceAtText(PlaceAt p) => p == PlaceAt.SymbolCentre ? "Symbol centre" : "Base point";
+
         /// <summary>Writes rows in the standard mapping format (.xlsx or .csv).
         /// Rows with an empty Family are written as "do not place" (Skip).</summary>
         public static void Save(string path, IEnumerable<MapRow> rows, SlabOptions slab = null)
@@ -161,6 +181,7 @@ namespace CAD2Revit.Core
             {
                 r.Block, r.Family ?? "", r.TypeName ?? "", r.LevelName ?? "", r.OffsetMm, r.RotationDeg, HostText(r.Host),
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
+                PlaceAtText(r.PlaceAt),
                 slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm, slab.ReviewDistanceMm,
             }).ToList());
         }
@@ -282,6 +303,12 @@ namespace CAD2Revit.Core
                     result.Errors.Add($"Row {line}: Facing '{Get(r, "facing")}' not recognised (use Down/Up) - using Down");
                     facing = Facing.Down;
                 }
+                var placeAt = ParsePlaceAt(Get(r, "placeat"));
+                if (placeAt == null)
+                {
+                    result.Errors.Add($"Row {line}: Place_At '{Get(r, "placeat")}' not recognised (use Base point / Symbol centre) - using Base point");
+                    placeAt = PlaceAt.BasePoint;
+                }
                 if (result.Rows.ContainsKey(block))
                     result.Errors.Add($"Row {line}: block '{block}' is mapped twice - last row wins");
                 result.Rows[block] = new MapRow
@@ -290,6 +317,7 @@ namespace CAD2Revit.Core
                     OffsetMm = offset.Value, RotationDeg = rot.Value, Host = host, Facing = facing.Value, Line = line,
                     LevelName = Get(r, "level"),
                     Category = BlockCategories.Normalize(Get(r, "category")) ?? "",
+                    PlaceAt = placeAt.Value,
                 };
             }
             return result;

@@ -251,7 +251,30 @@ namespace CAD2Revit.Revit
                         else
                         {
                             var ctx = ContextFor(level);
-                            res = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created);
+                            // Place At = Symbol centre: the block point is moved to the centre of the
+                            // drawn symbol (for blocks whose base point is away from the symbol).
+                            var pb = b;
+                            string anchorNote = null;
+                            if (row.PlaceAt == PlaceAt.SymbolCentre)
+                            {
+                                var c = SymbolCentre(b);
+                                if (c != null) pb = AtPoint(b, new XYZ(c.X, c.Y, b.Point.Z));
+                                else anchorNote = "block has no symbol geometry - placed at its base point";
+                            }
+                            res = PlaceOne(pb, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created);
+                            if (anchorNote != null) res.Message = res.Message.Length > 0 ? res.Message + "; " + anchorNote : anchorNote;
+                            // Base point far from the drawn symbol: the family sits at the base point,
+                            // which looks "away from the CAD block". Flag it with the fix.
+                            if (res.Status == Status.Placed && row.PlaceAt == PlaceAt.BasePoint && row.Host != HostMode.Wall)
+                            {
+                                var c = SymbolCentre(b);
+                                double d = c != null ? VerticalPlacement.PlanDistanceMm(V(c), V(b.Point)) : 0;
+                                if (d > BaseOffsetReviewMm)
+                                {
+                                    var reason = $"Block base point is {d:0} mm from its symbol - set Place At = Symbol centre";
+                                    res.Review = string.IsNullOrEmpty(res.Review) ? reason : res.Review + "; " + reason;
+                                }
+                            }
                         }
                         res.Level = level.Name;
                         if (levelNote != null) res.Message = res.Message.Length > 0 ? levelNote + "; " + res.Message : levelNote;
@@ -750,7 +773,8 @@ namespace CAD2Revit.Revit
                 // blocks drawn with the wall along X and the room on +Y face into the room.
                 // It goes on the CAD insertion point (at the row's elevation) projected onto the
                 // plane, reference direction along the plane (upright, not mirrored).
-                var f = VerticalPlacement.Facing(angle);
+                // Facing from the block's real +Y axis (correct for mirrored blocks too).
+                var f = VerticalPlacement.Facing(b.FacingAngle + row.RotationDeg * Math.PI / 180.0);
                 var facing = new XYZ(f.X, f.Y, 0);
                 // The plane passes through the block point (or is colinear with it, < 5 mm); the
                 // family goes on the block point at level + Elevation From Level, reference
@@ -914,6 +938,39 @@ namespace CAD2Revit.Revit
         }
 
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        /// <summary>Base point farther than this (mm, plan) from the drawn symbol: Needs Review.</summary>
+        const double BaseOffsetReviewMm = 150;
+        readonly Dictionary<string, XYZ> _symbolCentres = new Dictionary<string, XYZ>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Centre of the block symbol's geometry in model coordinates (bounding box of its
+        /// line work, computed once per block name), or null if the symbol has no geometry.</summary>
+        XYZ SymbolCentre(BlockRef b)
+        {
+            if (b.Instance == null || b.Transform == null) return null;
+            var key = b.Name ?? "";
+            if (!_symbolCentres.TryGetValue(key, out var local))
+            {
+                try
+                {
+                    var bb = b.Instance.GetSymbolGeometry()?.GetBoundingBox();
+                    if (bb != null)
+                    {
+                        local = bb.Min.Add(bb.Max).Multiply(0.5);
+                        if (bb.Transform != null) local = bb.Transform.OfPoint(local);
+                    }
+                }
+                catch (Exception) { local = null; }
+                _symbolCentres[key] = local;
+            }
+            return local == null ? null : b.Transform.OfPoint(local);
+        }
+
+        static BlockRef AtPoint(BlockRef b, XYZ p) => new BlockRef
+        {
+            Name = b.Name, Transform = b.Transform, Depth = b.Depth, Point = p, Rotation = b.Rotation,
+            FacingAngle = b.FacingAngle, Mirrored = b.Mirrored, ScaleX = b.ScaleX, ScaleY = b.ScaleY, Instance = b.Instance,
+        };
 
         /// <summary>Plan distance from each placed element's location point to its CAD block; more
         /// than the review distance adds "Placed N mm away from CAD block" to Needs Review (with its

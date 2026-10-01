@@ -76,6 +76,8 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12n | Off-centre family origin | A face-based family whose origin is at one edge, Host *Vertical plane*: its origin sits on the block (default). With `CenterGeometryOnCadPoint = true` its geometry is centred on the block instead |
 | 12o | Vertical planes: one per line | Two sockets 2 m apart across a room, same facing: each gets its own plane `CAD2Revit_V_Level 1_1`, `_2` through its own point, and each family sits on its block. A third socket further along the first wall line reuses `_1` |
 | 12p | Final distance check | Set *Review if farther than* = 50. A wall row whose CAD block is drawn 300 mm from the wall: Needs Review "Placed 300 mm away from CAD block" with its Element ID. Ceiling/level-based rows: not listed |
+| 12q | Block drawn away from its base point | A wall-light block whose base point is on the wall line and whose circle is 200 mm into the room, Host *Vertical plane*. With *Place At = Base point*: the family is on the wall line, and Needs Review says "Block base point is 200 mm from its symbol". With *Place At = Symbol centre*: the family sits on the circle |
+| 12r | Mirrored block | Mirror one wall-light block in AutoCAD. Host *Vertical plane*: the family faces the same side as the mirrored symbol |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

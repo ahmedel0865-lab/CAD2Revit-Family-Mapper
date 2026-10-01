@@ -40,6 +40,7 @@ namespace CAD2Revit.UI
             Mapping.HostDisplay[HostMode.Vertical],
         };
         public static readonly string[] FacingChoices = { "Down", "Up" };
+        public static readonly string[] PlaceAtChoices = { "Base point", "Symbol centre" };
         public static readonly string RefPlaneLabel = Mapping.HostDisplay[HostMode.RefPlane];
 
         FamilyOption _family = FamilyOption.Skip;
@@ -153,6 +154,9 @@ namespace CAD2Revit.UI
         }
         /// <summary>Down (ceiling devices) or Up (floor devices); used by Reference Plane hosting.</summary>
         public string Facing { get => _facing; set { _facing = value; Changed(nameof(Facing)); } }
+        string _placeAt = "Base point";
+        /// <summary>Base point (block insertion point, default) or Symbol centre (centre of the drawn symbol).</summary>
+        public string PlaceAt { get => _placeAt; set { _placeAt = value; Changed(nameof(PlaceAt)); } }
         /// <summary>Host Type before "Use reference planes for all rows" was ticked.</summary>
         public string HostBeforeAll { get; set; }
 
@@ -184,6 +188,7 @@ namespace CAD2Revit.UI
             // Rows left on the default level follow whatever level is picked next time.
             LevelName = string.Equals(_level, DefaultLevel, StringComparison.OrdinalIgnoreCase) ? "" : _level,
             Category = _category,
+            PlaceAt = Mapping.ParsePlaceAt(_placeAt) ?? Core.PlaceAt.BasePoint,
         };
 
         /// <summary>Apply a mapping-file row to this grid row.</summary>
@@ -194,6 +199,7 @@ namespace CAD2Revit.UI
             Rotation = row.RotationDeg.ToString("0.###", Inv);
             Host = Mapping.HostDisplay[row.Host];
             Facing = row.Facing.ToString();
+            PlaceAt = Mapping.PlaceAtText(row.PlaceAt);
             if (!string.IsNullOrEmpty(row.Category)) Category = row.Category;
         }
 
