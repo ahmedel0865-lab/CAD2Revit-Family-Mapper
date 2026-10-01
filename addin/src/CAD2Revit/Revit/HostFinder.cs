@@ -18,6 +18,10 @@ namespace CAD2Revit.Revit
         public string LinkName = "";  // e.g. "STR.rvt" when linked
         public double Distance;       // ray length, feet
         public bool FromIndex;        // found by the face/wall index (not a ray)
+        // Walls only:
+        public XYZ RefDir;            // along the wall at Point (family upright, flat on the face)
+        public double MovedFt;        // plan distance from the CAD point to Point
+        public bool InsideWall;       // the CAD point was inside the wall thickness
 
         /// <summary>e.g. "Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)".</summary>
         public string Describe()
@@ -118,8 +122,10 @@ namespace CAD2Revit.Revit
             if (_intersectors.TryGetValue(mode, out var ri)) return ri;
             var cats = mode == HostMode.Wall
                 ? new List<BuiltInCategory> { BuiltInCategory.OST_Walls }
-                : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow
-                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors }   // structural + architectural slabs only
+                : mode == HostMode.SlabAbove
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming }
+                : mode == HostMode.SlabBelow
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs }   // slabs (sloped ones are often roofs)
                 : mode == HostMode.Ceiling
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings }
                     : new List<BuiltInCategory> { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
@@ -185,13 +191,20 @@ namespace CAD2Revit.Revit
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the ray passes through an opening).
         /// </summary>
-        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt)
+        public HostHit FindSlabRay(bool above, double x, double y, double levelZ, double maxDistFt) =>
+            above ? FindUndersideRay(HostMode.SlabAbove, x, y, levelZ, maxDistFt) : FaceRay(HostMode.SlabBelow, false, x, y, levelZ, maxDistFt);
+
+        /// <summary>Ray version of <see cref="FindUnderside"/>: first face pointing down straight above.</summary>
+        public HostHit FindUndersideRay(HostMode mode, double x, double y, double levelZ, double maxDistFt) =>
+            FaceRay(mode, true, x, y, levelZ, maxDistFt);
+
+        HostHit FaceRay(HostMode mode, bool above, double x, double y, double levelZ, double maxDistFt)
         {
             using (_timer.Time(Phases.HostRay))
             {
             var dir = above ? XYZ.BasisZ : XYZ.BasisZ.Negate();
             var origin = new XYZ(x, y, levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot));
-            var hits = Intersector(HostMode.SlabAbove).Find(origin, dir);
+            var hits = Intersector(mode).Find(origin, dir);
             if (hits == null) return null;
             foreach (var ctx in hits.Where(h => h.Proximity <= maxDistFt).OrderBy(h => h.Proximity))
             {

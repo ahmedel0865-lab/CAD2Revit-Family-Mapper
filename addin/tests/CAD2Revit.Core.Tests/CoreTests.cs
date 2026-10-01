@@ -212,6 +212,201 @@ namespace CAD2Revit.Core.Tests
         }
     }
 
+    public class SimpleReportTests
+    {
+        static PlacementResult R(string block, string family, Status status, string msg = "", int count = 1) =>
+            new PlacementResult
+            {
+                BlockName = block, Status = status, Message = msg, Count = count,
+                Row = family == null ? null : new MapRow { Block = block, Family = family, TypeName = "T" },
+            };
+
+        [Fact]
+        public void HeadlineGroupsByFamilyAndIsGreenOnlyWhenAllPlaced()
+        {
+            var all = SimpleReport.From(new[]
+            {
+                R("L1", "Panel", Status.Placed), R("L2", "Panel", Status.Placed), R("S", "Smoke", Status.Placed),
+            }, preview: false);
+            Assert.Equal("Placed 3 of 3 families", all.Headline);
+            Assert.True(all.AllPlaced);
+            Assert.Equal(new[] { "Panel", "Smoke" }, all.ByFamily.Select(kv => kv.Key));
+            Assert.Equal(new[] { 2, 1 }, all.ByFamily.Select(kv => kv.Value));
+            Assert.Empty(all.Warnings);
+
+            var some = SimpleReport.From(new[]
+            {
+                R("L1", "Panel", Status.Placed), R("S", "Smoke", Status.Failed, "no ceiling found"),
+                R("TEXT", null, Status.Unmapped, "not mapped (Skip)", count: 7),
+            }, preview: true);
+            Assert.Equal("Would place 1 of 9 families", some.Headline);
+            Assert.False(some.AllPlaced);
+            Assert.False(new SimpleReport().AllPlaced);
+        }
+
+        [Fact]
+        public void WarningsArePlainOneLinePerProblem()
+        {
+            var r = SimpleReport.From(new[]
+            {
+                R("LIGHT", "Panel", Status.Placed, "no ceiling found within 6000 mm above the level - placed unhosted"),
+                R("LIGHT", "Panel", Status.Placed, "no ceiling found within 6000 mm above the level - placed unhosted"),
+                R("SMOKE", "Smoke", Status.Failed,
+                  "family is not face-based (placement type OneLevelBased) - it cannot be hosted on a ceiling; " +
+                  "use a family made from a face-based template; DEBUG linked=yes element=123 (Floors) normal=(0,0,-1)"),
+                R("EXIT", "Exit", Status.Skipped, "family/type not loaded"),
+                R("DUP", "Panel", Status.Duplicate, "exists"),
+                R("OK", "Panel", Status.Placed, ""),
+            }, preview: false);
+            Assert.Equal(new[]
+            {
+                "SMOKE: family is not face-based, it cannot be hosted on a ceiling, not placed",
+                "EXIT: family 'Exit' is not loaded in this project, not placed",
+                "LIGHT (x2): no ceiling found above, placed on level",
+                "DUP: already in the model at this spot, skipped",
+            }, r.Warnings);
+            Assert.DoesNotContain(r.Warnings, w => w.Contains("123") || w.Contains("DEBUG") || w.Contains("mm"));
+        }
+
+        [Theory]
+        [InlineData("WARNING: no slab above this point within 3500 mm (slab opening or no slab) - hosted on a reference plane at 3200 mm (underside of the slab above)",
+                    "no slab above (slab opening or no slab), hosted on a reference plane")]
+        [InlineData("failed - not hosted on linked slab: Host is Reference Plane", "not hosted on linked slab: Host is Reference Plane")]
+        [InlineData("host: linked ceiling, slope 12.5 deg", "host: linked ceiling")]
+        [InlineData("DEBUG linked=no host=none", null)]
+        [InlineData("", null)]
+        public void PlainReason(string message, string expected) =>
+            Assert.Equal(expected, SimpleReport.PlainReason(message));
+    }
+
+    public class SlabOptionsTests : IDisposable
+    {
+        readonly string _dir = Path.Combine(Path.GetTempPath(), "c2r_slab_" + Guid.NewGuid().ToString("N"));
+        public SlabOptionsTests() => Directory.CreateDirectory(_dir);
+        public void Dispose() { try { Directory.Delete(_dir, true); } catch (Exception) { } }
+
+        static MapRow Row() => new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.SlabAbove };
+
+        [Theory]
+        [InlineData("m.csv")]
+        [InlineData("m.xlsx")]
+        public void SavedWithTheMapping(string file)
+        {
+            var path = Path.Combine(_dir, file);
+            Mapping.Save(path, new[] { Row() }, new SlabOptions { SearchRangeMm = 4200, FallbackPlaneMm = 2750 });
+            var m = Mapping.Load(path);
+            Assert.Empty(m.Errors);
+            Assert.True(m.HasSlabOptions);
+            Assert.Equal(4200, m.Slab.SearchRangeMm);
+            Assert.Equal(2750, m.Slab.FallbackPlaneMm);
+            Assert.Equal(HostMode.SlabAbove, m.Rows["L"].Host);
+        }
+
+        [Fact]
+        public void OldFilesUseTheDefaults()
+        {
+            var path = Path.Combine(_dir, "old.csv");
+            File.WriteAllText(path, "CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Host_Type\nL,Light,600,slab above\n");
+            var m = Mapping.Load(path);
+            Assert.False(m.HasSlabOptions);
+            Assert.Equal(5000, m.Slab.SearchRangeMm);
+            Assert.Equal(3000, m.Slab.FallbackPlaneMm);
+        }
+
+        [Fact]
+        public void InvalidRangeFallsBackToDefault()
+        {
+            var path = Path.Combine(_dir, "bad.csv");
+            File.WriteAllText(path, "CAD_Block_Name,Revit_Family_Name,Revit_Type_Name,Slab_Search_Range_mm\nL,Light,600,-5\n");
+            var m = Mapping.Load(path);
+            Assert.Equal(5000, m.Slab.SearchRangeMm);
+            Assert.Single(m.Errors);
+        }
+
+        [Fact]
+        public void FallbacksAreCountedNotListedAsWarnings()
+        {
+            var row = Row();
+            var msg = SlabSearch.FallbackMessage(5000, 3000, false);
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, Message = msg, SlabFallback = true },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, Message = msg, SlabFallback = true },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed },
+            };
+            var simple = SimpleReport.From(results, preview: true);
+            Assert.Equal(2, simple.SlabFallbacks);
+            Assert.Equal(new[] { "No slab/beam within 5000 mm - placed on reference plane at +3000 mm (2 families)" }, simple.SlabFallbackLines);
+            Assert.Empty(simple.Warnings);
+            Assert.Equal("Would place 3 of 3 families", simple.Headline);
+
+            var s = Report.Summarize(results);
+            Assert.Equal(2, s.SlabFallbacks);
+            Assert.Contains("2 Slab (above) / Ceiling block(s) would be placed at the fallback height", Report.SummaryText(s, true));
+        }
+    }
+
+    public class NeedsReviewTests
+    {
+        [Fact]
+        public void ListsOnlyFallbackElementsWithReasonAndIds()
+        {
+            var row = new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.SlabAbove };
+            var msg = SlabSearch.FallbackMessage(5000, 3000, false);
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 11, Point = new[] { 1.0, 2.0, 9.8 },
+                                      Message = "level 'X' not found - placed on Level 1; " + msg, SlabFallback = true, SlabHost = SlabHost.Plane },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 12, Point = new[] { 0.0, 0, 0 },
+                                      Message = SlabSearch.FallbackMessage(5000, 3000, true), SlabFallback = true, SlabHost = SlabHost.LevelBased },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 13, SlabHost = SlabHost.Beam },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Placed, ElementId = 14, SlabHost = SlabHost.Slab },
+                new PlacementResult { BlockName = "L", Row = row, Status = Status.Failed, ElementId = null, SlabFallback = true },
+            };
+            var items = NeedsReview.From(results);
+            Assert.Equal(new long?[] { 11, 12 }, items.Select(i => i.ElementId));
+            Assert.Equal("No slab/beam within 5000 mm", items[0].Reason);
+            Assert.Equal("Light : 600", items[0].FamilyType);
+            Assert.Equal("305, 610", items[0].XY);
+            Assert.Equal("11,12", NeedsReview.CopyIds(items));
+            var rows = NeedsReview.Rows(items);
+            Assert.Equal(NeedsReview.Header.Length, rows[0].Count);
+            Assert.Equal(11L, rows[0][0]);
+
+            var s = Report.Summarize(results);
+            Assert.Equal(new[] { "Slab (above): 1 hosted on slab, 1 hosted on beam, 1 on reference plane, 1 level-based" }, s.HostCounts);
+            Assert.Equal(s.HostCounts, SimpleReport.From(results, false).HostCountLines);
+            Assert.Empty(SimpleReport.From(new[] { new PlacementResult { Status = Status.Placed } }, false).HostCountLines);
+        }
+
+        [Fact]
+        public void CeilingFallbacksShareTheSameListAndCounts()
+        {
+            var slabRow = new MapRow { Block = "S", Family = "Smoke", TypeName = "Std", Host = HostMode.SlabAbove };
+            var ceilRow = new MapRow { Block = "L", Family = "Light", TypeName = "600", Host = HostMode.Ceiling };
+            var ceilMsg = SlabSearch.FallbackMessage(5000, 3000, false, HostMode.Ceiling);
+            Assert.Equal("No ceiling within 5000 mm - placed on reference plane at +3000 mm", ceilMsg);
+            Assert.Equal("No ceiling within 4000 mm - placed level-based at +3000 mm",
+                         SlabSearch.FallbackMessage(4000, 3000, true, HostMode.Ceiling));
+            var results = new List<PlacementResult>
+            {
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 1, SlabHost = SlabHost.Ceiling },
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 2, SlabHost = SlabHost.Ceiling },
+                new PlacementResult { BlockName = "L", Row = ceilRow, Status = Status.Placed, ElementId = 3, Message = ceilMsg,
+                                      SlabFallback = true, SlabHost = SlabHost.Plane, Point = new[] { 0.0, 0, 0 } },
+                new PlacementResult { BlockName = "S", Row = slabRow, Status = Status.Placed, ElementId = 4, SlabHost = SlabHost.Slab },
+            };
+            Assert.Equal(new[]
+            {
+                "Slab (above): 1 hosted on slab, 0 hosted on beam, 0 on reference plane, 0 level-based",
+                "Ceiling: 2 hosted on ceiling, 1 on reference plane, 0 level-based",
+            }, Report.HostCountLines(results));
+            var review = NeedsReview.From(results);
+            Assert.Equal("No ceiling within 5000 mm", review.Single().Reason);
+            Assert.Equal(new[] { ceilMsg + " (1 family)" }, SimpleReport.From(results, false).SlabFallbackLines);
+        }
+    }
+
     public class SettingsTests
     {
         [Fact]

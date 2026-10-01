@@ -40,6 +40,7 @@ namespace CAD2Revit.UI
             Mapping.HostDisplay[HostMode.Vertical],
         };
         public static readonly string[] FacingChoices = { "Down", "Up" };
+        public static readonly string[] PlaceAtChoices = { "Base point", "Symbol centre" };
         public static readonly string RefPlaneLabel = Mapping.HostDisplay[HostMode.RefPlane];
 
         FamilyOption _family = FamilyOption.Skip;
@@ -153,6 +154,9 @@ namespace CAD2Revit.UI
         }
         /// <summary>Down (ceiling devices) or Up (floor devices); used by Reference Plane hosting.</summary>
         public string Facing { get => _facing; set { _facing = value; Changed(nameof(Facing)); } }
+        string _placeAt = "Base point";
+        /// <summary>Base point (block insertion point, default) or Symbol centre (centre of the drawn symbol).</summary>
+        public string PlaceAt { get => _placeAt; set { _placeAt = value; Changed(nameof(PlaceAt)); } }
         /// <summary>Host Type before "Use reference planes for all rows" was ticked.</summary>
         public string HostBeforeAll { get; set; }
 
@@ -184,6 +188,7 @@ namespace CAD2Revit.UI
             // Rows left on the default level follow whatever level is picked next time.
             LevelName = string.Equals(_level, DefaultLevel, StringComparison.OrdinalIgnoreCase) ? "" : _level,
             Category = _category,
+            PlaceAt = Mapping.ParsePlaceAt(_placeAt) ?? Core.PlaceAt.BasePoint,
         };
 
         /// <summary>Apply a mapping-file row to this grid row.</summary>
@@ -194,6 +199,7 @@ namespace CAD2Revit.UI
             Rotation = row.RotationDeg.ToString("0.###", Inv);
             Host = Mapping.HostDisplay[row.Host];
             Facing = row.Facing.ToString();
+            PlaceAt = Mapping.PlaceAtText(row.PlaceAt);
             if (!string.IsNullOrEmpty(row.Category)) Category = row.Category;
         }
 
@@ -215,6 +221,8 @@ namespace CAD2Revit.UI
         /// <summary>All level names in the model (Level dropdown), lowest first.</summary>
         public List<string> LevelNames = new List<string>();
         public Settings Settings;
+        /// <summary>Slab (above) search range and fallback plane height (top of the mapping window).</summary>
+        public SlabOptions Slab = new SlabOptions();
 
         /// <summary>Find a family type by name; adds non-electrical types to the dropdown on demand.</summary>
         public FamilyOption Resolve(string family, string type)
@@ -225,16 +233,19 @@ namespace CAD2Revit.UI
             return opt;
         }
 
-        /// <summary>Apply a loaded mapping to the grid. Returns (rows applied, messages).</summary>
-        public (int applied, List<string> messages) Apply(MappingResult mapping)
+        /// <summary>Apply a loaded mapping to the grid. Returns (rows applied, messages).
+        /// families = false (opening the tool): every row stays on (Skip); only Elevation, Host
+        /// Type, Rotation, Facing, Level, Category and the Slab / Ceiling options are restored.</summary>
+        public (int applied, List<string> messages) Apply(MappingResult mapping, bool families = true)
         {
             int applied = 0;
             var messages = new List<string>(mapping.Errors);
+            if (mapping.HasSlabOptions) Slab = mapping.Slab.Clone();
             foreach (var row in Rows)
             {
                 if (mapping.Rows.TryGetValue(row.BlockName, out var m))
                 {
-                    var opt = Resolve(m.Family, m.TypeName);
+                    var opt = families ? Resolve(m.Family, m.TypeName) : FamilyOption.Skip;
                     if (opt == null)
                         messages.Add($"'{row.BlockName}': family '{m.Family} : {m.TypeName}' is not loaded in this model - left as (Skip)");
                     row.Apply(m, opt);
@@ -254,6 +265,19 @@ namespace CAD2Revit.UI
                 if (mapping.Categories.TryGetValue(row.BlockName, out var cat)) row.Category = cat;
             }
             return (applied, messages);
+        }
+
+        /// <summary>"Clear All Families": every row back to (Skip). Returns how many rows changed.</summary>
+        public int ClearFamilies()
+        {
+            int n = 0;
+            foreach (var row in Rows)
+                if (!row.Family.IsSkip)
+                {
+                    row.Family = FamilyOption.Skip;
+                    n++;
+                }
+            return n;
         }
 
         /// <summary>Pre-select a family for every (Skip) row whose name closely matches
@@ -304,7 +328,7 @@ namespace CAD2Revit.UI
 
         public MappingResult ToMapping()
         {
-            var result = new MappingResult();
+            var result = new MappingResult { Slab = Slab.Clone(), HasSlabOptions = true };
             foreach (var row in Rows)
             {
                 var m = row.ToMapRow();

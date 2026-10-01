@@ -14,6 +14,9 @@ namespace CAD2Revit.Core
         Failed,     // Revit refused the placement / no host found
     }
 
+    /// <summary>What a Slab (above) or Ceiling block ended up on (None for other host types).</summary>
+    public enum SlabHost { None, Slab, Beam, Ceiling, Plane, LevelBased }
+
     /// <summary>The outcome for one CAD block (or one unmapped block name).</summary>
     public class PlacementResult
     {
@@ -30,6 +33,12 @@ namespace CAD2Revit.Core
         public bool Mirrored;
         public bool HasBlock = true;    // false for grouped "unmapped" rows
         public int Count = 1;
+        /// <summary>Slab (above) found no slab in range: placed on the fallback plane / height.</summary>
+        public bool SlabFallback;
+        /// <summary>Slab (above): slab, beam, reference plane or level-based.</summary>
+        public SlabHost SlabHost;
+        /// <summary>Needs Review reasons for walls ("No wall within 500 mm; ..."), "" = none.</summary>
+        public string Review = "";
     }
 
     public class Summary
@@ -40,6 +49,10 @@ namespace CAD2Revit.Core
         public List<PlacementResult> Problems = new List<PlacementResult>();
         /// <summary>Placed, but with a "WARNING:" message (e.g. placed level-based instead of on a plane).</summary>
         public List<PlacementResult> Warnings = new List<PlacementResult>();
+        /// <summary>Slab (above) blocks with no slab in range, placed at the fallback height.</summary>
+        public int SlabFallbacks;
+        /// <summary>"Slab (above): ..." / "Ceiling: ..." count lines (see <see cref="Report.HostCountLines"/>).</summary>
+        public List<string> HostCounts = new List<string>();
 
         public int Get(Status s) => Status.TryGetValue(s, out var n) ? n : 0;
     }
@@ -65,6 +78,7 @@ namespace CAD2Revit.Core
             foreach (var r in results)
             {
                 s.Status[r.Status] = s.Get(r.Status) + r.Count;
+                if (r.Status == Status.Placed && r.SlabFallback) s.SlabFallbacks += r.Count;
                 if (r.Status == Status.Placed && r.Row != null)
                 {
                     byType[r.Row.Label] = (byType.TryGetValue(r.Row.Label, out var n) ? n : 0) + 1;
@@ -75,6 +89,7 @@ namespace CAD2Revit.Core
                 else if (r.Status == Status.Failed || r.Status == Status.Skipped)
                     s.Problems.Add(r);
             }
+            s.HostCounts = HostCountLines(results);
             s.ByType = byType.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).ToList();
             s.Unmapped = unmapped.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).ToList();
             return s;
@@ -123,6 +138,23 @@ namespace CAD2Revit.Core
             return rows;
         }
 
+        /// <summary>Placed-block counts for Slab (above) and Ceiling rows, e.g.
+        /// "Slab (above): 12 hosted on slab, 3 hosted on beam, 2 on reference plane, 1 level-based" and
+        /// "Ceiling: 20 hosted on ceiling, 4 on reference plane, 0 level-based". Only host types in use.</summary>
+        public static List<string> HostCountLines(IEnumerable<PlacementResult> results)
+        {
+            var placed = results.Where(r => r.Status == Status.Placed && r.SlabHost != SlabHost.None && r.Row != null).ToList();
+            int N(HostMode mode, SlabHost h) => placed.Where(r => r.Row.Host == mode && r.SlabHost == h).Sum(r => r.Count);
+            var lines = new List<string>();
+            if (placed.Any(r => r.Row.Host == HostMode.SlabAbove))
+                lines.Add($"Slab (above): {N(HostMode.SlabAbove, SlabHost.Slab)} hosted on slab, {N(HostMode.SlabAbove, SlabHost.Beam)} hosted on beam, " +
+                          $"{N(HostMode.SlabAbove, SlabHost.Plane)} on reference plane, {N(HostMode.SlabAbove, SlabHost.LevelBased)} level-based");
+            if (placed.Any(r => r.Row.Host == HostMode.Ceiling))
+                lines.Add($"Ceiling: {N(HostMode.Ceiling, SlabHost.Ceiling)} hosted on ceiling, " +
+                          $"{N(HostMode.Ceiling, SlabHost.Plane)} on reference plane, {N(HostMode.Ceiling, SlabHost.LevelBased)} level-based");
+            return lines;
+        }
+
         /// <summary>Plain-text summary shown in the result window.</summary>
         public static string SummaryText(Summary s, bool preview)
         {
@@ -134,6 +166,9 @@ namespace CAD2Revit.Core
                 $"{s.Get(Status.Duplicate)} duplicates skipped, {s.Get(Status.Failed)} failed, " +
                 $"{s.Get(Status.Skipped)} not loaded, {s.Get(Status.Unmapped)} unmapped instances",
             };
+            lines.AddRange(s.HostCounts);
+            if (s.SlabFallbacks > 0)
+                lines.Add($"{s.SlabFallbacks} Slab (above) / Ceiling block(s) {(preview ? "would be placed" : "placed")} at the fallback height (no host in range) - see the log");
             if (s.ByType.Count > 0)
             {
                 lines.Add("");

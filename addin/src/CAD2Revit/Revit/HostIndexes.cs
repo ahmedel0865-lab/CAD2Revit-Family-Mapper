@@ -26,7 +26,82 @@ namespace CAD2Revit.Revit
         public RevitLinkInstance Link;
         public Transform Tf = Transform.Identity;
         public string LinkName = "";
+        public Curve Curve;                 // location line, in the wall's own document
         List<(Reference reference, Face face)> _sides;
+        List<(Reference reference, Face face, double offset)> _faces;
+
+        static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        /// <summary>Nearest point of the location line to a point (wall document coordinates, plan).
+        /// Lines and arcs exactly; other curves (ellipses, splines) through Curve.Project.</summary>
+        public WallStation Station(XYZ local)
+        {
+            if (Curve is Line line)
+                return WallPlacement.NearestOnLine(V(line.GetEndPoint(0)), V(line.GetEndPoint(1)), V(local));
+            if (Curve is Arc arc && arc.IsBound)
+            {
+                var c = arc.Center;
+                var p0 = arc.GetEndPoint(0);
+                double start = Math.Atan2(p0.Y - c.Y, p0.X - c.X);
+                double sweep = arc.Length / arc.Radius * (arc.Normal.Z >= 0 ? 1 : -1);
+                return WallPlacement.NearestOnArc(V(c), arc.Radius, start, sweep, V(local));
+            }
+            var flat = new XYZ(local.X, local.Y, Curve.GetEndPoint(0).Z);
+            var ir = Curve.Project(flat);
+            var pt = ir.XYZPoint;
+            var d = Curve.ComputeDerivatives(ir.Parameter, false).BasisX;
+            var t = new V3(d.X, d.Y, 0).Normalize();
+            double over = 0;
+            if (pt.IsAlmostEqualTo(Curve.GetEndPoint(0)) || pt.IsAlmostEqualTo(Curve.GetEndPoint(1)))
+                over = Math.Abs(t.Dot(new V3(flat.X - pt.X, flat.Y - pt.Y, 0)));
+            return new WallStation { Point = new V3(pt.X, pt.Y, 0), Tangent = t, Overshoot = over };
+        }
+
+        /// <summary>Side faces with their plan offset from the location line, measured along
+        /// Left(tangent) (the same axis WallPlacement uses). Offsets are found by projecting points
+        /// of the location line (at mid height, several positions so openings do not matter) onto
+        /// each face; if that fails, +/- half the wall width on the exterior/interior side.</summary>
+        public List<(Reference reference, Face face, double offset)> Faces
+        {
+            get
+            {
+                if (_faces != null) return _faces;
+                _faces = new List<(Reference, Face, double)>();
+                var bb = Wall.get_BoundingBox(null);
+                double zMid = bb != null ? (bb.Min.Z + bb.Max.Z) / 2 : Curve.GetEndPoint(0).Z;
+                double half = Wall.Width / 2;
+                foreach (var side in new[] { ShellLayerType.Interior, ShellLayerType.Exterior })
+                    foreach (var r in HostObjectUtils.GetSideFaces(Wall, side))
+                    {
+                        if (!(Wall.GetGeometryObjectFromReference(r) is Face f)) continue;
+                        double? offset = null;
+                        foreach (var u in new[] { 0.5, 0.25, 0.75, 0.1, 0.9, 0.4, 0.6 })
+                        {
+                            try
+                            {
+                                var loc = Curve.Evaluate(u, true);
+                                var probe = new XYZ(loc.X, loc.Y, zMid);
+                                var ir = f.Project(probe);
+                                if (ir == null) continue;
+                                var st = Station(probe);
+                                offset = WallPlacement.Offset(st, V(ir.XYZPoint));
+                                break;
+                            }
+                            catch (Exception) { }
+                        }
+                        if (!offset.HasValue)
+                        {
+                            // Exterior face is on Wall.Orientation's side of the location line.
+                            var st = Station(Curve.Evaluate(0.5, true));
+                            var ori = Wall.Orientation;
+                            double sign = WallPlacement.Left(st.Tangent).Dot(new V3(ori.X, ori.Y, 0)) >= 0 ? 1 : -1;
+                            offset = (side == ShellLayerType.Exterior ? sign : -sign) * half;
+                        }
+                        _faces.Add((r, f, offset.Value));
+                    }
+                return _faces;
+            }
+        }
 
         /// <summary>Interior and exterior side faces (in the wall's own document).</summary>
         public List<(Reference reference, Face face)> Sides
@@ -45,7 +120,7 @@ namespace CAD2Revit.Revit
 
     public partial class HostFinder
     {
-        const string Floors = "floors", Ceilings = "ceilings", AnyFace = "face";
+        const string Floors = "floors", Ceilings = "ceilings", AnyFace = "face", SlabsAndBeams = "slabsbeams";
         const double MaxWallHalfWidthFt = 2.0;   // wall location line to face, generous
 
         readonly Dictionary<string, FaceIndex<FaceSource>> _faceIndexes = new Dictionary<string, FaceIndex<FaceSource>>();
@@ -58,14 +133,17 @@ namespace CAD2Revit.Revit
         public int IndexedWalls => _walls?.Count ?? 0;
 
         static string GroupFor(HostMode mode) =>
-            mode == HostMode.SlabAbove || mode == HostMode.SlabBelow ? Floors
+            mode == HostMode.SlabAbove ? SlabsAndBeams
+            : mode == HostMode.SlabBelow ? Floors
             : mode == HostMode.Ceiling ? Ceilings
             : mode == HostMode.Face ? AnyFace : null;
 
         static readonly Dictionary<string, BuiltInCategory[]> GroupCategories = new Dictionary<string, BuiltInCategory[]>
         {
-            [Floors] = new[] { BuiltInCategory.OST_Floors },
+            [Floors] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs },   // sloped slabs are often roofs
             [Ceilings] = new[] { BuiltInCategory.OST_Ceilings },
+            // Slab (above): nearest bottom face of a slab or a beam (a drop beam under the slab wins).
+            [SlabsAndBeams] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
             [AnyFace] = new[] { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
                                 BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
         };
@@ -210,7 +288,7 @@ namespace CAD2Revit.Revit
                             if (bb != null)
                             {
                                 double z0 = tf.OfPoint(bb.Min).Z, z1 = tf.OfPoint(bb.Max).Z;
-                                var src = new WallSource { Wall = w, Link = link, Tf = tf, LinkName = name };
+                                var src = new WallSource { Wall = w, Link = link, Tf = tf, LinkName = name, Curve = lc.Curve };
                                 var pts = lc.Curve.Tessellate();
                                 for (int i = 0; i + 1 < pts.Count; i++)
                                 {
@@ -267,13 +345,15 @@ namespace CAD2Revit.Revit
         /// <summary>
         /// Slab (above): the underside of the first floor slab straight above (x, y), searching
         /// up from the level - i.e. the slab of the level above. Slab (below): the top face of the
-        /// slab at the level, searching down from just above it. Only Floor elements count (beams,
-        /// ceilings, ducts are ignored), in this model and in Revit links. Faces pointing the wrong
+        /// slab at the level, searching down from just above it. Floors and Roofs count, plus beams
+        /// (Structural Framing) for Slab (above): the nearest bottom face straight above the point wins,
+        /// so a beam is only used where the point is under its bottom face. In this model and in Revit links. Faces pointing the wrong
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the point is under an opening).
         /// </summary>
         public HostHit FindSlab(bool above, double x, double y, double levelZ, double maxDistFt) =>
-            Cached(above ? 100 : 101, x, y, levelZ, maxDistFt, () =>
+            above ? FindUnderside(HostMode.SlabAbove, x, y, levelZ, maxDistFt) :
+            Cached(101, x, y, levelZ, maxDistFt, () =>
             {
                 var idx = Faces(Floors);
                 double start = levelZ + (above ? 0.01 : SlabSearch.BelowStartMm / SlabSearch.MmPerFoot);
@@ -282,50 +362,114 @@ namespace CAD2Revit.Revit
                 return idx.IsUnindexedAt(x, y) ? FindSlabRay(above, x, y, levelZ, maxDistFt) : null;
             });
 
-        /// <summary>Nearest wall side face to (x, y) at height z, within maxDistFt: candidate walls
-        /// from the wall index (by location line), then the exact point on their side faces.</summary>
-        public HostHit FindWall(double x, double y, double z, double maxDistFt, double startAngle) =>
-            Cached(200, x, y, z, maxDistFt, () =>
+        /// <summary>
+        /// Shared search for Slab (above) and Ceiling: the nearest bottom face (normal pointing down)
+        /// straight above (x, y), from just above the level up to maxDistFt, among the categories of
+        /// the host type (Ceiling: ceilings; Slab (above): floors, roofs and beams), in this model and
+        /// in Revit links. From the face index (built once); a ray only where faces could not be indexed.
+        /// </summary>
+        public HostHit FindUnderside(HostMode mode, double x, double y, double levelZ, double maxDistFt) =>
+            Cached(300 + (int)mode, x, y, levelZ, maxDistFt, () =>
             {
-                if (_walls == null)
-                    using (_timer.Time(Phases.HostIndex)) BuildWallIndex();
-                var origin = new XYZ(x, y, z);
-                HostHit best = null;
-                foreach (var src in _walls.Near(x, y, z, maxDistFt + MaxWallHalfWidthFt))
-                {
-                    List<(Reference reference, Face face)> sides;
-                    try { sides = src.Sides; } catch (Exception) { continue; }
-                    var local = src.Tf.Inverse.OfPoint(origin);
-                    foreach (var (reference, face) in sides)
-                    {
-                        IntersectionResult ir;
-                        try { ir = face.Project(local); } catch (Exception) { continue; }
-                        if (ir == null || ir.Distance > maxDistFt || (best != null && ir.Distance >= best.Distance)) continue;
-                        var pt = src.Tf.OfPoint(ir.XYZPoint);
-                        var n = src.Tf.OfVector(face.ComputeNormal(ir.UVPoint));
-                        n = new XYZ(n.X, n.Y, 0);
-                        if (n.GetLength() < 1e-6) continue;
-                        n = n.Normalize();
-                        var toFace = new XYZ(pt.X - x, pt.Y - y, 0);
-                        best = new HostHit
-                        {
-                            Reference = src.Link == null ? reference : reference.CreateLinkReference(src.Link),
-                            Point = pt, FaceNormal = n,
-                            // Room side = back towards the CAD point.
-                            RoomNormal = toFace.GetLength() > 1e-6 && n.DotProduct(toFace) > 0 ? n.Negate() : n,
-                            Element = src.Wall, IsLinked = src.Link != null, LinkName = src.LinkName,
-                            Distance = ir.Distance, FromIndex = true,
-                        };
-                    }
-                }
-                if (best != null) return best;
-                return NearUnindexedWall(x, y, maxDistFt) ? FindWallRay(x, y, z, maxDistFt, startAngle) : null;
+                var idx = Faces(GroupFor(mode));
+                double start = levelZ + 0.01;
+                var f = idx.Nearest(x, y, start, true, maxDistFt, face => face.Nz < -0.5, out var z);
+                if (f != null) return FromFace(f, x, y, z, start);
+                return idx.IsUnindexedAt(x, y) ? FindUndersideRay(mode, x, y, levelZ, maxDistFt) : null;
             });
+
+        /// <summary>
+        /// Wall hosting (see Core.WallPlacement): the nearest wall to (x, y) - by plan distance to the
+        /// wall body, within maxDistFt - among walls in this model and links that exist at height
+        /// <paramref name="searchZ"/>. Its side face on the CAD point's side is used (inside the wall
+        /// thickness: the side the block symbol is drawn on, from <paramref name="symbolCentre"/>),
+        /// and the point is projected perpendicularly onto that face at height <paramref name="z"/>.
+        /// The reference direction is the wall direction there (tangent, for curved walls); the CAD
+        /// rotation is not used. Walls whose location line could not be indexed fall back to rays.
+        /// </summary>
+        public HostHit FindWall(double x, double y, double searchZ, double z, double maxDistFt, double startAngle,
+                                Func<XYZ> symbolCentre = null)
+        {
+            if (_walls == null)
+                using (_timer.Time(Phases.HostIndex)) BuildWallIndex();
+            var cad = new XYZ(x, y, z);
+            HostHit best = null;
+            double bestDist = double.MaxValue, bestMoved = double.MaxValue;
+            XYZ centre = null;
+            bool centreRead = false;
+            foreach (var src in _walls.Near(x, y, searchZ, maxDistFt + MaxWallHalfWidthFt))
+            {
+                try
+                {
+                    var inv = src.Tf.Inverse;
+                    var local = inv.OfPoint(cad);
+                    var faces = src.Faces;
+                    if (faces.Count == 0) continue;
+                    double low = faces.Min(f => f.offset), high = faces.Max(f => f.offset);
+                    var st = src.Station(local);
+                    var plan = WallPlacement.Plan(st, low, high, V(local), null, local.Z);
+                    if (plan.InsideWall && symbolCentre != null)
+                    {
+                        if (!centreRead) { centreRead = true; try { centre = symbolCentre(); } catch (Exception) { } }
+                        if (centre != null) plan = WallPlacement.Plan(st, low, high, V(local), V(inv.OfPoint(centre)), local.Z);
+                    }
+                    if (plan.DistanceFt > maxDistFt) continue;
+                    if (plan.DistanceFt > bestDist + 1e-6 || (Math.Abs(plan.DistanceFt - bestDist) <= 1e-6 && plan.MovedFt >= bestMoved)) continue;
+
+                    // The face on that side: the one the projected point lies on (walls can have
+                    // several faces per side), else the first.
+                    double faceOffset = plan.Side > 0 ? high : low;
+                    var target = new XYZ(plan.Point.X, plan.Point.Y, plan.Point.Z);
+                    (Reference reference, Face face, double offset) pick = default;
+                    double pickDist = double.MaxValue;
+                    foreach (var f in faces.Where(f => Math.Abs(f.offset - faceOffset) < 5 / 304.8))
+                    {
+                        double d = 1e9;
+                        try { var ir = f.face.Project(target); if (ir != null) d = ir.Distance; } catch (Exception) { }
+                        if (pick.reference == null || d < pickDist) { pick = f; pickDist = d; }
+                    }
+                    if (pick.reference == null) continue;
+
+                    var n = src.Tf.OfVector(new XYZ(plan.Normal.X, plan.Normal.Y, 0)).Normalize();
+                    best = new HostHit
+                    {
+                        Reference = src.Link == null ? pick.reference : pick.reference.CreateLinkReference(src.Link),
+                        Point = src.Tf.OfPoint(target),
+                        FaceNormal = n, RoomNormal = n,
+                        RefDir = src.Tf.OfVector(new XYZ(plan.ReferenceDirection.X, plan.ReferenceDirection.Y, 0)).Normalize(),
+                        MovedFt = plan.MovedFt, InsideWall = plan.InsideWall,
+                        Element = src.Wall, IsLinked = src.Link != null, LinkName = src.LinkName,
+                        Distance = plan.DistanceFt, FromIndex = true,
+                    };
+                    bestDist = plan.DistanceFt;
+                    bestMoved = plan.MovedFt;
+                }
+                catch (Exception) { }
+            }
+            if (best != null) return best;
+            if (!NearUnindexedWall(x, y, maxDistFt)) return null;
+            return WallRay(x, y, z, maxDistFt, startAngle);
+        }
+
+        static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        HostHit WallRay(double x, double y, double z, double maxDistFt, double startAngle)
+        {
+            var ray = FindWallRay(x, y, z, maxDistFt, startAngle);
+            if (ray != null)
+            {
+                ray.FaceNormal = ray.RoomNormal;
+                ray.RefDir = XYZ.BasisZ.CrossProduct(ray.RoomNormal).Normalize();
+                ray.MovedFt = new XYZ(ray.Point.X - x, ray.Point.Y - y, 0).GetLength();
+            }
+            return ray;
+        }
 
         /// <summary>Ray-cast version of a lookup, used when a face from the index cannot host.</summary>
         public HostHit Recast(HostMode mode, double x, double y, double levelZ, double z, double maxDistFt, double startAngle) =>
-            mode == HostMode.Wall ? FindWallRay(x, y, z, maxDistFt, startAngle)
-            : mode == HostMode.SlabAbove || mode == HostMode.SlabBelow ? FindSlabRay(mode == HostMode.SlabAbove, x, y, levelZ, maxDistFt)
+            mode == HostMode.Wall ? WallRay(x, y, z, maxDistFt, startAngle)
+            : mode == HostMode.SlabAbove || mode == HostMode.Ceiling ? FindUndersideRay(mode, x, y, levelZ, maxDistFt)
+            : mode == HostMode.SlabBelow ? FindSlabRay(false, x, y, levelZ, maxDistFt)
             : FindAboveRay(mode, x, y, levelZ, maxDistFt);
     }
 }

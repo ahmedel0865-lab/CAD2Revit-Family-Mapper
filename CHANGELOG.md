@@ -1,6 +1,68 @@
 # Changelog
 
-## [0.16.0] - 2026-09-30
+## [0.23.0] - 2026-10-01
+### Changed: vertical reference planes follow the nearest wall or column, not the block rotation
+For Host Type **Vertical plane**, per block:
+1. **Nearest edge** within **Wall/column search** (new box, default 600 mm):
+   - first the side faces of walls and of architectural and structural columns, in this model and in links, that exist at the device height;
+   - else the DWG line work on the **DWG wall/column layers**. That is a new box (wildcards, default `*WALL*, *COL*, *A-WALL*, *S-COLS*`) with an **All layers** option. Lines and polylines (and arcs, tessellated) are collected once from the DWG, ignoring segments under 100 mm and hatch layers. With All layers, lines inside blocks (the device symbols) are skipped;
+   - else the block rotation, with Needs Review: "No wall/column within 600 mm - used block rotation".
+2. **Orientation**: the plane direction is the edge direction, and the family faces away from the wall/column, toward the side the block is on. It is flipped after placing if needed.
+3. **Position** (new option): **Snap to face** (default) puts the plane on the face, with the device at the block point projected onto it. **Through block point** puts the plane through the block point, parallel to the face. A snap of more than 200 mm goes to Needs Review.
+4. **Reuse**: blocks on the same face share one plane (same line within 5 mm and 0.5°).
+5. The **distance check** now measures against each element's **intended point** (the snapped face point, the wall face, or the CAD block), so expected snaps aren't flagged. Elements more than 50 mm from that point go to Needs Review with their Element ID.
+6. **Performance**: walls, columns and DWG segments are indexed once per run in a grid (`EdgeIndex`), so each block only checks the nearby cells. It all still runs in one transaction.
+- All new options are saved with the mapping: `Vertical_Edge_Search_mm`, `Vertical_Plane_Position`, `DWG_Wall_Layers`, `DWG_All_Layers`.
+- New Core classes `EdgeIndex`, `EdgeSnap` and `LayerFilter`, with tests.
+
+## [0.22.0] - 2026-10-01
+### Fixed: one block type lands away from its CAD symbol
+When only one block goes wrong, the cause is usually in how that block was drawn:
+- **Base point away from the symbol.** For example, the base point is on the wall line and the circle is drawn in the room. The family went on the base point, so it looked away from the CAD symbol.
+  - New per-row **Place At** column: **Base point** (default) or **Symbol centre**. With Symbol centre, the family goes on the centre of the drawn symbol (bounding box of the block's line work, computed once per block).
+  - It is saved in the mapping as `Place_At`.
+  - Blocks whose base point is more than 150 mm from their symbol are listed in **Needs Review** with that hint. Wall rows are not, because their base point is often on the wall on purpose.
+- **Mirrored blocks faced the wrong way.** The facing was derived from the block's rotation, which is the block's X axis. For a mirrored block, the +Y axis is flipped, so devices faced the opposite side. The facing now comes from the block's real +Y axis.
+- Tests for Place At (parse, save/load) and for the facing of normal and mirrored blocks.
+
+## [0.21.0] - 2026-10-01
+### Fixed: families on vertical reference planes placed far from their CAD blocks
+- **Cause.** The 0.16 *centre on the CAD point* correction (`CenterFamiliesOnCadPoint`, on by default, and written as `true` into every settings.ini since then) shifted each family by its bounding box. A family with geometry far from its insertion point (nested annotation, hidden lines) was pushed far away. That correction is now **off**, under a new key `CenterGeometryOnCadPoint` (default false). The old key is ignored.
+- **One plane per block.** Each block gets a vertical reference plane through its insertion point.
+  - It runs along the block's X direction, with its normal on the block's +Y, drawn from the level up to level + 3000 mm (`NewReferencePlane2`), and is named `CAD2Revit_V_<Level>_<n>`.
+- **Reuse only if colinear.** An existing CAD2Revit vertical plane (this run, or an earlier one, including the old `CAD2Revit vertical ...` planes) is reused only if the block point lies on it (< 5 mm) and its direction matches (< 0.5°). It is never reused because it is the nearest plane or on the same level or elevation.
+- **Position.** The family goes on the block point at level + Elevation From Level, on the plane's reference, with the plane direction as its reference direction.
+- **Verify and correct.**
+  - After placing, a family that faces away from the block is flipped: work plane flip, or *flip facing* when `FacingOrientation` is opposite to the block.
+  - If its location point is more than 10 mm from the block point, it is moved there with `ElementTransformUtils.MoveElement`.
+  - If it still isn't within 10 mm, it goes to **Needs Review**: "Placed N mm away from CAD block".
+### Added: final distance check for all host types
+- After the run, with one regeneration, each placed element's location is compared with its CAD block in plan.
+  - Anything farther than **Review if farther than (mm)** (new box above the grid, default 50, saved as `Review_Distance_mm`) is listed in **Needs Review** with its Element ID, and gets a warning in the result window.
+- Everything still runs in one transaction. The plane search is a simple scan of the CAD2Revit vertical planes, with no rays.
+- New Core helpers (`VerticalPlacement.CanReuse`, `PlaneName`, `PlanDistanceMm`, `PlacedAwayReason`), with tests.
+
+## [0.20.0] - 2026-09-30
+### Fixed: wall hosting (Host Type "Wall")
+- **Family on the opposite face.** The old search projected the CAD point onto every wall side face and took the nearest projection. Where the near face had a door/window opening at that point (or the point was past the face edge), only the far face gave a projection, so the family went on the wrong side. A block with no wall found stood on a vertical plane through the point, rotated like the CAD block.
+- **Family rotated like the CAD block.** For wall hosting the CAD rotation is now ignored: the family uses the wall direction.
+### New wall logic, per block
+1. **Find the wall**: the nearest wall by plan distance to the wall body (location line and face offsets), within the **Wall search distance**. This is a new box above the grid, default 500 mm (from `WallSearchDistanceMm`), and it is saved with the mapping (`Wall_Search_Distance_mm`). Walls in this model and in links count, if they exist at the row's height.
+2. **Pick the face on the block's side**: the sign of the CAD point's offset from the location line, compared with the offsets of the two side faces. Inside the wall thickness, the side the block symbol is drawn on (its centre of geometry) decides.
+3. **Position**: the CAD point projected perpendicularly onto that face, at level + Elevation From Level.
+4. **Orientation**: the reference direction is the wall direction, so the family sits flat on the face and faces out towards the block.
+   - Face-based families facing into the wall are flipped after placing.
+   - Legacy wall-hosted families get *flip facing*, and *flip hand* if mirrored.
+5. **Straight and curved walls**: on a curved wall, the tangent at the projected point is used. Other curve types use `Curve.Project`.
+6. **Needs Review** now also lists wall blocks: *No wall within 500 mm* (then the vertical/reference-plane fallback, Comments `CAD2Revit: Host = Reference Plane`), *Moved more than 200 mm to reach the wall face*, and *Wall is in a linked model*.
+- Performance is unchanged: walls are collected once into the location-line index, face offsets are computed once per wall, and everything still runs in one transaction. No ray per block, except for walls that can't be indexed.
+- New Core class `WallPlacement`, with tests. They include: a block on the right face goes on the right face; a block drawn at an angle still sits flat on the wall; a point inside the wall; a location line on a face; past the wall end; curved walls (clockwise and counter-clockwise).
+
+## [0.19.2] - 2026-09-30
+### Fixed
+- **Place Families crashed** with `ArgumentException: Corresponding button not found (defaultButton)` when blocks were already placed. The "already placed" dialog set its default button before adding its buttons. The default (*Skip them*) is now set after the buttons are added.
+
+## [0.19.1] - 2026-09-30
 ### Fixed: offset of families on vertical planes
 - Families on a **vertical plane** (Host Type *Vertical plane*, or *Wall* with no wall found) could land shifted from the CAD block insertion point, depending on the direction the plane faced.
 - **Exact point.** The CAD insertion point is projected perpendicularly onto the plane, at the row's elevation, and the family is placed there.
@@ -14,6 +76,63 @@
   - The position is measured again after the move.
 - The timing table has a new phase, *Position check + snap (vertical planes)*. The check regenerates the model for each vertical-plane block, which makes these rows a little slower.
 - New Core class `VerticalPlacement`, with tests for planes facing north, south, east, west and at angles.
+
+## [0.19.0] - 2026-09-29
+### Changed: the mapping window starts with no families picked, and a warning before placing twice
+- **Revit Family starts at (Skip) every time.** Opening Place Families no longer fills in the families from the last run, and no longer auto-selects families by name. Every row starts at `(Skip)`, so nothing is placed that you did not pick this time.
+- **The other columns are still remembered** per project: Elevation From Level, Host Type, Rotation, Facing, Level and Category, plus the Slab (above) / Ceiling *Search range* and *Fallback reference plane height*. You only re-pick the families.
+- **Families come back only when you ask**: **Load...** fills the grid from a mapping file (families included), and **Auto-match** still pre-selects by name when you click it. Preview keeps your picks when you return to the mapping window.
+- **Clear All Families** button (next to Load / Save / Auto-match): sets every row back to `(Skip)` and leaves the other columns as they are.
+- **Warning before Run when elements are already there.** Before a Run, the tool checks every block location for an element that is already in the model: an instance of the same family (the existing duplicate check, same tolerance and level band), or one whose Comments say `CAD: <block>` (placed by CAD2Revit, even with another family). If any are found, it asks: *"X elements already exist at these locations."* **Skip them** (default) / **Place anyway** / **Cancel** (back to the mapping window). Skipped blocks are listed as duplicates in the result window and the log.
+- The duplicate check during a run also counts elements whose Comments say `CAD: <block>` for the same block.
+
+## [0.18.0] - 2026-09-29
+### Changed: Ceiling uses the same search and fallback as Slab (above)
+- **One shared search.** Slab (above) and Ceiling now use the same code (`HostFinder.FindUnderside`, with the host type choosing the categories): the nearest bottom face straight above the block, from the level up to the search range, in this model and in links. Ceiling searches Ceilings; Slab (above) searches Floors, Roofs and beams. Hosts are still collected once into the face index, with no ray per block.
+- **Ceiling found**: the face-based family is hosted on the ceiling's bottom face, facing down, with the CAD rotation. Level-based families are placed level-based at the ceiling's underside height (before: failed).
+- **No ceiling in range**: same fallback as Slab (above). The family goes on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, or level-based at that height. It is logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm` and its Comments get `CAD2Revit: Host = Reference Plane`. Before, it was placed unhosted at the row's elevation, and the search was capped at the next level or `HostSearchDistanceMm`.
+- **Needs Review** lists Ceiling fallbacks too (reason `No ceiling within 5000 mm`), with the same select/zoom, Copy IDs and Export to Excel.
+- **Counts** in Preview and the result window: `Ceiling: N hosted on ceiling, N on reference plane, N level-based`, next to the Slab (above) line.
+- The mapping window's two values are now labelled **Slab (above) and Ceiling: Search range (mm) / Fallback reference plane height (mm)**. They are saved in the same `Slab_Search_Range_mm` / `Slab_Fallback_Plane_mm` columns, so existing mapping files keep working.
+- Duplicate check: re-runs now also see instances placed above the next level (up to the search range / fallback plane) as duplicates.
+
+## [0.17.0] - 2026-09-29
+### Changed: Slab (above) hosts on slabs or beams, and a Needs Review list
+- **Nearest slab or beam.** Slab (above) now looks for Floors, Roofs **and Structural Framing (beams)**, in this model and in links, within the search range above the level. The nearest bottom face straight above the block wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. Hosts are still collected once into the face index, with no ray per block.
+- **Hosting** on the found slab/beam: bottom face, facing down, CAD rotation (unchanged).
+- **Fallback** (no slab or beam in range): unchanged, one reference plane per level at the fallback height (`CAD2Revit_<Level>_+3000mm`), or level-based at that height. The log text is now `No slab/beam within 5000 mm - placed on reference plane at +3000 mm`.
+- **Comments.** Every fallback element's Comments is set to `CAD2Revit: Host = Reference Plane` (followed by ` | CAD: <block>` when writing block names is on), so it can be found with a filter or schedule.
+- **Needs Review window** after a run, when there are fallback elements: Element ID, Family : Type, CAD Block, X, Y (mm), Reason. Clicking a row selects and zooms to the element in Revit. Buttons: **Select All in Revit**, **Copy IDs** (comma-separated, for Manage > Select by ID), **Export to Excel** (.xlsx or .csv) and Close.
+- **Counts** in Preview and in the result window: `Slab (above): N hosted on slab, N hosted on beam, N on reference plane, N level-based`.
+
+## [0.16.0] - 2026-09-29
+### Changed: Slab (above) search range and fallback plane
+- **Search range.** Slab (above) looks for a slab from the row's level up to the **Slab search range** (default 5000 mm), and ignores anything higher, even when the level above is higher. It replaces "next level + `SlabSearchToleranceMm`", and the 0.15.3 extra search of sloped faces up to `HostSearchDistanceMm`. Floors and roofs, in this model and in links, are still collected once and looked up in memory: there is no ray per block.
+- **Slab found**: the face-based family is hosted on the slab's bottom face, facing down, with the CAD rotation (unchanged).
+- **No slab in range**: the family is hosted on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). The plane is reused by every block that falls back and by later runs. Before, the plane height came from the biggest slab above or the level above.
+- **Level-based families**: with no slab, they are placed level-based with Elevation From Level = the fallback height (still batch-created). Under a slab, they are placed level-based at the slab underside height; before, they failed. Legacy ceiling-hosted families with no slab still fail.
+- **Log and counts**: every fallback block is logged as `No slab within 5000 mm - placed on reference plane at +3000 mm` (or `placed level-based at +3000 mm`). Preview and the result window show the number of fallback blocks, and the full report lists it too.
+- **Mapping window**: *Slab search range (mm)* and *Fallback reference plane height (mm)* are at the top of the window. They are saved with the mapping (the project's remembered mapping and Save...) as the `Slab_Search_Range_mm` and `Slab_Fallback_Plane_mm` columns, and restored by Load.... Invalid values turn red and block Preview/Run.
+- `SlabSearchToleranceMm` in settings.ini now only affects Slab (below).
+
+## [0.15.3] - 2026-09-29
+### Fixed: Slab (above) did not follow sloped slabs
+- **Roofs count as slabs.** Sloped slabs are often modelled as Roofs, which Slab (above) and Slab (below) ignored. The tool found no slab, and the family ended up flat on a reference plane below the slope. Roofs are now searched along with Floors, in this model and in links.
+- **High end of a sloped slab.** The search stopped at the next level + `SlabSearchToleranceMm`. Where a sloped underside rises above that, it was missed and the family was placed flat. Sloped faces (more than about 3 degrees) are now also searched up to `HostSearchDistanceMm`. A flat slab two floors up is still never used.
+
+## [0.15.2] - 2026-09-28
+### Changed: simpler results window after Place Families
+- **Headline**: "Placed X of Y families" ("Would place ..." in Preview), green when every block was placed, amber otherwise.
+- **What was placed**: one line per family with the number placed.
+- **Warnings**, shown only when there are any: one plain line per block and problem, worst first, e.g. `LIGHT (x2): no ceiling found above, placed on level`. Element ids, slopes, distances and DEBUG text are left out.
+- **Show details** reveals the previous full report (tables, timings, log path) with Copy, Open log and Log folder links. There is one **Close** button.
+- The window stays attached to Revit and cannot be minimized.
+
+## [0.15.1] - 2026-09-28
+### Fixed: Revit looks frozen after a CAD2Revit window is closed or hidden
+- Every CAD2Revit dialog (DWG picker, mapping window, results, lists) is now **owned by Revit's main window**, so it always stays on top of Revit. Before, the DWG picker, the result window and the list pickers had no owner and could drop behind Revit. Revit stays locked while a dialog is open, so it looked frozen and the dialog could not be found.
+- The mapping window and the result window can no longer be **minimized**. They have no taskbar button, so a minimized window could not be brought back while Revit stayed locked.
+- **Ribbon tab**: start-up never fails. If a *Mapper* or *Tools* panel already exists on the CAD2Revit tab (a second copy of the add-in, or the old pyRevit extension), it is reused or a separate panel is added, instead of the add-in failing to load and the buttons disappearing.
 
 ## [0.15.0] - 2026-09-28
 ### Removed

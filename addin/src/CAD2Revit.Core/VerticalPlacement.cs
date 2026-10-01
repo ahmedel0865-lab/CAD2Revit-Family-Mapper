@@ -30,12 +30,65 @@ namespace CAD2Revit.Core
         public const double MmPerFoot = 304.8;
         /// <summary>Allowed distance (mm) between the placed family and the CAD point.</summary>
         public const double ToleranceMm = 10.0;
-        /// <summary>A shared vertical plane is reused only if the point is this close to it (mm).</summary>
-        public const double PlaneReuseMm = 0.5;
+        /// <summary>An existing CAD2Revit vertical plane is reused only if the block point lies on it
+        /// (closer than this, mm) and it faces the same way (within <see cref="PlaneReuseDeg"/>).</summary>
+        public const double PlaneReuseMm = 5.0;
+        public const double PlaneReuseDeg = 0.5;
+        /// <summary>Drawn height of a new vertical plane above the level (mm).</summary>
+        public const double PlaneHeightMm = 3000.0;
+        /// <summary>Default for the final check (all host types): an element farther than this
+        /// (mm, in plan) from its CAD block goes to Needs Review.</summary>
+        public const double DefaultReviewDistanceMm = 50.0;
+        public const string PlaneNamePrefix = "CAD2Revit_V_";
+
+        /// <summary>"CAD2Revit_V_Level 1_7".</summary>
+        public static string PlaneName(string levelName, int n) => PlaneNamePrefix + levelName + "_" + n;
+
+        /// <summary>n of "CAD2Revit_V_&lt;level&gt;_&lt;n&gt;" for that level, or 0.</summary>
+        public static int PlaneNumber(string planeName, string levelName)
+        {
+            var prefix = PlaneNamePrefix + levelName + "_";
+            if (planeName == null || !planeName.StartsWith(prefix, StringComparison.Ordinal)) return 0;
+            return int.TryParse(planeName.Substring(prefix.Length), out var n) && n > 0 ? n : 0;
+        }
+
+        /// <summary>
+        /// Reuse an existing vertical plane only if it is colinear with the block: the block point
+        /// lies on it (distance &lt; 5 mm) and its normal is within 0.5 deg of the block's facing.
+        /// Never because it is the nearest plane, or on the same level or elevation.
+        /// </summary>
+        public static bool CanReuse(V3 blockPoint, V3 planePoint, V3 planeNormal, V3 facing)
+        {
+            var n = new V3(planeNormal.X, planeNormal.Y, 0).Normalize();
+            var f = new V3(facing.X, facing.Y, 0).Normalize();
+            if (n.Length < 0.5 || f.Length < 0.5) return false;
+            if (n.Dot(f) < Math.Cos(PlaneReuseDeg * Math.PI / 180)) return false;
+            var p = new V3(blockPoint.X, blockPoint.Y, 0);
+            var o = new V3(planePoint.X, planePoint.Y, 0);
+            return Math.Abs(Distance(p, o, n)) * MmPerFoot < PlaneReuseMm;
+        }
+
+        /// <summary>Distance in plan (XY only), mm.</summary>
+        public static double PlanDistanceMm(V3 a, V3 b) => new V3(a.X - b.X, a.Y - b.Y, 0).Length * MmPerFoot;
+
+        /// <summary>The Needs Review reason: "Placed 123 mm away from CAD block".</summary>
+        public static string PlacedAwayReason(double mm) => $"Placed {mm:0} mm away from CAD block";
+
+        /// <summary>"Placed 75 mm away from its intended point" (the snapped face point, wall face, ...).</summary>
+        public static string PlacedAwayFromTargetReason(double mm) => $"Placed {mm:0} mm away from its intended point";
+
+        public static bool IsPlacedAwayReason(string text) =>
+            text != null && text.StartsWith("Placed ", StringComparison.Ordinal) &&
+            (text.EndsWith(" mm away from CAD block", StringComparison.Ordinal) || text.EndsWith(" mm away from its intended point", StringComparison.Ordinal));
 
         /// <summary>Horizontal facing (plane normal) for a block rotation in radians:
         /// 0 = north (+Y), 90 deg = west, 180 deg = south, 270 deg = east.</summary>
         public static V3 Facing(double angleRad) => new V3(-Math.Sin(angleRad), Math.Cos(angleRad), 0);
+
+        /// <summary>The angle whose <see cref="Facing"/> is the block's +Y axis (yx, yy) in plan:
+        /// equals the block rotation for a normal block, and is 180 deg off for a mirrored block
+        /// (its Y axis is flipped), so the family faces the side the symbol is drawn on.</summary>
+        public static double FacingAngleFromYAxis(double yx, double yy) => Math.Atan2(-yx, yy);
 
         /// <summary>Reference direction of the family: horizontal, along the plane
         /// (Z x normal), so the family stands upright and is not mirrored.</summary>

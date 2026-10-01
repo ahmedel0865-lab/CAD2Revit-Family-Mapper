@@ -69,5 +69,26 @@ namespace CAD2Revit.Core.Tests
                 HostLabels.Summarize(mixed));
             Assert.Equal("", HostLabels.Summarize(new PlacementResult[0]));
         }
+
+        [Fact]
+        public void SlabAboveRangeIgnoresTheLevelAbove()
+        {
+            Assert.Equal(5000 / 304.8, SlabSearch.RangeFt(5000), 9);
+            // A slab at 5500 mm is outside the default 5000 mm range, even with the level above at 7000.
+            var idx = new FaceIndex<string>();
+            idx.Add(new List<double[]> { new[] { 0.0, 0, 10, 0, 10, 10, 0, 10 } }, 0, 0, -1, 0, 0, 5500 / 304.8, "high slab");
+            Assert.Null(idx.Nearest(5, 5, 0.01, true, SlabSearch.RangeFt(5000), f => f.Nz < -0.5, out _));
+            Assert.NotNull(idx.Nearest(5, 5, 0.01, true, SlabSearch.RangeFt(6000), f => f.Nz < -0.5, out _));
+        }
+
+        [Fact]
+        public void FallbackMessageAndPlaneName()
+        {
+            Assert.Equal("No slab/beam within 5000 mm - placed on reference plane at +3000 mm",
+                         SlabSearch.FallbackMessage(5000, 3000, levelBased: false));
+            Assert.Equal("No slab/beam within 4500 mm - placed level-based at +2750.5 mm",
+                         SlabSearch.FallbackMessage(4500, 2750.5, levelBased: true));
+            Assert.Equal("CAD2Revit_Level 1_+3000mm", RefPlaneNames.For("Level 1", 3000, Facing.Down));
+        }
     }
 }

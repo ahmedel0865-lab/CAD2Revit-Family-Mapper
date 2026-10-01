@@ -43,24 +43,34 @@ flowchart LR
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
 - **Find** box and **Show** filter; **Skip shown rows** hides e.g. all architectural blocks in one click.
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.
-- **Auto-selects** families whose names match the block name (`SMOKE-DET` → *Smoke Detector*), including common CAD abbreviations.
+- **Revit Family starts at `(Skip)`** every time the tool opens, so you pick the families for this run yourself. **Auto-match** pre-selects families whose names match the block name (`SMOKE-DET` → *Smoke Detector*, common CAD abbreviations included) when you click it, and **Clear All Families** sets every row back to `(Skip)`.
 - **Level + elevation per row**: different blocks can go on different levels in one run.
 - **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category together.
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
-- **Remembers the last mapping per project**; Load / Save mappings as **.xlsx or .csv**.
+- **Remembers per project** Elevation From Level, Host Type, Rotation, Facing, Level and the Slab (above) / Ceiling search range and fallback height, but not the families. Load / Save mappings as **.xlsx or .csv**; **Load...** is the only way families are filled in from a file.
 
 **Placement and hosting**
 - Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
 - Hosts per row: **None (level-based)**, **Ceiling**, **Slab (above)**, **Slab (below)**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
-- **Vertical plane** placement lands exactly on the CAD insertion point, whatever the wall direction. The point is projected onto the plane at the row's elevation. After placing, the family is checked: if it is more than 10 mm off, it is moved back and a warning is shown. A family whose origin isn't at its centre is centred on the point along the plane (`CenterFamiliesOnCadPoint`).
-- **Slab (above)**: hosts on the **underside of the slab of the level above**, found straight up from each block. Only floor slabs count; beams, ceilings and ducts are ignored. Structural links are searched too, and the search is limited to the level-to-level height + 500 mm. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits under a slab opening, the family goes on a reference plane at the slab's height, with a warning.
+- **Wall** hosting puts the family on the wall face **on the side the CAD block is drawn**, at the CAD point projected onto that face, flat on the wall and facing out towards the block. The CAD rotation is ignored; the wall direction is used, including on curved walls. The nearest wall within the **Wall search distance** (500 mm, set in the window) at the row's height is used, in this model and in links. Blocks with no wall in range, moved more than 200 mm to reach the face, or on a wall in a link are listed in **Needs Review**.
+- **Vertical plane** placement:
+  - **Smart orientation.** The plane is made **parallel to the nearest wall or column face** within 600 mm. It looks first at walls and columns in this model and in links, then at **DWG lines on the wall/column layers** (editable, e.g. `*WALL*, *COL*`, or *All layers*). The family faces away from the wall, toward the block. With nothing near, it uses the block rotation and lists the block in **Needs Review**.
+  - **Position** (set in the window): **Snap to face** (default) puts the device on the face, at the block point projected onto it. **Through block point** keeps the block point. A snap of more than 200 mm is listed in Needs Review.
+  - Planes are named `CAD2Revit_V_<Level>_<n>`, drawn from the level up to level + 3000 mm. Blocks on the same face share one plane (same line within 5 mm and 0.5°). Walls, columns and DWG lines are indexed once in a grid.
+  - The family goes on the block point at level + elevation, facing the block. If it lands more than 10 mm off, it is moved back. If it still can't be corrected, it is listed in **Needs Review**.
+- **Place At** (per row): **Base point** (the block's insertion point, default) or **Symbol centre** (the centre of the drawn symbol). Use Symbol centre for blocks drawn away from their base point, for example a wall light whose base point is on the wall line and whose circle is in the room. Such blocks are flagged in **Needs Review** ("Block base point is N mm from its symbol"). **Mirrored blocks** face the side their symbol is drawn on.
+- **Final distance check, all host types**: any element placed farther than the **review distance** (50 mm, set in the window) from its **intended point** is listed in **Needs Review** with its Element ID. The intended point is the CAD block, or the face point it was snapped to.
+- **Slab (above)**: hosts on the **bottom face of the nearest slab or beam above** each block, facing down, keeping the CAD rotation (sloped slabs included). Floors, roofs (sloped slabs are often modelled as roofs) and Structural Framing (beams) count, in this model and in linked models; ceilings and ducts are ignored. Whichever bottom face is closest above the point wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. The search goes from the row's level up to the **Slab search range** (default 5000 mm), never higher, even if the level above is higher. **No slab or beam in range** (open area, slab opening, missing structural link): the family goes on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). Level-based families are placed level-based at that Elevation From Level. Each such block is logged as `No slab/beam within 5000 mm - placed on reference plane at +3000 mm`, and its **Comments** get `CAD2Revit: Host = Reference Plane`, so you can find it later with a filter or schedule. Both values are at the top of the mapping window and are saved with the mapping. A level-based family under a slab or beam is placed level-based at its underside height.
+- **Ceiling**: works the same way as Slab (above) and uses the same search code. It hosts on the **bottom face of the nearest ceiling above** each block, in this model and in linked (architectural) models, within the same search range. With no ceiling in range (no ceiling there, an opening, a missing architectural link), it uses the same fallback plane `CAD2Revit_<Level>_+3000mm`, or level-based at that height, logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm`, with the same Comments text. The two values at the top of the mapping window (*Search range* and *Fallback reference plane height*) apply to both Slab (above) and Ceiling.
+- **Counts**: Preview and the result window show how many Slab (above) blocks were hosted on a slab, hosted on a beam, put on the reference plane, or placed level-based, and how many Ceiling blocks were hosted on a ceiling, put on the reference plane, or placed level-based.
+- **Needs Review** window: after a run, every Slab (above) and Ceiling element that went on the fallback plane (or level-based fallback) is listed with Element ID, Family : Type, CAD Block, X, Y (mm) and Reason. Clicking a row selects the element in Revit and zooms to it. **Select All in Revit**, **Copy IDs** (comma-separated, for Manage > Select by ID) and **Export to Excel** are there too. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits over a slab opening, the family goes on a reference plane at the slab's height, with a warning.
 - **Detected Host (Preview)** column: after Preview, every row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
 - **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `CAD2Revit_Level 1_+2800mm`), shared per elevation, facing Down or Up.
 - If no host is found, falls back to unhosted placement (or reports a failure, your choice).
 
 **Safety and output**
 - **Preview** runs the full placement and undoes it, so its counts match a real run.
-- **Duplicate protection** per level: re-running only adds new blocks.
+- **Duplicate protection** per level: before a Run, if elements are already at the block locations (same family, or Comments `CAD: <block>`), the tool asks *"X elements already exist at these locations"*: **Skip them** (default), **Place anyway** or **Cancel**.
 - **One transaction**: a single Ctrl+Z undoes a whole run.
 - **Fast on big drawings**: hosts are found from face/wall indexes built once (not one ray per block), and level-based families are created in batches. A progress bar with **Cancel** is shown (Cancel rolls everything back), and a **Timings** table shows where the time went. See [Performance](#performance).
 - Summary per family type, unmapped blocks and failures with reasons; a **CSV log** of every block with Element ID, level, host, coordinates and rotation.
@@ -80,10 +90,10 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
 2. **CAD2Revit > Place Families** > pick the DWG > **Next**.
-3. In the mapping window, pick a family for each CAD block (type to search; close matches are pre-selected), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
+3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select close matches, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
 4. **Preview** > check the result and the *Detected Host* column > **Run**. One Ctrl+Z undoes it all.
 
-Next time in the same project, the mapping window opens pre-filled.
+Next time in the same project, the mapping window remembers elevations, host types, rotation, facing and levels. Every Revit Family starts at `(Skip)`, so you only re-pick the families (or use **Load...**).
 
 - Full guide: [docs/USAGE.md](docs/USAGE.md)
 - Test on a small sample first: [docs/TESTING.md](docs/TESTING.md)
@@ -102,9 +112,9 @@ Next time in the same project, the mapping window opens pre-filled.
 | | Devices go on the **underside of a slab** or in **open ceilings** (car parks, plant rooms), or **face up** on the floor (floor boxes: set *Facing* = Up). |
 
 Notes:
-- All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window. On Ceiling / Face / Slab rows it is not placed ("family is not face-based").
+- All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window. On Slab (above) and Ceiling rows it is placed level-based at the host's underside height, or at the fallback height when there is no host. On Face / Slab (below) rows it is not placed ("family is not face-based").
 - For hosts in **linked models**, each placed instance is checked: *Host* must be the link, not a reference plane. Otherwise the block is reported as failed. Set `DebugHosting = true` in `settings.ini` to get a per-block DEBUG line (link, element, normal, final host) in the log.
-- Ceiling hosting looks straight up from each block and needs a ceiling within the search distance. Anything without a ceiling above it falls back to the row's elevation, unhosted.
+- Ceiling hosting looks straight up from each block for a ceiling within the search range (default 5000 mm). Anything without a ceiling above it goes on the fallback reference plane (default +3000 mm) and is listed in **Needs Review**.
 - Reference planes are named `CAD2Revit_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
 
 ## Mapping file
@@ -119,6 +129,8 @@ The mapping window can **Load / Save** the mapping as a file, to reuse it across
 | FLOOR-BOX | Floor Box | Standard | 0 | 0 | slab below |
 
 `Host_Type` values: `non-hosted`, `ceiling`, `slab above`, `slab below`, `wall`, `reference plane`, `face` or `vertical`. The window's labels are accepted too.
+
+Saved mappings also carry two columns, `Slab_Search_Range_mm` and `Slab_Fallback_Plane_mm`, with the same value on every row (the Slab (above) values from the top of the mapping window). Files without them use 5000 and 3000.
 
 ## Project structure
 ```
@@ -156,7 +168,7 @@ What v0.12 changed, **for 1,000 blocks** (counts of Revit API work, from the cod
 | Work | v0.11 | v0.12 |
 |---|---|---|
 | Slab / ceiling / face host detection | 1,000 ray casts (`ReferenceIntersector.Find`) | host geometry read **once** + 1,000 in-memory lookups |
-| Wall host detection | up to **16,000** rays (16 per block) | line-index lookup, then face projection on the 1–2 nearest walls |
+| Wall host detection | up to **16,000** rays (16 per block) | location-line index lookup, then plan math on the 1–2 nearest walls (side, projection, tangent); face offsets computed once per wall |
 | Level-based creation | 1,000 `NewFamilyInstance` + up to 1,000 `RotateElement` | **one** `NewFamilyInstances2` per mapping row and level, rotation included |
 | Regenerations | 1 per reference-plane block, plus 1 per newly activated type | **1**, before the loop |
 | Duplicate grid | rebuilt from all instances for every level used | built **once** |

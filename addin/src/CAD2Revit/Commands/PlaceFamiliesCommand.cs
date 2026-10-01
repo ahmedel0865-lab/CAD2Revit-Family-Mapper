@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Windows.Interop;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -26,6 +25,7 @@ namespace CAD2Revit.Commands
         {
             var uiapp = data.Application;
             var doc = uiapp.ActiveUIDocument.Document;
+            RevitOwner.MainHandle = uiapp.MainWindowHandle;
             try
             {
                 var settings = Core.Settings.Load();
@@ -39,7 +39,7 @@ namespace CAD2Revit.Commands
                 PlaceOptions opts;
                 using (var dlg = new PlaceDialog(doc, settings))
                 {
-                    if (dlg.ShowDialog() != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
+                    if (dlg.ShowDialog(RevitOwner.Win32) != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
                     opts = dlg.Result;
                 }
                 if (opts.Level == null)
@@ -61,20 +61,14 @@ namespace CAD2Revit.Commands
                 }
 
                 sw.Restart();
-                var session = BuildSession(doc, opts, blocks, settings, out var startupNotes);
+                var session = BuildSession(doc, opts, blocks, settings);
                 var setupTime = sw.Elapsed;
 
                 // 3. Mapping window -> Preview / Run loop.
                 while (true)
                 {
                     var win = new MappingWindow(session);
-                    new WindowInteropHelper(win).Owner = uiapp.MainWindowHandle;
-                    if (startupNotes != null)
-                    {
-                        var notes = startupNotes;
-                        win.ContentRendered += (s, e) => System.Windows.MessageBox.Show(win, notes, "CAD2Revit");
-                        startupNotes = null;
-                    }
+                    RevitOwner.Attach(win);
                     win.ShowDialog();
                     if (win.Action == MappingAction.Cancel)
                         return Result.Cancelled;
@@ -84,7 +78,7 @@ namespace CAD2Revit.Commands
                     try
                     {
                         Directory.CreateDirectory(ProjectStore.Folder);
-                        Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()));
+                        Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()), session.Slab);
                     }
                     catch (Exception) { /* remembering is a convenience only */ }
 
@@ -101,13 +95,26 @@ namespace CAD2Revit.Commands
                         mapping = session.ToMapping();
                         symbols = Placer.ResolveSymbols(doc, mapping, errors);
                     }
+                    // Run: warn when elements were already placed at these locations.
+                    var placer = new Placer(doc, settings);
+                    if (!preview)
+                    {
+                        int existing;
+                        using (timer.Time(Phases.DupIndex)) existing = placer.CountExisting(blocks, mapping, symbols, opts.Level);
+                        if (existing > 0)
+                        {
+                            var choice = AskExisting(existing);
+                            if (choice == ExistingChoice.Cancel) continue;   // back to the mapping window
+                            placer.CheckDuplicates = choice == ExistingChoice.Skip;
+                        }
+                    }
                     List<PlacementResult> results;
                     try
                     {
                         using (var progress = new ProgressWindow(preview ? "CAD2Revit - Preview" : "CAD2Revit - Placing families",
                                                                  uiapp.MainWindowHandle))
-                            results = new Placer(doc, settings).PlaceAll(blocks, mapping, symbols, opts.Level, preview,
-                                                                         progress.Report, DwgExtents(opts.Import), timer);
+                            results = placer.PlaceAll(blocks, mapping, symbols, opts.Level, preview,
+                                                                         progress.Report, DwgExtents(opts.Import), timer, opts.Import);
                     }
                     catch (OperationCanceledException)
                     {
@@ -120,20 +127,38 @@ namespace CAD2Revit.Commands
                     using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
                     if (preview) session.SetDetectedHosts(results);
 
+                    // Details (behind "Show details"): the full technical summary, timings and log path.
                     var summary = Report.Summarize(results);
                     var text = Report.SummaryText(summary, preview);
                     if (errors.Count > 0)
                         text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
                     text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
                     text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
-                    if (preview)
-                        text += "\r\n\r\nClose this window to return to the mapping. Click Run there to place the families.";
-                    else if (summary.Get(Status.Placed) > 0)
-                        text += "\r\nUndo the whole run with a single Ctrl+Z (\"CAD2Revit: Place families\").";
 
-                    using (var form = new ResultForm(preview ? "CAD2Revit - Preview" : "CAD2Revit - Done", text, logPath))
-                        form.ShowDialog();
-                    if (!preview) return Result.Succeeded;
+                    var simple = SimpleReport.From(results, preview);
+                    string footnote = preview
+                        ? "Close this window to return to the mapping, then click Run to place the families."
+                        : summary.Get(Status.Placed) > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
+
+                    using (var form = new ResultForm(simple, text, logPath, footnote))
+                        form.ShowDialog(RevitOwner.Win32);
+                    if (!preview)
+                    {
+                        // Slab (above) blocks that found no slab/beam: list them so they can be fixed.
+                        var review = NeedsReview.From(results);
+                        if (review.Count > 0)
+                        {
+                            var uidoc = uiapp.ActiveUIDocument;
+                            using (var form = new NeedsReviewForm(review, ids =>
+                            {
+                                var elementIds = ids.Select(Compat.ToId).ToList();
+                                uidoc.Selection.SetElementIds(elementIds);
+                                uidoc.ShowElements(elementIds);
+                            }))
+                                form.ShowDialog(RevitOwner.Win32);
+                        }
+                        return Result.Succeeded;
+                    }
                 }
             }
             catch (Exception ex)
@@ -144,12 +169,36 @@ namespace CAD2Revit.Commands
             }
         }
 
-        /// <summary>One grid row per unique block name, pre-filled from the project's last
-        /// mapping, then by name matching for blocks that were never mapped.</summary>
-        static MappingSession BuildSession(Document doc, PlaceOptions opts, List<BlockRef> blocks,
-                                           Core.Settings settings, out string notes)
+        enum ExistingChoice { Skip, PlaceAnyway, Cancel }
+
+        /// <summary>"X elements already exist at these locations": Skip them (default) / Place anyway / Cancel.</summary>
+        static ExistingChoice AskExisting(int count)
         {
-            notes = null;
+            var td = new TaskDialog("CAD2Revit - already placed")
+            {
+                MainInstruction = ExistingIndex.Warning(count),
+                MainContent = "An element of the same family, or one whose Comments say \"CAD: <block>\", is already " +
+                              "at these block locations (probably from an earlier run).",
+                AllowCancellation = true,
+                CommonButtons = TaskDialogCommonButtons.None,
+            };
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Skip them", "Place only the blocks that are not in the model yet (recommended)");
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Place anyway", "Place every block, even where an element already exists");
+            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "Cancel", "Go back to the mapping window");
+            // Only after the command links exist: Revit throws "Corresponding button not found"
+            // when DefaultButton names a button the dialog does not have yet.
+            td.DefaultButton = TaskDialogResult.CommandLink1;
+            var r = td.Show();
+            return r == TaskDialogResult.CommandLink1 ? ExistingChoice.Skip
+                 : r == TaskDialogResult.CommandLink2 ? ExistingChoice.PlaceAnyway
+                 : ExistingChoice.Cancel;
+        }
+
+        /// <summary>One grid row per unique block name. The project's last mapping restores
+        /// Elevation, Host Type, Rotation, Facing, Level and the Slab / Ceiling options, but every
+        /// Revit Family starts at (Skip): families are picked again, or come from Load... / Auto-match.</summary>
+        static MappingSession BuildSession(Document doc, PlaceOptions opts, List<BlockRef> blocks, Core.Settings settings)
+        {
             var session = new MappingSession
             {
                 DwgName = doc.GetElement(opts.Import.GetTypeId())?.Name ?? "DWG",
@@ -158,6 +207,7 @@ namespace CAD2Revit.Commands
                 Settings = settings,
                 ProjectMappingPath = ProjectStore.MappingPathFor(ProjectStore.KeyFor(ModelPath(doc), doc.Title)),
             };
+            session.Slab.WallSearchMm = settings.WallSearchDistanceMm > 0 ? settings.WallSearchDistanceMm : SlabOptions.DefaultWallSearchMm;
             FamilyCatalog.Load(doc, session);
             session.LevelNames = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
                 .OrderBy(l => l.ProjectElevation).Select(l => l.Name).ToList();
@@ -168,20 +218,8 @@ namespace CAD2Revit.Commands
                     Symbol = symbols.TryGetValue(kv.Key, out var sym) ? sym : null,
                 });
 
-            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (File.Exists(session.ProjectMappingPath))
-            {
-                var saved = Mapping.Load(session.ProjectMappingPath);
-                var (_, messages) = session.Apply(saved);
-                known.UnionWith(saved.Rows.Keys);
-                known.UnionWith(saved.SkippedBlocks);
-                var missing = messages.Where(m => m.Contains("is not loaded")).ToList();
-                if (missing.Count > 0)
-                    notes = "Some families from this project's last mapping are no longer loaded:\n\n" +
-                            string.Join("\n", missing.Take(15)) + (missing.Count > 15 ? "\n..." : "");
-            }
-            session.AutoMatch(row => !known.Contains(row.BlockName));
-            foreach (var row in session.Rows) MappingSession.UseFamilyCategory(row);
+                session.Apply(Mapping.Load(session.ProjectMappingPath), families: false);
             return session;
         }
 
