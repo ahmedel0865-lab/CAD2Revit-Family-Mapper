@@ -116,7 +116,8 @@ namespace CAD2Revit.Revit
             public string BlockName;
             public double? Offset;          // level-based: Elevation From Level (feet)
             public PlacementResult Result;
-            public XYZ CadPoint;            // the CAD block insertion point (final distance check)
+            public XYZ CadPoint;            // the CAD block insertion point
+            public XYZ Intended;            // where the family was meant to go (snapped face point, wall face, ...)
         }
 
         /// <summary>Places every mapped block. Each row goes on its own Level (MapRow.LevelName,
@@ -126,9 +127,11 @@ namespace CAD2Revit.Revit
         public List<PlacementResult> PlaceAll(List<BlockRef> blocks, MappingResult mapping,
                                               Dictionary<MapRow, FamilySymbol> symbols, Level defaultLevel,
                                               bool dryRun, Func<int, int, bool> progress = null, double[] dwgExtents = null,
-                                              PhaseTimer timer = null)
+                                              PhaseTimer timer = null, ImportInstance dwg = null)
         {
             _timer = timer ?? new PhaseTimer();
+            _dwg = dwg;
+            _edges = null;
             _slab = mapping.Slab ?? new SlabOptions();
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
@@ -690,7 +693,7 @@ namespace CAD2Revit.Revit
                     {
                         st.Commit();
                         dups.Add(dupKey, "CAD: " + b.Name, target.X, target.Y, target.Z);
-                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res, CadPoint = b.Point });
+                        created.Add(new Created { Id = inst.Id, Level = level, BlockName = b.Name, Offset = instOffset, Result = res, CadPoint = b.Point, Intended = target });
                     }
                     else st.RollBack();
                 }
@@ -776,13 +779,40 @@ namespace CAD2Revit.Revit
                 // Facing from the block's real +Y axis (correct for mirrored blocks too).
                 var f = VerticalPlacement.Facing(b.FacingAngle + row.RotationDeg * Math.PI / 180.0);
                 var facing = new XYZ(f.X, f.Y, 0);
-                // The plane passes through the block point (or is colinear with it, < 5 mm); the
-                // family goes on the block point at level + Elevation From Level, reference
-                // direction = the plane direction (block X).
+                var planePoint = target;
+                bool snapped = false;
+                // Host Type "Vertical plane": the plane is parallel to the nearest wall/column face
+                // (this model and links), else to the nearest DWG wall/column line, within the search
+                // radius; the family faces away from it, toward the block. Snap to face: the device
+                // sits on the face (block point projected onto it). Nothing near: block rotation.
+                if (row.Host == HostMode.Vertical)
+                {
+                    EdgeHit<EdgeInfo> edge;
+                    using (_timer.Time(Phases.HostQuery))
+                    {
+                        if (_edges == null)
+                            using (_timer.Time(Phases.HostIndex)) _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab);
+                        edge = _edges.Find(x, y, target.Z);
+                    }
+                    if (edge != null)
+                    {
+                        var ep = EdgeSnap.Plan(V(target), new V3(edge.X1, edge.Y1, 0), new V3(edge.X2, edge.Y2, 0), f,
+                                               _slab.PlanePosition, target.Z);
+                        facing = new XYZ(ep.Facing.X, ep.Facing.Y, 0);
+                        planePoint = new XYZ(ep.Point.X, ep.Point.Y, ep.Point.Z);
+                        snapped = _slab.PlanePosition == PlanePosition.SnapToFace;
+                        notes.Add($"plane parallel to {edge.Payload.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : ""));
+                        if (EdgeSnap.NeedsSnapReview(ep)) plan.Review.Add(EdgeSnap.SnapMovedReason(ep.MovedFt * MmPerFoot));
+                    }
+                    else plan.Review.Add(EdgeSnap.NoEdgeReason(_slab.EdgeSearchMm));
+                }
+                // The plane passes through the plane point (or is colinear with it, < 5 mm); the
+                // family goes on it at level + Elevation From Level, reference direction = the
+                // plane direction.
                 Reference planeRef;
                 XYZ onPlane, normal;
                 string planeName;
-                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(target, facing, out onPlane, out normal, out planeName);
+                using (_timer.Time(Phases.Planes)) planeRef = ctx.VerticalPlanes.Get(planePoint, facing, out onPlane, out normal, out planeName);
                 var along = XYZ.BasisZ.CrossProduct(normal).Normalize();
                 using (_timer.Time(Phases.Create))
                     inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, along, sym);
@@ -793,7 +823,7 @@ namespace CAD2Revit.Revit
                 {
                     double leftMm = SnapToPoint(inst, onPlane, normal, along, facing, notes);
                     if (leftMm > VerticalPlacement.ToleranceMm)
-                        plan.Review.Add(VerticalPlacement.PlacedAwayReason(leftMm));
+                        plan.Review.Add(snapped ? VerticalPlacement.PlacedAwayFromTargetReason(leftMm) : VerticalPlacement.PlacedAwayReason(leftMm));
                 }
             }
             else if (hit != null && ptype == FamilyPlacementType.WorkPlaneBased)
@@ -938,6 +968,8 @@ namespace CAD2Revit.Revit
         }
 
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+        ImportInstance _dwg;      // the DWG being placed (for its wall/column line work)
+        EdgeFinder _edges;        // vertical plane orientation (built on first use)
 
         /// <summary>Base point farther than this (mm, plan) from the drawn symbol: Needs Review.</summary>
         const double BaseOffsetReviewMm = 150;
@@ -982,15 +1014,17 @@ namespace CAD2Revit.Revit
             double limitMm = _slab.ReviewDistanceMm > 0 ? _slab.ReviewDistanceMm : VerticalPlacement.DefaultReviewDistanceMm;
             foreach (var c in created)
             {
-                if (c.CadPoint == null || c.Result == null) continue;
+                var intended = c.Intended ?? c.CadPoint;
+                if (intended == null || c.Result == null) continue;
                 if (!(_doc.GetElement(c.Id) is FamilyInstance fi) || !(fi.Location is LocationPoint lp)) continue;
-                double mm = VerticalPlacement.PlanDistanceMm(V(lp.Point), V(c.CadPoint));
+                double mm = VerticalPlacement.PlanDistanceMm(V(lp.Point), V(intended));
+                bool atCad = c.CadPoint == null || VerticalPlacement.PlanDistanceMm(V(intended), V(c.CadPoint)) < 1;
                 if (mm <= limitMm) continue;
                 var parts = (c.Result.Review ?? "").Split(new[] { "; " }, StringSplitOptions.RemoveEmptyEntries)
                     .Where(t => !VerticalPlacement.IsPlacedAwayReason(t)).ToList();
-                parts.Add(VerticalPlacement.PlacedAwayReason(mm));
+                parts.Add(atCad ? VerticalPlacement.PlacedAwayReason(mm) : VerticalPlacement.PlacedAwayFromTargetReason(mm));
                 c.Result.Review = string.Join("; ", parts);
-                var warn = $"WARNING: placed {mm:0} mm away from its CAD block (more than {limitMm:0} mm) - see Needs Review";
+                var warn = $"WARNING: placed {mm:0} mm away from its {(atCad ? "CAD block" : "intended point")} (more than {limitMm:0} mm) - see Needs Review";
                 c.Result.Message = c.Result.Message.Length > 0 ? c.Result.Message + "; " + warn : warn;
             }
         }

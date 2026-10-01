@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.23.0] - 2026-10-01
+### Changed: vertical reference planes follow the nearest wall or column, not the block rotation
+For Host Type **Vertical plane**, per block:
+1. **Nearest edge** within **Wall/column search** (new box, default 600 mm):
+   - first the side faces of walls and of architectural and structural columns, in this model and in links, that exist at the device height;
+   - else the DWG line work on the **DWG wall/column layers**. That is a new box (wildcards, default `*WALL*, *COL*, *A-WALL*, *S-COLS*`) with an **All layers** option. Lines and polylines (and arcs, tessellated) are collected once from the DWG, ignoring segments under 100 mm and hatch layers. With All layers, lines inside blocks (the device symbols) are skipped;
+   - else the block rotation, with Needs Review: "No wall/column within 600 mm - used block rotation".
+2. **Orientation**: the plane direction is the edge direction, and the family faces away from the wall/column, toward the side the block is on. It is flipped after placing if needed.
+3. **Position** (new option): **Snap to face** (default) puts the plane on the face, with the device at the block point projected onto it. **Through block point** puts the plane through the block point, parallel to the face. A snap of more than 200 mm goes to Needs Review.
+4. **Reuse**: blocks on the same face share one plane (same line within 5 mm and 0.5°).
+5. The **distance check** now measures against each element's **intended point** (the snapped face point, the wall face, or the CAD block), so expected snaps aren't flagged. Elements more than 50 mm from that point go to Needs Review with their Element ID.
+6. **Performance**: walls, columns and DWG segments are indexed once per run in a grid (`EdgeIndex`), so each block only checks the nearby cells. It all still runs in one transaction.
+- All new options are saved with the mapping: `Vertical_Edge_Search_mm`, `Vertical_Plane_Position`, `DWG_Wall_Layers`, `DWG_All_Layers`.
+- New Core classes `EdgeIndex`, `EdgeSnap` and `LayerFilter`, with tests.
+
 ## [0.22.0] - 2026-10-01
 ### Fixed: one block type lands away from its CAD symbol
 When only one block goes wrong, the cause is usually in how that block was drawn:

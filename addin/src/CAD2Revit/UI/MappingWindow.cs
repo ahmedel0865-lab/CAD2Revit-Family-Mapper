@@ -679,6 +679,18 @@ namespace CAD2Revit.UI
         readonly TextBox _reviewDistance = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
             ToolTip = "All host types: after placing, any element farther than this (mm, in plan) from its CAD block is listed in Needs Review." };
 
+        readonly TextBox _edgeSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "Vertical planes: look this far (mm) from the block for the nearest wall or column face (this model and links), " +
+                      "then for a DWG wall/column line. The plane is made parallel to it." };
+        readonly ComboBox _planePosition = new ComboBox { Width = 140, ItemsSource = new[] { "Snap to face", "Through block point" },
+            ToolTip = "Snap to face: the plane is on the wall/column face and the device sits on it (block point projected onto the face). " +
+                      "Through block point: the plane passes through the block point, parallel to the face." };
+        readonly TextBox _dwgLayers = new TextBox { Width = 220, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "DWG layers with wall/column lines, used when no Revit wall or column is near: wildcards, comma separated " +
+                      "(e.g. *WALL*, *COL*, *A-WALL*, *S-COLS*). Hatch layers and lines shorter than 100 mm are ignored." };
+        readonly CheckBox _allDwgLayers = new CheckBox { Content = "All layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+            ToolTip = "Use line work on every DWG layer (except hatch layers and lines inside blocks)." };
+
         UIElement BuildSlabOptions()
         {
             var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -690,6 +702,14 @@ namespace CAD2Revit.UI
             bar.Children.Add(new TextBlock { Text = "Wall:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 10, 0) });
             bar.Children.Add(new TextBlock { Text = "Search distance (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             bar.Children.Add(_wallSearch);
+            bar.Children.Add(new TextBlock { Text = "Vertical planes:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 10, 0) });
+            bar.Children.Add(new TextBlock { Text = "Wall/column search (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            bar.Children.Add(_edgeSearch);
+            bar.Children.Add(new TextBlock { Text = "Position", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
+            bar.Children.Add(_planePosition);
+            bar.Children.Add(new TextBlock { Text = "DWG wall/column layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
+            bar.Children.Add(_dwgLayers);
+            bar.Children.Add(_allDwgLayers);
             bar.Children.Add(new TextBlock { Text = "Review if farther than (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 6, 0) });
             bar.Children.Add(_reviewDistance);
             ShowSlabOptions();
@@ -697,6 +717,11 @@ namespace CAD2Revit.UI
             _slabPlane.TextChanged += (o, e) => ReadSlabOptions();
             _wallSearch.TextChanged += (o, e) => ReadSlabOptions();
             _reviewDistance.TextChanged += (o, e) => ReadSlabOptions();
+            _edgeSearch.TextChanged += (o, e) => ReadSlabOptions();
+            _planePosition.SelectionChanged += (o, e) => ReadSlabOptions();
+            _dwgLayers.TextChanged += (o, e) => ReadSlabOptions();
+            _allDwgLayers.Checked += (o, e) => { _dwgLayers.IsEnabled = false; ReadSlabOptions(); };
+            _allDwgLayers.Unchecked += (o, e) => { _dwgLayers.IsEnabled = true; ReadSlabOptions(); };
             return bar;
         }
 
@@ -706,6 +731,11 @@ namespace CAD2Revit.UI
             _slabPlane.Text = _s.Slab.FallbackPlaneMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _wallSearch.Text = _s.Slab.WallSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _reviewDistance.Text = _s.Slab.ReviewDistanceMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            _edgeSearch.Text = _s.Slab.EdgeSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            _planePosition.SelectedItem = Mapping.PlanePositionText(_s.Slab.PlanePosition);
+            _dwgLayers.Text = _s.Slab.DwgLayers ?? "";
+            _allDwgLayers.IsChecked = _s.Slab.AllDwgLayers;
+            _dwgLayers.IsEnabled = !_s.Slab.AllDwgLayers;
         }
 
         /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
@@ -725,12 +755,20 @@ namespace CAD2Revit.UI
             bool reviewOk = review.HasValue && review.Value > 0 && _reviewDistance.Text.Trim().Length > 0;
             if (reviewOk) _s.Slab.ReviewDistanceMm = review.Value;
             _reviewDistance.BorderBrush = reviewOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
+            var edge = Mapping.ParseNumber(_edgeSearch.Text);
+            bool edgeOk = edge.HasValue && edge.Value > 0 && _edgeSearch.Text.Trim().Length > 0;
+            if (edgeOk) _s.Slab.EdgeSearchMm = edge.Value;
+            _edgeSearch.BorderBrush = edgeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
+            if (_planePosition.SelectedItem is string pos && Mapping.ParsePlanePosition(pos) is PlanePosition pp) _s.Slab.PlanePosition = pp;
+            _s.Slab.DwgLayers = _dwgLayers.Text ?? "";
+            _s.Slab.AllDwgLayers = _allDwgLayers.IsChecked == true;
             _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             return !rangeOk ? "Slab search range must be a number of mm greater than 0."
                  : !planeOk ? "Fallback reference plane height must be a number of mm."
                  : !wallOk ? "Wall search distance must be a number of mm greater than 0."
                  : !reviewOk ? "Review distance must be a number of mm greater than 0."
+                 : !edgeOk ? "Vertical plane wall/column search must be a number of mm greater than 0."
                  : null;
         }
 

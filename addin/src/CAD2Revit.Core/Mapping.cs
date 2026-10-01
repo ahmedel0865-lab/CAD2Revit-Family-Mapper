@@ -45,8 +45,16 @@ namespace CAD2Revit.Core
         public double WallSearchMm = DefaultWallSearchMm;
         /// <summary>All host types: an element placed farther than this (mm, in plan) from its CAD block goes to Needs Review.</summary>
         public double ReviewDistanceMm = DefaultReviewDistanceMm;
+        /// <summary>Vertical planes: search radius (mm) for the nearest wall/column face or DWG wall line.</summary>
+        public double EdgeSearchMm = EdgeSnap.DefaultSearchMm;
+        /// <summary>Vertical planes: Snap to face (default) or Through block point.</summary>
+        public PlanePosition PlanePosition = PlanePosition.SnapToFace;
+        /// <summary>Vertical planes: DWG layers with wall/column lines (wildcards), and "All layers".</summary>
+        public string DwgLayers = EdgeSnap.DefaultLayers;
+        public bool AllDwgLayers;
 
-        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm, ReviewDistanceMm = ReviewDistanceMm };
+        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm, ReviewDistanceMm = ReviewDistanceMm,
+            EdgeSearchMm = EdgeSearchMm, PlanePosition = PlanePosition, DwgLayers = DwgLayers, AllDwgLayers = AllDwgLayers };
     }
 
     public class MappingResult
@@ -74,7 +82,8 @@ namespace CAD2Revit.Core
         };
 
         /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
-        public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm", "Review_Distance_mm" };
+        public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm", "Review_Distance_mm",
+            "Vertical_Edge_Search_mm", "Vertical_Plane_Position", "DWG_Wall_Layers", "DWG_All_Layers" };
 
         // Accepted header spellings, compared after lower-casing and removing
         // everything that is not a letter/digit ("Offset_From_Level (mm)" ==
@@ -95,6 +104,10 @@ namespace CAD2Revit.Core
             ["slabplane"] = new[] { "slabfallbackplanemm", "slabfallbackplane", "fallbackreferenceplaneheightmm", "fallbackplanemm" },
             ["wallsearch"] = new[] { "wallsearchdistancemm", "wallsearchdistance", "wallsearchmm", "wallsearch" },
             ["reviewdistance"] = new[] { "reviewdistancemm", "reviewdistance", "maxdistancemm" },
+            ["edgesearch"] = new[] { "verticaledgesearchmm", "edgesearchmm", "edgesearch" },
+            ["planeposition"] = new[] { "verticalplaneposition", "planeposition" },
+            ["dwglayers"] = new[] { "dwgwalllayers", "dwglayers", "walllayers" },
+            ["dwgalllayers"] = new[] { "dwgalllayers", "alllayers" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -170,6 +183,16 @@ namespace CAD2Revit.Core
             return null;
         }
 
+        public static PlanePosition? ParsePlanePosition(string text)
+        {
+            var n = Norm(text);
+            if (n.Length == 0 || n == "snaptoface" || n == "snap" || n == "face") return PlanePosition.SnapToFace;
+            if (n == "throughblockpoint" || n == "throughpoint" || n == "blockpoint" || n == "through") return PlanePosition.ThroughBlockPoint;
+            return null;
+        }
+
+        public static string PlanePositionText(PlanePosition p) => p == PlanePosition.ThroughBlockPoint ? "Through block point" : "Snap to face";
+
         public static string PlaceAtText(PlaceAt p) => p == PlaceAt.SymbolCentre ? "Symbol centre" : "Base point";
 
         /// <summary>Writes rows in the standard mapping format (.xlsx or .csv).
@@ -183,6 +206,7 @@ namespace CAD2Revit.Core
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
                 PlaceAtText(r.PlaceAt),
                 slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm, slab.ReviewDistanceMm,
+                slab.EdgeSearchMm, PlanePositionText(slab.PlanePosition), slab.DwgLayers ?? "", slab.AllDwgLayers ? "yes" : "no",
             }).ToList());
         }
 
@@ -261,7 +285,19 @@ namespace CAD2Revit.Core
             if (wall.HasValue) result.Slab.WallSearchMm = wall.Value;
             var review = First("reviewdistance", v => v > 0);
             if (review.HasValue) result.Slab.ReviewDistanceMm = review.Value;
-            result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue || review.HasValue;
+            var edge = First("edgesearch", v => v > 0);
+            if (edge.HasValue) result.Slab.EdgeSearchMm = edge.Value;
+            string FirstText(string field) =>
+                cols.ContainsKey(field) ? rows.Select(r => Get(r, field)).FirstOrDefault(t => t.Length > 0) : null;
+            var pos = FirstText("planeposition");
+            bool hasPos = pos != null && ParsePlanePosition(pos).HasValue;
+            if (hasPos) result.Slab.PlanePosition = ParsePlanePosition(pos).Value;
+            var layers = FirstText("dwglayers");
+            if (layers != null) result.Slab.DwgLayers = layers;
+            var all = FirstText("dwgalllayers");
+            if (all != null) result.Slab.AllDwgLayers = Norm(all) == "yes" || Norm(all) == "true" || all.Trim() == "1";
+            result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue || review.HasValue || edge.HasValue ||
+                                    hasPos || layers != null || all != null;
 
             int line = 1;
             foreach (var r in rows)

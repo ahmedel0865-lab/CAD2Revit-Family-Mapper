@@ -74,8 +74,12 @@ namespace CAD2Revit.Core
         /// <summary>The Needs Review reason: "Placed 123 mm away from CAD block".</summary>
         public static string PlacedAwayReason(double mm) => $"Placed {mm:0} mm away from CAD block";
 
+        /// <summary>"Placed 75 mm away from its intended point" (the snapped face point, wall face, ...).</summary>
+        public static string PlacedAwayFromTargetReason(double mm) => $"Placed {mm:0} mm away from its intended point";
+
         public static bool IsPlacedAwayReason(string text) =>
-            text != null && text.StartsWith("Placed ", StringComparison.Ordinal) && text.EndsWith(" mm away from CAD block", StringComparison.Ordinal);
+            text != null && text.StartsWith("Placed ", StringComparison.Ordinal) &&
+            (text.EndsWith(" mm away from CAD block", StringComparison.Ordinal) || text.EndsWith(" mm away from its intended point", StringComparison.Ordinal));
 
         /// <summary>Horizontal facing (plane normal) for a block rotation in radians:
         /// 0 = north (+Y), 90 deg = west, 180 deg = south, 270 deg = east.</summary>

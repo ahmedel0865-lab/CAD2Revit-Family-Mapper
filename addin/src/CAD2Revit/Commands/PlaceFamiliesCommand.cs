@@ -114,7 +114,7 @@ namespace CAD2Revit.Commands
                         using (var progress = new ProgressWindow(preview ? "CAD2Revit - Preview" : "CAD2Revit - Placing families",
                                                                  uiapp.MainWindowHandle))
                             results = placer.PlaceAll(blocks, mapping, symbols, opts.Level, preview,
-                                                                         progress.Report, DwgExtents(opts.Import), timer);
+                                                                         progress.Report, DwgExtents(opts.Import), timer, opts.Import);
                     }
                     catch (OperationCanceledException)
                     {
