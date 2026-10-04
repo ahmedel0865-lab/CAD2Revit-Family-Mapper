@@ -28,7 +28,7 @@ namespace CAD2Revit.Core
         public Facing Facing = Facing.Down;   // used by HostMode.RefPlane
         public string LevelName = "";         // "" = the level chosen when running
         public string Category = "";          // Electrical / Architectural / ... ("" = auto)
-        public PlaceAt PlaceAt = PlaceAt.BasePoint;
+        public PlaceAt PlaceAt = PlaceAt.SymbolCentre;
         public int Line;   // row number in the source file (for messages)
 
         public string Label => Family + " : " + TypeName;
@@ -172,11 +172,12 @@ namespace CAD2Revit.Core
             return null;
         }
 
-        /// <summary>"" / "base point" / "insertion point" -> BasePoint; "symbol centre" / "center" -> SymbolCentre; else null.</summary>
+        /// <summary>"" / "symbol centre" / "center" -> SymbolCentre (the default); "base point" / "insertion point" -> BasePoint; else null.</summary>
         public static PlaceAt? ParsePlaceAt(string text)
         {
             var n = Norm(text);
-            if (n.Length == 0 || n == "basepoint" || n == "base" || n == "insertionpoint" || n == "insertion" || n == "origin")
+            if (n.Length == 0) return PlaceAt.SymbolCentre;
+            if (n == "basepoint" || n == "base" || n == "insertionpoint" || n == "insertion" || n == "origin")
                 return PlaceAt.BasePoint;
             if (n == "symbolcentre" || n == "symbolcenter" || n == "centre" || n == "center" || n == "symbol" || n == "geometrycentre" || n == "geometrycenter")
                 return PlaceAt.SymbolCentre;
@@ -342,8 +343,8 @@ namespace CAD2Revit.Core
                 var placeAt = ParsePlaceAt(Get(r, "placeat"));
                 if (placeAt == null)
                 {
-                    result.Errors.Add($"Row {line}: Place_At '{Get(r, "placeat")}' not recognised (use Base point / Symbol centre) - using Base point");
-                    placeAt = PlaceAt.BasePoint;
+                    result.Errors.Add($"Row {line}: Place_At '{Get(r, "placeat")}' not recognised (use Symbol centre / Base point) - using Symbol centre");
+                    placeAt = PlaceAt.SymbolCentre;
                 }
                 if (result.Rows.ContainsKey(block))
                     result.Errors.Add($"Row {line}: block '{block}' is mapped twice - last row wins");

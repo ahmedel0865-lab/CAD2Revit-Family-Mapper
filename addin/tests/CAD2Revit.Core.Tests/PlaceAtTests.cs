@@ -8,7 +8,7 @@ namespace CAD2Revit.Core.Tests
     public class PlaceAtTests
     {
         [Theory]
-        [InlineData("", PlaceAt.BasePoint)]
+        [InlineData("", PlaceAt.SymbolCentre)]
         [InlineData("Base point", PlaceAt.BasePoint)]
         [InlineData("insertion point", PlaceAt.BasePoint)]
         [InlineData("Symbol centre", PlaceAt.SymbolCentre)]
@@ -20,6 +20,22 @@ namespace CAD2Revit.Core.Tests
         public void UnknownPlaceAtIsNull() => Assert.Null(Mapping.ParsePlaceAt("left corner"));
 
         [Fact]
+        public void SymbolCentreIsTheDefault()
+        {
+            Assert.Equal(PlaceAt.SymbolCentre, new MapRow().PlaceAt);
+            // A mapping saved before Place_At existed (no column) loads as Symbol centre.
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "c2r_placeat_old_" + Guid.NewGuid().ToString("N") + ".csv");
+            try
+            {
+                System.IO.File.WriteAllText(path, "CAD_Block_Name,Revit_Family_Name,Revit_Type_Name\nSOCKET,F,T\n");
+                var m = Mapping.Load(path);
+                Assert.Empty(m.Errors);
+                Assert.Equal(PlaceAt.SymbolCentre, m.Rows["SOCKET"].PlaceAt);
+            }
+            finally { try { System.IO.File.Delete(path); } catch { } }
+        }
+
+        [Fact]
         public void PlaceAtIsSavedAndLoaded()
         {
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "c2r_placeat_" + Guid.NewGuid().ToString("N") + ".csv");
@@ -28,7 +44,7 @@ namespace CAD2Revit.Core.Tests
                 Mapping.Save(path, new[]
                 {
                     new MapRow { Block = "WALL-LIGHT", Family = "F", TypeName = "T", Host = HostMode.Vertical, PlaceAt = PlaceAt.SymbolCentre },
-                    new MapRow { Block = "SOCKET", Family = "F", TypeName = "T", Host = HostMode.Wall },
+                    new MapRow { Block = "SOCKET", Family = "F", TypeName = "T", Host = HostMode.Wall, PlaceAt = PlaceAt.BasePoint },
                 });
                 var m = Mapping.Load(path);
                 Assert.Empty(m.Errors);

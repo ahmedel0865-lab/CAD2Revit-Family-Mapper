@@ -82,7 +82,7 @@ Host types:
 
 The elevation is also the fallback height if a ceiling is not found.
 
-**Place At (per row):** use *Symbol centre* when a block's base point is not where its symbol is drawn. A typical case is a wall light whose base point is on the wall line and whose circle is in the room: with *Base point* the family sits on the wall line, away from the circle. When a block's base point is more than 150 mm from its symbol, the block is listed in Needs Review as "Block base point is N mm from its symbol - set Place At = Symbol centre" (not for Wall rows, where the base point is often on the wall on purpose). **Mirrored blocks** face the side their symbol is drawn on: the facing comes from the block's real +Y axis, not from its rotation.
+**Place At (per row):** the default is *Symbol centre*, so the family lands on the drawn symbol even when the block's base point is elsewhere. Pick *Base point* when the insertion point is the exact location. A typical case is a wall light whose base point is on the wall line and whose circle is in the room: with *Base point* the family sits on the wall line, away from the circle. With *Base point*, when a block's base point is more than 150 mm from its symbol, the block is listed in Needs Review as "Block base point is N mm from its symbol - set Place At = Symbol centre" (not for Wall rows, where the base point is often on the wall on purpose). **Mirrored blocks** face the side their symbol is drawn on: the facing comes from the block's real +Y axis, not from its rotation.
 
 **Final distance check (all host types):** after placing, every element's location is compared with its CAD block in plan. Anything farther than **Review if farther than (mm)** (above the grid, default 50 mm, saved with the mapping as `Review_Distance_mm`) from its **intended point** is listed in **Needs Review** with its Element ID. The intended point is the CAD block, or the wall face / snapped face point the tool chose. A warning also appears in the result window.
 
@@ -115,7 +115,7 @@ The mapping window lists every block name with its count. **Save** writes the ma
 | Offset_From_Level_mm | `2800` | Elevation from level. |
 | Rotation_Adjustment_deg | `90` | Rotation adjustment. |
 | Host_Type | `ceiling` | `non-hosted`, `ceiling`, `slab above`, `slab below`, `wall`, `reference plane`, `face` or `vertical` (the window's labels are accepted too). |
-| Place_At | `Symbol centre` | Optional. `Base point` (default): the family goes on the block's insertion point. `Symbol centre`: it goes on the centre of the drawn symbol (its bounding box). Use this for blocks whose base point is away from the symbol, for example on the wall line. |
+| Place_At | `Symbol centre` | Optional. `Symbol centre` (default, also when empty or the column is missing): the family goes on the centre of the drawn symbol (its bounding box). `Base point`: it goes on the block's insertion point. |
 | Facing | `Down` | Optional. `Down` (default) or `Up`, for reference-plane rows. |
 | Category | `Electrical` | Optional. Electrical / Mechanical / Plumbing / Architectural / Structural / Annotation / Other; empty = detected from the name. |
 

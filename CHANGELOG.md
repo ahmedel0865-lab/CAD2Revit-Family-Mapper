@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0] - 2026-10-04
+### Changed: Place At defaults to Symbol centre
+- New rows and the mapping window now use **Symbol centre**, so the family lands on the drawn CAD symbol, not on the block's base point.
+- An empty `Place_At` cell, or a mapping saved before the column existed, now loads as Symbol centre. Rows saved with `Base point` keep it.
+- Blocks with no line work still fall back to their base point (noted in the result message).
+- Test for the new default.
+
 ## [0.23.0] - 2026-10-01
 ### Changed: vertical reference planes follow the nearest wall or column, not the block rotation
 For Host Type **Vertical plane**, per block:
