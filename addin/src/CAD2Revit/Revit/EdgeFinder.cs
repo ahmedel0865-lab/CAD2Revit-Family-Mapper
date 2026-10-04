@@ -15,12 +15,11 @@ namespace CAD2Revit.Revit
     }
 
     /// <summary>
-    /// Edges that orient vertical reference planes (Host Type "Vertical plane"):
-    /// 1. the side faces of Revit walls and columns, in this model and in Revit links;
-    /// 2. else walls and columns DETECTED in the DWG line work from their shapes (parallel line
-    ///    pairs, small closed shapes, circles - see Core.CadDetector), not from layer names.
-    /// The Revit elements and the DWG curves are each read ONCE per run into grid indexes; each
-    /// block then only looks at the few lines in the cells around it.
+    /// Edges that orient vertical reference planes (Host Type "Vertical plane"): the plan lines
+    /// of wall side faces and column side faces, in this model and in Revit links, and - when no
+    /// Revit wall/column is near - the line work of the DWG on the wall/column layers.
+    /// Everything is collected ONCE per run into grid indexes (Core.EdgeIndex); each block then
+    /// only looks at the few segments in the cells around it.
     /// </summary>
     class EdgeFinder
     {
@@ -28,51 +27,31 @@ namespace CAD2Revit.Revit
         readonly bool _searchLinks;
         readonly ImportInstance _dwg;
         readonly SlabOptions _opts;
-        readonly HashSet<string> _exclude;
         readonly double _radiusFt;
-        EdgeIndex<EdgeInfo> _revit;
-        CadDetector _cad;
+        EdgeIndex<EdgeInfo> _revit, _cad;
 
-        /// <param name="excludeBlocks">DWG block names (as Revit reports them) whose line work is
-        /// ignored: the blocks being converted.</param>
-        public EdgeFinder(Document doc, bool searchLinks, ImportInstance dwg, SlabOptions opts, IEnumerable<string> excludeBlocks)
+        public int RevitEdges => _revit?.Count ?? 0;
+        public int DwgEdges => _cad?.Count ?? 0;
+
+        public EdgeFinder(Document doc, bool searchLinks, ImportInstance dwg, SlabOptions opts)
         {
             _doc = doc;
             _searchLinks = searchLinks;
             _dwg = dwg;
             _opts = opts ?? new SlabOptions();
-            _exclude = new HashSet<string>(excludeBlocks ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             _radiusFt = Math.Max(_opts.EdgeSearchMm, 1) / EdgeSnap.MmPerFoot;
         }
 
-        /// <summary>DWG statistics for the log.</summary>
-        public string DwgSummary => _cad == null ? "" :
-            $"DWG detection: {_cad.Segments} lines, {_cad.Columns} columns, {_cad.IgnoredShort} short lines and {_cad.IgnoredDoorArcs} door swings ignored";
-
-        /// <summary>Nearest Revit wall/column face within the radius that exists at height z (the
-        /// family faces the block's side of it), else the face of a wall/column detected in the
-        /// DWG, else null.</summary>
-        public CadFace Find(double x, double y, double z, V3 blockFacing)
+        /// <summary>Nearest Revit wall/column face within the radius that exists at height z,
+        /// else the nearest DWG wall/column line, else null.</summary>
+        public EdgeHit<EdgeInfo> Find(double x, double y, double z)
         {
             if (_revit == null) BuildRevit();
             const double tol = 0.5;   // ft: walls/columns that reach the device height (with a margin)
             var hit = _revit.Nearest(x, y, _radiusFt, e => z >= e.ZMin - tol && z <= e.ZMax + tol);
-            if (hit != null)
-            {
-                var a = new V3(hit.X1, hit.Y1, 0);
-                var b = new V3(hit.X2, hit.Y2, 0);
-                var d = (b - a).Normalize();
-                var n = new V3(-d.Y, d.X, 0);
-                double side = n.Dot(new V3(x, y, 0) - a);
-                if (Math.Abs(side) * EdgeSnap.MmPerFoot < 0.5) side = n.Dot(blockFacing);
-                return new CadFace
-                {
-                    A = a, B = b, Outward = side >= 0 ? n : n * -1, DistanceFt = hit.DistanceFt, Label = hit.Payload.Label,
-                    Key = $"R{hit.X1:0.###}_{hit.Y1:0.###}_{hit.X2:0.###}_{hit.Y2:0.###}", Outline = { (a, b) },
-                };
-            }
+            if (hit != null) return hit;
             if (_cad == null) BuildDwg();
-            return _cad.Find(x, y);
+            return _cad.Nearest(x, y, _radiusFt);
         }
 
         IEnumerable<(Document doc, RevitLinkInstance link, Transform tf, string name)> Sources()
@@ -177,74 +156,63 @@ namespace CAD2Revit.Revit
             }
         }
 
-        /// <summary>Every curve of the DWG, in model coordinates, read once: lines, polylines,
-        /// arcs and circles, including those inside blocks and xrefs (architectural backgrounds are
-        /// often blocks) - except inside the blocks being converted, dimension blocks, and on
-        /// hatch / dimension / text layers. Door swings and lines under 100 mm are dropped by the
-        /// detector.</summary>
+        /// <summary>DWG line work on the wall/column layers (or all layers), segments of 100 mm and
+        /// more, no hatch layers. With "All layers" only the drawing's own line work is used (not
+        /// lines inside blocks, which are the device symbols); with a layer list, blocks are
+        /// searched too (walls are sometimes drawn as blocks or xrefs).</summary>
         void BuildDwg()
         {
-            _cad = new CadDetector(_opts.Detect());
+            _cad = new EdgeIndex<EdgeInfo>(_radiusFt);
             if (_dwg == null) return;
+            var patterns = LayerFilter.Parse(_opts.DwgLayers);
+            bool all = _opts.AllDwgLayers;
+            if (!all && patterns.Count == 0) return;
             var opts = new Options { ComputeReferences = false, IncludeNonVisibleObjects = false };
             if (_dwg.ViewSpecific) opts.View = _doc.GetElement(_dwg.OwnerViewId) as View;
             else opts.DetailLevel = ViewDetailLevel.Coarse;
-            var junk = new Dictionary<ElementId, bool>();
-            bool Junk(GeometryObject g)
+            var layerOk = new Dictionary<ElementId, (bool ok, string name)>();
+            (bool ok, string name) Layer(GeometryObject g)
             {
                 var id = g.GraphicsStyleId;
-                if (id == null || id == ElementId.InvalidElementId) return false;
-                if (junk.TryGetValue(id, out var r)) return r;
+                if (id == null || id == ElementId.InvalidElementId) return (all, "");
+                if (layerOk.TryGetValue(id, out var r)) return r;
                 string name = "";
                 try { name = (_doc.GetElement(id) as GraphicsStyle)?.GraphicsStyleCategory?.Name ?? ""; } catch (Exception) { }
-                return junk[id] = LayerFilter.IsJunk(name);
+                r = (LayerFilter.Matches(name, patterns, all), name);
+                layerOk[id] = r;
+                return r;
             }
-            V3 P(Transform tf, XYZ p) { var q = tf.OfPoint(p); return new V3(q.X, q.Y, 0); }
-            List<V3> Pts(Transform tf, IList<XYZ> pts) => pts.Select(p => P(tf, p)).ToList();
+            double minFt = EdgeSnap.MinSegmentMm / EdgeSnap.MmPerFoot;
+            void AddSeg(XYZ a, XYZ b, string layer)
+            {
+                if (new XYZ(b.X - a.X, b.Y - a.Y, 0).GetLength() < minFt) return;
+                _cad.Add(a.X, a.Y, b.X, b.Y, new EdgeInfo { Source = EdgeSource.Dwg, Label = "DWG line on layer " + layer });
+            }
             void Walk(GeometryElement geo, Transform tf, int depth)
             {
-                if (geo == null || depth > 8) return;
+                if (geo == null || depth > 6) return;
                 foreach (var obj in geo)
                 {
-                    try
+                    if (obj is GeometryInstance gi)
                     {
-                        if (obj is GeometryInstance gi)
-                        {
-                            // depth 0: the DWG itself. Deeper: blocks/xrefs, except the devices being
-                            // converted and dimension blocks (anonymous *D...).
-                            if (depth > 0)
-                            {
-                                var name = (DwgReader.SymbolName(_doc, gi) ?? "").Trim();
-                                if (_exclude.Contains(name) || name.StartsWith("*D", StringComparison.OrdinalIgnoreCase)) continue;
-                            }
-                            Walk(gi.GetSymbolGeometry(), tf.Multiply(gi.Transform), depth + 1);
-                            continue;
-                        }
-                        if (!(obj is Curve) && !(obj is PolyLine)) continue;   // solids/meshes: fills, text
-                        if (Junk(obj)) continue;
-                        switch (obj)
-                        {
-                            case Line line:
-                                _cad.AddLine(P(tf, line.GetEndPoint(0)), P(tf, line.GetEndPoint(1)));
-                                break;
-                            case PolyLine pl:
-                                _cad.AddPolyline(Pts(tf, pl.GetCoordinates()));
-                                break;
-                            case Arc arc:
-                            {
-                                double scale = tf.BasisX.GetLength();
-                                double r = arc.Radius * scale;
-                                if (!arc.IsBound) { _cad.AddCircle(P(tf, arc.Center), r); break; }
-                                double sweep = arc.Length / Math.Max(arc.Radius, 1e-9);
-                                _cad.AddArc(Pts(tf, arc.Tessellate()), r, sweep);
-                                break;
-                            }
-                            case Curve c when c.IsBound:
-                                _cad.AddCurve(Pts(tf, c.Tessellate()));
-                                break;
-                        }
+                        // depth 0: the DWG itself; deeper: blocks (skipped with "All layers").
+                        if (depth == 0 || !all) Walk(gi.GetSymbolGeometry(), tf.Multiply(gi.Transform), depth + 1);
+                        continue;
                     }
-                    catch (Exception) { /* unreadable geometry: skip it */ }
+                    if (!(obj is Curve) && !(obj is PolyLine)) continue;
+                    var (ok, layer) = Layer(obj);
+                    if (!ok) continue;
+                    if (obj is Line line) AddSeg(tf.OfPoint(line.GetEndPoint(0)), tf.OfPoint(line.GetEndPoint(1)), layer);
+                    else if (obj is PolyLine pl)
+                    {
+                        var pts = pl.GetCoordinates();
+                        for (int i = 0; i + 1 < pts.Count; i++) AddSeg(tf.OfPoint(pts[i]), tf.OfPoint(pts[i + 1]), layer);
+                    }
+                    else if (obj is Curve c && c.IsBound)
+                    {
+                        var pts = c.Tessellate();
+                        for (int i = 0; i + 1 < pts.Count; i++) AddSeg(tf.OfPoint(pts[i]), tf.OfPoint(pts[i + 1]), layer);
+                    }
                 }
             }
             try { Walk(_dwg.get_Geometry(opts), Transform.Identity, 0); } catch (Exception) { }

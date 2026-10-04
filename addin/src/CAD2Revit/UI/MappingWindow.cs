@@ -680,19 +680,16 @@ namespace CAD2Revit.UI
             ToolTip = "All host types: after placing, any element farther than this (mm, in plan) from its CAD block is listed in Needs Review." };
 
         readonly TextBox _edgeSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Vertical planes: look this far (mm) from the block for the nearest wall or column face (Revit walls/columns in " +
-                      "this model and links, else walls and columns detected in the DWG line work). The plane is made parallel to it." };
+            ToolTip = "Vertical planes: look this far (mm) from the block for the nearest wall or column face (this model and links), " +
+                      "then for a DWG wall/column line. The plane is made parallel to it." };
         readonly ComboBox _planePosition = new ComboBox { Width = 140, ItemsSource = new[] { "Snap to face", "Through block point" },
             ToolTip = "Snap to face: the plane is on the wall/column face and the device sits on it (block point projected onto the face). " +
                       "Through block point: the plane passes through the block point, parallel to the face." };
-        static TextBox RangeBox(string tip) => new TextBox { Width = 45, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = tip };
-        readonly TextBox _wallMin = RangeBox("DWG walls: two parallel lines (less than 1 deg apart, overlapping 300 mm or more) at least this far apart (mm) are a wall.");
-        readonly TextBox _wallMax = RangeBox("DWG walls: two parallel lines at most this far apart (mm) are a wall.");
-        readonly TextBox _colMin = RangeBox("DWG columns: closed shapes (rectangles, polygons) and circles at least this big (mm, sides or diameter) are columns.");
-        readonly TextBox _colMax = RangeBox("DWG columns: closed shapes and circles at most this big (mm) are columns.");
-        readonly CheckBox _showDetection = new CheckBox { Content = "Show detection", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
-            ToolTip = "After Preview or Run, draw the detected wall faces and column sides as red detail lines in the active plan view. " +
-                      "They are deleted afterwards unless you choose to keep them." };
+        readonly TextBox _dwgLayers = new TextBox { Width = 220, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "DWG layers with wall/column lines, used when no Revit wall or column is near: wildcards, comma separated " +
+                      "(e.g. *WALL*, *COL*, *A-WALL*, *S-COLS*). Hatch layers and lines shorter than 100 mm are ignored." };
+        readonly CheckBox _allDwgLayers = new CheckBox { Content = "All layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+            ToolTip = "Use line work on every DWG layer (except hatch layers and lines inside blocks)." };
 
         UIElement BuildSlabOptions()
         {
@@ -710,15 +707,9 @@ namespace CAD2Revit.UI
             bar.Children.Add(_edgeSearch);
             bar.Children.Add(new TextBlock { Text = "Position", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
             bar.Children.Add(_planePosition);
-            bar.Children.Add(new TextBlock { Text = "DWG wall thickness (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
-            bar.Children.Add(_wallMin);
-            bar.Children.Add(new TextBlock { Text = "to", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) });
-            bar.Children.Add(_wallMax);
-            bar.Children.Add(new TextBlock { Text = "Column size (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
-            bar.Children.Add(_colMin);
-            bar.Children.Add(new TextBlock { Text = "to", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) });
-            bar.Children.Add(_colMax);
-            bar.Children.Add(_showDetection);
+            bar.Children.Add(new TextBlock { Text = "DWG wall/column layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
+            bar.Children.Add(_dwgLayers);
+            bar.Children.Add(_allDwgLayers);
             bar.Children.Add(new TextBlock { Text = "Review if farther than (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 6, 0) });
             bar.Children.Add(_reviewDistance);
             ShowSlabOptions();
@@ -728,9 +719,9 @@ namespace CAD2Revit.UI
             _reviewDistance.TextChanged += (o, e) => ReadSlabOptions();
             _edgeSearch.TextChanged += (o, e) => ReadSlabOptions();
             _planePosition.SelectionChanged += (o, e) => ReadSlabOptions();
-            foreach (var box in new[] { _wallMin, _wallMax, _colMin, _colMax }) box.TextChanged += (o, e) => ReadSlabOptions();
-            _showDetection.Checked += (o, e) => ReadSlabOptions();
-            _showDetection.Unchecked += (o, e) => ReadSlabOptions();
+            _dwgLayers.TextChanged += (o, e) => ReadSlabOptions();
+            _allDwgLayers.Checked += (o, e) => { _dwgLayers.IsEnabled = false; ReadSlabOptions(); };
+            _allDwgLayers.Unchecked += (o, e) => { _dwgLayers.IsEnabled = true; ReadSlabOptions(); };
             return bar;
         }
 
@@ -742,11 +733,9 @@ namespace CAD2Revit.UI
             _reviewDistance.Text = _s.Slab.ReviewDistanceMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _edgeSearch.Text = _s.Slab.EdgeSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _planePosition.SelectedItem = Mapping.PlanePositionText(_s.Slab.PlanePosition);
-            _wallMin.Text = _s.Slab.WallMinMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _wallMax.Text = _s.Slab.WallMaxMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _colMin.Text = _s.Slab.ColumnMinMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _colMax.Text = _s.Slab.ColumnMaxMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _showDetection.IsChecked = _s.Slab.ShowDetection;
+            _dwgLayers.Text = _s.Slab.DwgLayers ?? "";
+            _allDwgLayers.IsChecked = _s.Slab.AllDwgLayers;
+            _dwgLayers.IsEnabled = !_s.Slab.AllDwgLayers;
         }
 
         /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
@@ -771,18 +760,8 @@ namespace CAD2Revit.UI
             if (edgeOk) _s.Slab.EdgeSearchMm = edge.Value;
             _edgeSearch.BorderBrush = edgeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             if (_planePosition.SelectedItem is string pos && Mapping.ParsePlanePosition(pos) is PlanePosition pp) _s.Slab.PlanePosition = pp;
-            // Detection ranges: both ends positive and min below max.
-            var wMin = Mapping.ParseNumber(_wallMin.Text);
-            var wMax = Mapping.ParseNumber(_wallMax.Text);
-            var cMin = Mapping.ParseNumber(_colMin.Text);
-            var cMax = Mapping.ParseNumber(_colMax.Text);
-            bool wallRangeOk = wMin > 0 && wMax > 0 && wMin < wMax;
-            bool colRangeOk = cMin > 0 && cMax > 0 && cMin < cMax;
-            if (wallRangeOk) { _s.Slab.WallMinMm = wMin.Value; _s.Slab.WallMaxMm = wMax.Value; }
-            if (colRangeOk) { _s.Slab.ColumnMinMm = cMin.Value; _s.Slab.ColumnMaxMm = cMax.Value; }
-            _wallMin.BorderBrush = _wallMax.BorderBrush = wallRangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            _colMin.BorderBrush = _colMax.BorderBrush = colRangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            _s.Slab.ShowDetection = _showDetection.IsChecked == true;
+            _s.Slab.DwgLayers = _dwgLayers.Text ?? "";
+            _s.Slab.AllDwgLayers = _allDwgLayers.IsChecked == true;
             _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             return !rangeOk ? "Slab search range must be a number of mm greater than 0."
@@ -790,8 +769,6 @@ namespace CAD2Revit.UI
                  : !wallOk ? "Wall search distance must be a number of mm greater than 0."
                  : !reviewOk ? "Review distance must be a number of mm greater than 0."
                  : !edgeOk ? "Vertical plane wall/column search must be a number of mm greater than 0."
-                 : !wallRangeOk ? "DWG wall thickness: enter two numbers of mm, the first smaller than the second."
-                 : !colRangeOk ? "Column size: enter two numbers of mm, the first smaller than the second."
                  : null;
         }
 

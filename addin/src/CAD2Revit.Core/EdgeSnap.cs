@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace CAD2Revit.Core
 {
@@ -75,26 +76,6 @@ namespace CAD2Revit.Core
             return Math.Sqrt(qx * qx + qy * qy);
         }
 
-        /// <summary>Every segment within <paramref name="radiusFt"/> of (x, y), with its distance.</summary>
-        public List<EdgeHit<T>> Within(double x, double y, double radiusFt)
-        {
-            var hits = new List<EdgeHit<T>>();
-            var done = new HashSet<int>();
-            for (long cx = C(x - radiusFt); cx <= C(x + radiusFt); cx++)
-                for (long cy = C(y - radiusFt); cy <= C(y + radiusFt); cy++)
-                {
-                    if (!_grid.TryGetValue((cx, cy), out var list)) continue;
-                    foreach (var i in list)
-                    {
-                        if (!done.Add(i)) continue;
-                        var s = _segs[i];
-                        double d = SegmentDistance(x, y, s.x1, s.y1, s.x2, s.y2);
-                        if (d <= radiusFt) hits.Add(new EdgeHit<T> { X1 = s.x1, Y1 = s.y1, X2 = s.x2, Y2 = s.y2, Payload = s.payload, DistanceFt = d });
-                    }
-                }
-            return hits;
-        }
-
         /// <summary>Nearest segment within <paramref name="radiusFt"/> whose payload passes
         /// <paramref name="accept"/>, or null.</summary>
         public EdgeHit<T> Nearest(double x, double y, double radiusFt, Func<T, bool> accept = null)
@@ -143,9 +124,9 @@ namespace CAD2Revit.Core
         public const double DefaultSearchMm = 600;
         public const double SnapReviewMm = 200;
         public const double MinSegmentMm = 100;
+        public const string DefaultLayers = "*WALL*, *COL*, *A-WALL*, *S-COLS*";
 
-        /// <summary>Needs Review reason when no wall/column was found near the block.</summary>
-        public const string NoEdgeReason = "Wall/column not detected";
+        public static string NoEdgeReason(double radiusMm) => $"No wall/column within {radiusMm:0} mm - used block rotation";
         public static string SnapMovedReason(double mm) => $"Moved {mm:0} mm to snap to the wall/column face";
 
         /// <summary>The plan for a block at <paramref name="block"/> and the edge a-b.
@@ -173,44 +154,30 @@ namespace CAD2Revit.Core
             };
         }
 
-        /// <summary>As <see cref="Plan"/>, but the side is known: the family faces
-        /// <paramref name="outward"/> (away from the wall/column material), whichever side the
-        /// block point is on (a block drawn inside the wall thickness still faces out).</summary>
-        public static EdgePlan PlanOutward(V3 block, V3 a, V3 b, V3 outward, PlanePosition position, double z)
-        {
-            var d = new V3(b.X - a.X, b.Y - a.Y, 0);
-            if (d.Length < 1e-9) d = new V3(-outward.Y, outward.X, 0);
-            d = d.Normalize();
-            var n = new V3(-d.Y, d.X, 0);
-            var facing = n.Dot(outward) >= 0 ? n : n * -1;
-            var rel = new V3(block.X - a.X, block.Y - a.Y, 0);
-            V3 onPlan = position == PlanePosition.SnapToFace
-                ? new V3(a.X, a.Y, 0) + d * d.Dot(rel)
-                : new V3(block.X, block.Y, 0);
-            return new EdgePlan
-            {
-                Point = new V3(onPlan.X, onPlan.Y, z),
-                Facing = facing,
-                Along = new V3(-facing.Y, facing.X, 0),
-                MovedFt = new V3(block.X - onPlan.X, block.Y - onPlan.Y, 0).Length,
-            };
-        }
-
         public static bool NeedsSnapReview(EdgePlan p) => p.MovedFt * MmPerFoot > SnapReviewMm;
     }
 
-    /// <summary>DWG layers whose line work is never a wall or column (hatch patterns, dimensions,
-    /// text). Walls and columns themselves are found from the shapes, not from layer names.</summary>
+    /// <summary>DWG layer filter: comma/semicolon separated wildcards (* and ?), case-insensitive.
+    /// Hatch layers never match (hatch lines are not wall edges).</summary>
     public static class LayerFilter
     {
-        static readonly string[] Junk = { "HATCH", "PATT", "DIM", "TEXT", "TXT" };
+        public static List<Regex> Parse(string patterns) =>
+            (patterns ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim()).Where(p => p.Length > 0)
+                .Select(p => new Regex("^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$",
+                                       RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                .ToList();
 
         public static bool IsHatch(string layer) => (layer ?? "").IndexOf("HATCH", StringComparison.OrdinalIgnoreCase) >= 0;
 
-        public static bool IsJunk(string layer)
+        public static bool Matches(string layer, IList<Regex> patterns, bool allLayers)
         {
-            var l = layer ?? "";
-            return Junk.Any(j => l.IndexOf(j, StringComparison.OrdinalIgnoreCase) >= 0);
+            if (IsHatch(layer)) return false;
+            if (allLayers) return true;
+            var name = layer ?? "";
+            return patterns.Any(r => r.IsMatch(name));
         }
+
+        public static bool Matches(string layer, string patterns, bool allLayers) => Matches(layer, Parse(patterns), allLayers);
     }
 }

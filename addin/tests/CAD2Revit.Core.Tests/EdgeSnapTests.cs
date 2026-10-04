@@ -77,7 +77,7 @@ namespace CAD2Revit.Core.Tests
             Assert.True(EdgeSnap.NeedsSnapReview(far));
             Assert.False(EdgeSnap.NeedsSnapReview(near));
             Assert.Equal("Moved 250 mm to snap to the wall/column face", EdgeSnap.SnapMovedReason(250));
-            Assert.Equal("Wall/column not detected", EdgeSnap.NoEdgeReason);
+            Assert.Equal("No wall/column within 600 mm - used block rotation", EdgeSnap.NoEdgeReason(600));
         }
 
         [Fact]
@@ -103,21 +103,22 @@ namespace CAD2Revit.Core.Tests
         }
 
         [Theory]
-        [InlineData("A-WALL-HATCH", true)]
-        [InlineData("A-ANNO-DIMS", true)]
-        [InlineData("TEXT", true)]
-        [InlineData("A-WALL", false)]
-        [InlineData("0", false)]
-        public void JunkLayersAreHatchDimensionsAndText(string layer, bool junk) => Assert.Equal(junk, LayerFilter.IsJunk(layer));
+        [InlineData("A-WALL", true)]
+        [InlineData("a-wall-ext", true)]
+        [InlineData("S-COLS", true)]
+        [InlineData("E-POWER", false)]
+        [InlineData("A-WALL-HATCH", false)]   // hatch layers never count
+        [InlineData("COLUMN", true)]
+        public void LayerFilterWildcards(string layer, bool expected) =>
+            Assert.Equal(expected, LayerFilter.Matches(layer, EdgeSnap.DefaultLayers, false));
 
         [Fact]
-        public void WithinReturnsEverySegmentInRange()
+        public void AllLayersButNeverHatch()
         {
-            var idx = new EdgeIndex<int>(1000 * Mm);
-            idx.Add(0, 0, 0, 10, 1);
-            idx.Add(1, 0, 1, 10, 2);
-            idx.Add(5, 0, 5, 10, 3);
-            Assert.Equal(new[] { 1, 2 }, idx.Within(0.5, 5, 0.6).Select(h => h.Payload).OrderBy(v => v).ToArray());
+            Assert.True(LayerFilter.Matches("E-POWER", "", true));
+            Assert.False(LayerFilter.Matches("HATCH-01", "", true));
+            Assert.False(LayerFilter.Matches("E-POWER", "", false));
+            Assert.Equal(4, LayerFilter.Parse("*WALL*; *COL*, ,A-?").Count + 1);
         }
 
         [Theory]
@@ -130,16 +131,13 @@ namespace CAD2Revit.Core.Tests
             {
                 Mapping.Save(path, new[] { new MapRow { Block = "SOCKET", Family = "F", TypeName = "T", Host = HostMode.Vertical } },
                              new SlabOptions { EdgeSearchMm = 750, PlanePosition = PlanePosition.ThroughBlockPoint,
-                                               WallMinMm = 80, WallMaxMm = 450, ColumnMinMm = 250, ColumnMaxMm = 1200, ShowDetection = true });
+                                               DwgLayers = "*WALL*, A-COL?", AllDwgLayers = true });
                 var m = Mapping.Load(path);
                 Assert.Empty(m.Errors);
                 Assert.Equal(750, m.Slab.EdgeSearchMm);
                 Assert.Equal(PlanePosition.ThroughBlockPoint, m.Slab.PlanePosition);
-                Assert.Equal(80, m.Slab.WallMinMm);
-                Assert.Equal(450, m.Slab.WallMaxMm);
-                Assert.Equal(250, m.Slab.ColumnMinMm);
-                Assert.Equal(1200, m.Slab.ColumnMaxMm);
-                Assert.True(m.Slab.ShowDetection);
+                Assert.Equal("*WALL*, A-COL?", m.Slab.DwgLayers);
+                Assert.True(m.Slab.AllDwgLayers);
             }
             finally { try { System.IO.File.Delete(path); } catch { } }
         }
@@ -150,14 +148,8 @@ namespace CAD2Revit.Core.Tests
             var o = new SlabOptions();
             Assert.Equal(600, o.EdgeSearchMm);
             Assert.Equal(PlanePosition.SnapToFace, o.PlanePosition);
-            Assert.Equal(100, o.WallMinMm);
-            Assert.Equal(600, o.WallMaxMm);
-            Assert.Equal(200, o.ColumnMinMm);
-            Assert.Equal(1500, o.ColumnMaxMm);
-            Assert.False(o.ShowDetection);
-            var d = o.Detect();
-            Assert.Equal(600, d.SearchMm);
-            Assert.Equal(1500, d.ColumnMaxMm);
+            Assert.Equal("*WALL*, *COL*, *A-WALL*, *S-COLS*", o.DwgLayers);
+            Assert.False(o.AllDwgLayers);
         }
 
         [Fact]

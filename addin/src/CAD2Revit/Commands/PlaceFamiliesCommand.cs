@@ -127,63 +127,38 @@ namespace CAD2Revit.Commands
                     using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
                     if (preview) session.SetDetectedHosts(results);
 
-                    // Show detection: the wall/column faces used for vertical planes, as red detail
-                    // lines. Removed afterwards unless the user keeps them.
-                    DetectionLines lines = null;
-                    string linesNote = null;
-                    if (session.Slab.ShowDetection)
+                    // Details (behind "Show details"): the full technical summary, timings and log path.
+                    var summary = Report.Summarize(results);
+                    var text = Report.SummaryText(summary, preview);
+                    if (errors.Count > 0)
+                        text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
+                    text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
+                    text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
+
+                    var simple = SimpleReport.From(results, preview);
+                    string footnote = preview
+                        ? "Close this window to return to the mapping, then click Run to place the families."
+                        : summary.Get(Status.Placed) > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
+
+                    using (var form = new ResultForm(simple, text, logPath, footnote))
+                        form.ShowDialog(RevitOwner.Win32);
+                    if (!preview)
                     {
-                        try
+                        // Slab (above) blocks that found no slab/beam: list them so they can be fixed.
+                        var review = NeedsReview.From(results);
+                        if (review.Count > 0)
                         {
-                            lines = DetectionLines.Draw(doc, uiapp.ActiveUIDocument.ActiveView, opts.Level, placer.Detected.Values);
-                            if (lines != null)
+                            var uidoc = uiapp.ActiveUIDocument;
+                            using (var form = new NeedsReviewForm(review, ids =>
                             {
-                                uiapp.ActiveUIDocument.RefreshActiveView();
-                                linesNote = $"Show detection: {lines.Count} red detail lines drawn in view '{lines.ViewName}'.";
-                            }
-                            else linesNote = "Show detection: no wall/column was detected, or no plan view to draw in.";
+                                var elementIds = ids.Select(Compat.ToId).ToList();
+                                uidoc.Selection.SetElementIds(elementIds);
+                                uidoc.ShowElements(elementIds);
+                            }))
+                                form.ShowDialog(RevitOwner.Win32);
                         }
-                        catch (Exception ex) { linesNote = "Show detection: could not draw the lines (" + ex.Message + ")."; }
+                        return Result.Succeeded;
                     }
-                    using (lines)
-                    {
-
-                        // Details (behind "Show details"): the full technical summary, timings and log path.
-                        var summary = Report.Summarize(results);
-                        var text = Report.SummaryText(summary, preview);
-                        if (errors.Count > 0)
-                            text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
-                        if (placer.DetectionSummary.Length > 0) text += "\r\n\r\n" + placer.DetectionSummary;
-                        if (linesNote != null) text += "\r\n" + linesNote;
-                        text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
-                        text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
-
-                        var simple = SimpleReport.From(results, preview);
-                        string footnote = preview
-                            ? "Close this window to return to the mapping, then click Run to place the families."
-                            : summary.Get(Status.Placed) > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
-
-                        using (var form = new ResultForm(simple, text, logPath, footnote))
-                            form.ShowDialog(RevitOwner.Win32);
-                        if (!preview)
-                        {
-                            // Slab (above) blocks that found no slab/beam: list them so they can be fixed.
-                            var review = NeedsReview.From(results);
-                            if (review.Count > 0)
-                            {
-                                var uidoc = uiapp.ActiveUIDocument;
-                                using (var form = new NeedsReviewForm(review, ids =>
-                                {
-                                    var elementIds = ids.Select(Compat.ToId).ToList();
-                                    uidoc.Selection.SetElementIds(elementIds);
-                                    uidoc.ShowElements(elementIds);
-                                }))
-                                    form.ShowDialog(RevitOwner.Win32);
-                            }
-                        }
-                        if (lines != null && AskKeepLines(lines.Count)) lines.Keep();
-                    }   // lines not kept are removed here
-                    if (!preview) return Result.Succeeded;
                 }
             }
             catch (Exception ex)
@@ -192,23 +167,6 @@ namespace CAD2Revit.Commands
                 TaskDialog.Show("CAD2Revit - error", ex.ToString());
                 return Result.Failed;
             }
-        }
-
-        /// <summary>"Keep the detection lines?" - Delete (default, also on Cancel) / Keep.</summary>
-        static bool AskKeepLines(int count)
-        {
-            var td = new TaskDialog("CAD2Revit - detection lines")
-            {
-                MainInstruction = $"Keep the {count} detection lines?",
-                MainContent = "The red detail lines show the wall faces and column sides the tool detected and used " +
-                              "to orient the vertical reference planes.",
-                AllowCancellation = true,
-                CommonButtons = TaskDialogCommonButtons.None,
-            };
-            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Delete them", "Remove the lines (recommended)");
-            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Keep them", "Leave the lines in the view");
-            td.DefaultButton = TaskDialogResult.CommandLink1;
-            return td.Show() == TaskDialogResult.CommandLink2;
         }
 
         enum ExistingChoice { Skip, PlaceAnyway, Cancel }

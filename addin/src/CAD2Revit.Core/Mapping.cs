@@ -49,19 +49,12 @@ namespace CAD2Revit.Core
         public double EdgeSearchMm = EdgeSnap.DefaultSearchMm;
         /// <summary>Vertical planes: Snap to face (default) or Through block point.</summary>
         public PlanePosition PlanePosition = PlanePosition.SnapToFace;
-        /// <summary>Vertical planes, DWG detection: wall thickness range (distance between the two
-        /// parallel lines) and column size range (sides / diameter), mm.</summary>
-        public double WallMinMm = CadDetectOptions.DefaultWallMinMm, WallMaxMm = CadDetectOptions.DefaultWallMaxMm;
-        public double ColumnMinMm = CadDetectOptions.DefaultColumnMinMm, ColumnMaxMm = CadDetectOptions.DefaultColumnMaxMm;
-        /// <summary>Draw the detected walls/columns as detail lines in the active view.</summary>
-        public bool ShowDetection;
+        /// <summary>Vertical planes: DWG layers with wall/column lines (wildcards), and "All layers".</summary>
+        public string DwgLayers = EdgeSnap.DefaultLayers;
+        public bool AllDwgLayers;
 
-        public CadDetectOptions Detect() => new CadDetectOptions
-        {
-            SearchMm = EdgeSearchMm, WallMinMm = WallMinMm, WallMaxMm = WallMaxMm, ColumnMinMm = ColumnMinMm, ColumnMaxMm = ColumnMaxMm,
-        };
-
-        public SlabOptions Clone() => (SlabOptions)MemberwiseClone();
+        public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm, ReviewDistanceMm = ReviewDistanceMm,
+            EdgeSearchMm = EdgeSearchMm, PlanePosition = PlanePosition, DwgLayers = DwgLayers, AllDwgLayers = AllDwgLayers };
     }
 
     public class MappingResult
@@ -90,8 +83,7 @@ namespace CAD2Revit.Core
 
         /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
         public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm", "Review_Distance_mm",
-            "Vertical_Edge_Search_mm", "Vertical_Plane_Position", "Wall_Thickness_Min_mm", "Wall_Thickness_Max_mm",
-            "Column_Size_Min_mm", "Column_Size_Max_mm", "Show_Detection" };
+            "Vertical_Edge_Search_mm", "Vertical_Plane_Position", "DWG_Wall_Layers", "DWG_All_Layers" };
 
         // Accepted header spellings, compared after lower-casing and removing
         // everything that is not a letter/digit ("Offset_From_Level (mm)" ==
@@ -114,11 +106,8 @@ namespace CAD2Revit.Core
             ["reviewdistance"] = new[] { "reviewdistancemm", "reviewdistance", "maxdistancemm" },
             ["edgesearch"] = new[] { "verticaledgesearchmm", "edgesearchmm", "edgesearch" },
             ["planeposition"] = new[] { "verticalplaneposition", "planeposition" },
-            ["wallmin"] = new[] { "wallthicknessminmm", "wallthicknessmin", "wallminmm" },
-            ["wallmax"] = new[] { "wallthicknessmaxmm", "wallthicknessmax", "wallmaxmm" },
-            ["colmin"] = new[] { "columnsizeminmm", "columnsizemin", "columnminmm" },
-            ["colmax"] = new[] { "columnsizemaxmm", "columnsizemax", "columnmaxmm" },
-            ["showdetection"] = new[] { "showdetection", "detectionlines" },
+            ["dwglayers"] = new[] { "dwgwalllayers", "dwglayers", "walllayers" },
+            ["dwgalllayers"] = new[] { "dwgalllayers", "alllayers" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -218,7 +207,7 @@ namespace CAD2Revit.Core
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
                 PlaceAtText(r.PlaceAt),
                 slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm, slab.ReviewDistanceMm,
-                slab.EdgeSearchMm, PlanePositionText(slab.PlanePosition), slab.WallMinMm, slab.WallMaxMm, slab.ColumnMinMm, slab.ColumnMaxMm, slab.ShowDetection ? "yes" : "no",
+                slab.EdgeSearchMm, PlanePositionText(slab.PlanePosition), slab.DwgLayers ?? "", slab.AllDwgLayers ? "yes" : "no",
             }).ToList());
         }
 
@@ -304,18 +293,12 @@ namespace CAD2Revit.Core
             var pos = FirstText("planeposition");
             bool hasPos = pos != null && ParsePlanePosition(pos).HasValue;
             if (hasPos) result.Slab.PlanePosition = ParsePlanePosition(pos).Value;
-            var wallMin = First("wallmin", v => v > 0);
-            var wallMax = First("wallmax", v => v > 0);
-            var colMin = First("colmin", v => v > 0);
-            var colMax = First("colmax", v => v > 0);
-            if (wallMin.HasValue) result.Slab.WallMinMm = wallMin.Value;
-            if (wallMax.HasValue) result.Slab.WallMaxMm = wallMax.Value;
-            if (colMin.HasValue) result.Slab.ColumnMinMm = colMin.Value;
-            if (colMax.HasValue) result.Slab.ColumnMaxMm = colMax.Value;
-            var show = FirstText("showdetection");
-            if (show != null) result.Slab.ShowDetection = Norm(show) == "yes" || Norm(show) == "true" || show.Trim() == "1";
+            var layers = FirstText("dwglayers");
+            if (layers != null) result.Slab.DwgLayers = layers;
+            var all = FirstText("dwgalllayers");
+            if (all != null) result.Slab.AllDwgLayers = Norm(all) == "yes" || Norm(all) == "true" || all.Trim() == "1";
             result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue || review.HasValue || edge.HasValue ||
-                                    hasPos || wallMin.HasValue || wallMax.HasValue || colMin.HasValue || colMax.HasValue || show != null;
+                                    hasPos || layers != null || all != null;
 
             int line = 1;
             foreach (var r in rows)

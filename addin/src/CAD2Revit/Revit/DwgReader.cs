@@ -9,8 +9,6 @@ namespace CAD2Revit.Revit
     public class BlockRef
     {
         public string Name;
-        /// <summary>The DWG block name as Revit reports it (before name simplification).</summary>
-        public string RawName = "";
         public Transform Transform;
         public int Depth;          // 1 = top-level block in the DWG
         public XYZ Point;          // insertion point, model internal coordinates (feet)
@@ -73,11 +71,9 @@ namespace CAD2Revit.Revit
                 var bx = tf.BasisX;
                 double baseLen = link.BasisX.GetLength();
                 if (baseLen < 1e-12) baseLen = 1;
-                var raw = (SymbolName(doc, gi) ?? "").Trim();
                 result.Add(new BlockRef
                 {
-                    Name = raw,
-                    RawName = raw,
+                    Name = (SymbolName(doc, gi) ?? "").Trim(),
                     Transform = tf,
                     Depth = depth,
                     Point = tf.Origin,
@@ -94,7 +90,7 @@ namespace CAD2Revit.Revit
             }
         }
 
-        internal static string SymbolName(Document doc, GeometryInstance gi)
+        static string SymbolName(Document doc, GeometryInstance gi)
         {
             try
             {

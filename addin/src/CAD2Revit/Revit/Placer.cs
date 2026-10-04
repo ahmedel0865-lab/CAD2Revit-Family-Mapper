@@ -132,7 +132,6 @@ namespace CAD2Revit.Revit
             _timer = timer ?? new PhaseTimer();
             _dwg = dwg;
             _edges = null;
-            Detected.Clear();
             _slab = mapping.Slab ?? new SlabOptions();
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
@@ -142,7 +141,6 @@ namespace CAD2Revit.Revit
                 if (mapping.Rows.TryGetValue(b.Name, out var row)) mapped.Add((b, row));
                 else unmapped[b.Name] = (unmapped.TryGetValue(b.Name, out var n) ? n : 0) + 1;
             }
-            _exclude = new HashSet<string>(mapped.Select(m => m.Item1.RawName), StringComparer.OrdinalIgnoreCase);
             foreach (var kv in unmapped)
                 results.Add(new PlacementResult
                 {
@@ -783,37 +781,30 @@ namespace CAD2Revit.Revit
                 var facing = new XYZ(f.X, f.Y, 0);
                 var planePoint = target;
                 bool snapped = false;
-                string source = null;
                 // Host Type "Vertical plane": the plane is parallel to the nearest wall/column face
-                // (Revit walls/columns in this model and links, else walls/columns detected in the
-                // DWG geometry) within the search radius; the family faces away from it, toward the
-                // block. Snap to face: the device sits on the face (block point projected onto it).
-                // Nothing detected: block rotation, and Needs Review.
+                // (this model and links), else to the nearest DWG wall/column line, within the search
+                // radius; the family faces away from it, toward the block. Snap to face: the device
+                // sits on the face (block point projected onto it). Nothing near: block rotation.
                 if (row.Host == HostMode.Vertical)
                 {
-                    CadFace edge;
+                    EdgeHit<EdgeInfo> edge;
                     using (_timer.Time(Phases.HostQuery))
                     {
                         if (_edges == null)
-                            using (_timer.Time(Phases.HostIndex)) _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab, _exclude);
-                        edge = _edges.Find(x, y, target.Z, f);
+                            using (_timer.Time(Phases.HostIndex)) _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab);
+                        edge = _edges.Find(x, y, target.Z);
                     }
                     if (edge != null)
                     {
-                        var ep = EdgeSnap.PlanOutward(V(target), edge.A, edge.B, edge.Outward, _slab.PlanePosition, target.Z);
+                        var ep = EdgeSnap.Plan(V(target), new V3(edge.X1, edge.Y1, 0), new V3(edge.X2, edge.Y2, 0), f,
+                                               _slab.PlanePosition, target.Z);
                         facing = new XYZ(ep.Facing.X, ep.Facing.Y, 0);
                         planePoint = new XYZ(ep.Point.X, ep.Point.Y, ep.Point.Z);
                         snapped = _slab.PlanePosition == PlanePosition.SnapToFace;
-                        source = edge.Label;
-                        notes.Add($"plane parallel to {edge.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : ""));
+                        notes.Add($"plane parallel to {edge.Payload.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : ""));
                         if (EdgeSnap.NeedsSnapReview(ep)) plan.Review.Add(EdgeSnap.SnapMovedReason(ep.MovedFt * MmPerFoot));
-                        if (!Detected.ContainsKey(edge.Key)) Detected[edge.Key] = edge;
                     }
-                    else
-                    {
-                        source = "block rotation (wall/column not detected)";
-                        plan.Review.Add(EdgeSnap.NoEdgeReason);
-                    }
+                    else plan.Review.Add(EdgeSnap.NoEdgeReason(_slab.EdgeSearchMm));
                 }
                 // The plane passes through the plane point (or is colinear with it, < 5 mm); the
                 // family goes on it at level + Elevation From Level, reference direction = the
@@ -826,7 +817,7 @@ namespace CAD2Revit.Revit
                 using (_timer.Time(Phases.Create))
                     inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, along, sym);
                 target = onPlane;
-                hostText = "Vertical plane " + planeName + (source != null ? " - " + source : "");
+                hostText = "Vertical plane " + planeName;
                 plan.FinalHost = "Reference Plane " + planeName + " (vertical)";
                 using (_timer.Time(Phases.Verify))
                 {
@@ -979,14 +970,6 @@ namespace CAD2Revit.Revit
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
         ImportInstance _dwg;      // the DWG being placed (for its wall/column line work)
         EdgeFinder _edges;        // vertical plane orientation (built on first use)
-        HashSet<string> _exclude = new HashSet<string>();   // DWG block names being converted (not walls)
-
-        /// <summary>The wall/column faces used for vertical planes in the last PlaceAll, by key
-        /// (one entry per wall pair / column), for "Show detection".</summary>
-        public Dictionary<string, CadFace> Detected { get; } = new Dictionary<string, CadFace>();
-
-        /// <summary>DWG detection statistics of the last PlaceAll ("" if the DWG was not read).</summary>
-        public string DetectionSummary => _edges?.DwgSummary ?? "";
 
         /// <summary>Base point farther than this (mm, plan) from the drawn symbol: Needs Review.</summary>
         const double BaseOffsetReviewMm = 150;
