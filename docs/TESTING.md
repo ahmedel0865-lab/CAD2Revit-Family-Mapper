@@ -80,8 +80,12 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12r | Mirrored block | Mirror one wall-light block in AutoCAD. Host *Vertical plane*: the family faces the same side as the mirrored symbol |
 | 12s | Vertical plane parallel to the wall | Revit wall running at 30°, a socket block 150 mm in front of it drawn at 0°, Host *Vertical plane*. The plane (`CAD2Revit_V_...`) is parallel to the wall, and the socket faces away from the wall. With *Snap to face* it sits on the wall face. With *Through block point* it stays at the block point |
 | 12t | Column | Block 200 mm from a structural column's face: the plane is parallel to that face |
-| 12u | DWG walls only | No Revit walls, DWG walls on layer `A-WALL`: the plane follows the DWG wall line. Change the layer list to `X-*`: Needs Review "No wall/column within 600 mm - used block rotation". Tick *All layers*: it follows the wall line again |
+| 12u | DWG walls only | No Revit walls; the DWG has walls drawn as two lines 200 mm apart (any layer name). The plane follows the wall face on the block's side, and the Host column says "CAD wall pair (thk 200 mm)". A block 700 mm from any wall: Needs Review "Wall/column not detected" |
 | 12v | Same face, one plane | Three sockets along the same wall face: one shared plane. A block 300 mm from the face with *Snap to face*: Needs Review "Moved 300 mm to snap to the wall/column face" |
+| 12w | DWG columns | A 400x400 column drawn as a closed polyline, one drawn as four separate lines, and a D=500 circle. Sockets beside them follow the column side (or the circle's tangent): "CAD column 400x400", "CAD circular column D=500". A socket between a wall and a column, the column side 30 mm farther: the column is used |
+| 12x | Ignored line work | Door swings, hatch and dimensions near a socket do not orient its plane; the lines of the socket block itself are never taken as a wall |
+| 12y | Show detection | Tick *Show detection*, Preview: red detail lines on the detected wall faces and column outlines in the active plan view; choose *Delete them*: the lines are gone and nothing is in the undo list. Run and choose *Keep them*: the lines stay |
+| 12z | Detection ranges | Set *DWG wall thickness* to 100-150: a 200 mm wall is no longer detected. Save and Load the mapping: the ranges and *Show detection* come back |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

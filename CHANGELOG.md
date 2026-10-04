@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.25.0] - 2026-10-04
+### Changed: vertical planes follow walls and columns detected from the DWG geometry, not from layer names
+1. **One geometry read.** All lines, polylines, arcs and circles of the linked DWG are read once, in model coordinates, including those inside blocks and xrefs. Skipped: the electrical blocks being converted, dimension blocks, hatch/dimension/text layers, text and fills, lines under 100 mm, and door swings (arcs of 80-100° with a radius of 600-1200 mm). The rest goes into a spatial grid with 1000 mm cells.
+2. **Walls = parallel line pairs**: less than 1° apart, 100-600 mm apart (editable), overlapping by at least 300 mm. The two lines are the two faces.
+3. **Columns = small closed shapes**: closed polylines, or lines joined end to end within 5 mm, measuring 200-1500 mm (editable) on both axes, including L-shapes and other polygons; and circles with a diameter of 200-1500 mm. The nearest side is used, or the tangent for circles.
+4. **Edge choice** within 600 mm (editable): the closest wall face or column side. A column wins when it is less than 50 mm farther. Only the face on the block's side of a wall is used, never the far face.
+5. **Plane**: parallel to the chosen face, *Snap to face* (default) or *Through block point*. The family faces away from the wall/column, and blocks on the same face share one plane (5 mm / 0.5°).
+6. **Preview and review**:
+   - The Host column shows the source, e.g. "CAD wall pair (thk 200 mm)", "CAD column 400x400" or "CAD circular column D=500".
+   - New **Show detection** option draws the detected faces as red detail lines in the active plan view. They are deleted afterwards unless you choose to keep them (rolled back, so nothing is left in the undo list).
+   - Nothing detected: block rotation, and Needs Review "Wall/column not detected". A snap of more than 200 mm: Needs Review.
+7. **Performance**: one read, grid index, and pair/shape detection only for the lines near blocks (cached). Placement stays in one transaction.
+- Revit walls and columns (this model and links) are still used first when present.
+- Removed the *DWG wall/column layers* box and the *All layers* option. New mapping columns `Wall_Thickness_Min_mm`, `Wall_Thickness_Max_mm`, `Column_Size_Min_mm`, `Column_Size_Max_mm` and `Show_Detection`. The old `DWG_Wall_Layers` / `DWG_All_Layers` columns are ignored.
+- New Core class `CadDetector`, with tests.
+
 ## [0.24.0] - 2026-10-04
 ### Changed: Place At defaults to Symbol centre
 - New rows and the mapping window now use **Symbol centre**, so the family lands on the drawn CAD symbol, not on the block's base point.
