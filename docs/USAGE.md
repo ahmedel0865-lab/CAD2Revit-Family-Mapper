@@ -2,20 +2,20 @@
 
 ## 0. Install (once)
 
-CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any other add-in.
+SmartHost MEP is a **standalone Revit add-in**. It does not need pyRevit or any other add-in.
 
-1. Download `CAD2Revit-<version>.zip`: from the repository's **Releases** page, from the **Actions** tab (latest build > *Artifacts*), or from whoever sent it to you.
+1. Download `SmartHostMEP-<version>.zip`: from the repository's **Releases** page, from the **Actions** tab (latest build > *Artifacts*), or from whoever sent it to you.
 2. **Close Revit**, unzip the file anywhere, and double-click **`Install.bat`**.
    - It installs the add-in for every Revit **2022 / 2023 / 2024 / 2025 / 2026** found on the PC.
    - Per Windows user, so no administrator rights are needed. Files go to `%AppData%\Autodesk\Revit\Addins\<version>\`.
-3. Start Revit. When Revit asks about loading the unsigned add-in *CAD2Revit Family Mapper*, click **Always Load**.
-4. A **CAD2Revit** tab appears with two panels: **Mapper** (**Place Families**) and **Tools** (**Settings**, **Help**).
+3. Start Revit. When Revit asks about loading the unsigned add-in *SmartHost MEP*, click **Always Load**.
+4. A **SmartHost MEP** tab appears with two panels: **Mapper** (**Place Families**) and **Tools** (**Settings**, **Help**).
 
-- **Manual install** (if IT policy blocks `Install.bat`): copy `<version>\CAD2Revit.addin` and the folder `<version>\CAD2Revit` into `%AppData%\Autodesk\Revit\Addins\<version>\`. Then right-click `CAD2Revit\CAD2Revit.dll` > *Properties* > tick **Unblock**.
+- **Manual install** (if IT policy blocks `Install.bat`): copy `<version>\SmartHostMEP.addin` and the folder `<version>\SmartHostMEP` into `%AppData%\Autodesk\Revit\Addins\<version>\`. Then right-click `SmartHostMEP\SmartHostMEP.dll` > *Properties* > tick **Unblock**.
 - **Update:** close Revit and run `Install.bat` from the new zip.
 - **Uninstall:** close Revit and run `Uninstall.bat`.
 
-> Earlier versions also shipped a pyRevit extension. It was removed in 0.13.0; everything it did (including face hosting on sloped ceilings and slabs) is in the add-in. If you installed it, remove it with `pyrevit extend remove CAD2Revit` (or delete the extension folder), so only one CAD2Revit tab remains.
+> Earlier versions also shipped a pyRevit extension. It was removed in 0.13.0; everything it did (including face hosting on sloped ceilings and slabs) is in the add-in. If you installed it, remove it with `pyrevit extend remove CAD2Revit` (its name before the rename, or delete the extension folder), so only one ribbon tab remains.
 
 ## 1. Prepare the drawing (AutoCAD)
 
@@ -41,7 +41,7 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 
 ## 3. Map the blocks and place (mapping window)
 
-1. Click **CAD2Revit > Place Families**.
+1. Click **SmartHost MEP > Place Families**.
 2. **Step 1:** pick the **DWG link/import**, and optionally *include nested blocks*. Click **Next >**. There is no level to pick here: every row's **Level** starts at the level the DWG is linked on (or the active plan's level) and can be changed per row, or for many rows at once, in the mapping window.
 3. **Step 2, the mapping window.** It is organized top to bottom: a header with the DWG and live counts (mapped / instances to place / skipped / invalid); **1 · Filter** (Find, Show, Skip shown rows); **2 · Edit selected rows**; the grid with a **Symbol preview** panel on its right (hover over or select a row to see the CAD block's 2D symbol, size, count and chosen family; hovering the block name shows it as a tooltip too); and the footer (mapping file Load / Save / Auto-match on the left, **Preview** and **Run** on the right). The grid shows one row per **unique** CAD block name (not one row per instance), **grouped by category** (Electrical first) and sorted by name. Use **Find** and **Show** (category) to filter the rows; **Skip shown rows** sets every row currently shown to (Skip), e.g. all Architectural blocks at once.
    - Block names are simplified so instances group correctly. The `<file>.dwg.` prefix Revit adds is removed. For DWGs **exported from Revit**, the `-<element id>-<view name>` suffix is removed too, so `MAAP_Ceiling Mounted Luminaire - F1-7107100-GROUND FLOOR LIGHTING PLAN` becomes `MAAP_Ceiling Mounted Luminaire - F1`. Turn this off with `SimplifyBlockNames = false` in settings.ini.
@@ -60,12 +60,12 @@ CAD2Revit is a **standalone Revit add-in**. It does not need pyRevit or any othe
 
 - The dropdown lists loaded family types in the electrical categories: Lighting Fixtures, Lighting Devices (switches), Electrical Fixtures, Electrical Equipment, Fire Alarm Devices, Communication Devices, Data Devices, Security Devices, Nurse Call Devices and Telephone Devices. A family from another category is added to the list automatically when a loaded mapping file uses it.
 - **Families start at `(Skip)`:** every time the tool opens, the Revit Family of every row is `(Skip)`. Nothing is filled in from the last run or by name. Click **Auto-match** to pre-select families whose names closely match (e.g. `SMOKE-DET` → *Smoke Detector*, `SKT-DOUBLE` → *Duplex Receptacle*, `MCP` → *Manual Call Point*), or **Load...** a mapping file. Always check the pre-selections. **Clear All Families** sets every row back to `(Skip)`.
-- **Remembered per project:** the grid is saved automatically when you click Preview or Run. The next time you open the mapping window in the same project, Elevation From Level, Host Type, Rotation, Facing, Level, Category and the Slab (above) / Ceiling values are restored; the families are not. The file is `%AppData%\CAD2Revit\projects\<project>_<id>.xlsx`, in the normal mapping format.
+- **Remembered per project:** the grid is saved automatically when you click Preview or Run. The next time you open the mapping window in the same project, Elevation From Level, Host Type, Rotation, Facing, Level, Category and the Slab (above) / Ceiling values are restored; the families are not. The file is `%AppData%\SmartHostMEP\projects\<project>_<id>.xlsx`, in the normal mapping format.
 - **Already placed?** Before a Run, if elements are already at the block locations (same family within the duplicate tolerance, or Comments `CAD: <block>`), the tool asks *"X elements already exist at these locations"*: **Skip them** (default), **Place anyway**, or **Cancel** to go back to the mapping window.
 - **Load Mapping... / Save Mapping...** read and write the normal mapping file (XLSX or CSV, format below), e.g. to reuse one mapping across projects or share it with the team. Loading only changes the rows whose block names are in the file.
 
 4. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The result window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. **Close the result window to return to the mapping window** with your choices kept, adjust, and preview again.
-5. Click **Run**. Everything is placed in **one transaction** named *CAD2Revit: Place families*. A single **Ctrl+Z** removes all of it.
+5. Click **Run**. Everything is placed in **one transaction** named *SmartHost MEP: Place families*. A single **Ctrl+Z** removes all of it.
 
 Host types:
 
@@ -77,8 +77,8 @@ Host types:
 | `slab above` = **Slab (above)** | Casts a ray straight up from the row's level and hosts on the **underside of the first floor slab** above it (the slab of the level above), **facing down**, with the CAD rotation as direction. Only **Floor** elements count (structural and architectural), in this model and in linked models; beams, ceilings and ducts are ignored. The search goes up to the level-to-level height + `SlabSearchToleranceMm` (500 mm), so never two floors up. **No slab at a block** (opening, or no slab) → hosted on a reference plane at the underside of that level's slab (or at the level above if the level has no slab), with a warning. **Not a face-based / work-plane-based family** → not placed: status `failed`, "family is not face-based". The Facing column is not used. |
 | `slab below` = **Slab (below)** | For floor boxes / floor sockets: casts a ray down from 300 mm above the level and hosts on the **top face of the slab** at that level, **facing up**. Same fallbacks (reference plane at the slab top, or at the level). |
 | `wall` | Hosts on the **nearest wall** to the block (this model or linked models), within the **Wall search distance** (500 mm, set above the grid), among walls that exist at the row's height. **Side:** the face on the side of the wall where the CAD point is. If the point is inside the wall thickness, the side the block symbol is drawn on (its centre of geometry) decides. **Position:** the CAD point projected perpendicularly onto that face, at level + Elevation From Level. **Orientation:** the CAD rotation is **ignored**. The family uses the wall direction (the tangent at that point, on curved walls), so it sits flat on the face and faces **out towards the block**. After placing, a family facing into the wall is flipped. Legacy wall-hosted families get *flip facing* and, if mirrored, *flip hand*. **No wall found:** a face-based device is stood upright on a vertical plane instead (as `vertical` below). **Needs Review** lists: *No wall within 500 mm*, *Moved more than 200 mm to reach the wall face*, and *Wall is in a linked model*. |
-| `reference plane` = **Reference Plane (auto-create)** | Creates (or reuses) a **horizontal reference plane** at *level elevation + Elevation From Level*, named `CAD2Revit_<Level>_+<elevation>mm` (e.g. `CAD2Revit_Level 1_+2800mm`; up-facing planes end in `_Up`). The plane covers the DWG link's extents plus 1 m. The family is hosted on it, with the CAD block rotation as its direction and facing Down or Up (the **Facing** column). All rows with the same elevation and facing share one plane, and later runs reuse it. Only face-based / work-plane-based families can be hosted this way; others are placed level-based with a warning. |
-| `vertical` = **Vertical plane (no wall)** | **No Revit host needed.** Each block gets a **vertical reference plane parallel to the nearest wall or column face**. **1. Find the nearest edge** within *Wall/column search* (600 mm, set above the grid): first the side faces of **walls and columns** (architectural and structural) in this model and in links, at the device height. If there are none, the **DWG line work** on the *DWG wall/column layers* (wildcards, default `*WALL*, *COL*, *A-WALL*, *S-COLS*`, or *All layers*). Lines shorter than 100 mm and hatch layers are ignored, and with *All layers* lines inside blocks are skipped. If nothing is found, the CAD block rotation is used and the block goes to Needs Review: "No wall/column within 600 mm - used block rotation". **2. Orientation:** the plane runs along that edge, and the family faces away from the wall/column, toward the side the block is on (flipped after placing if needed). **3. Position** (*Position* above the grid): *Snap to face* (default) puts the plane on the face and the device on the block point projected onto it. *Through block point* puts the plane through the block point, parallel to the face. A snap of more than 200 mm goes to Needs Review. **4. Reuse:** blocks on the same face share one plane `CAD2Revit_V_<Level>_<n>` (same line within 5 mm and 0.5°). The device goes at level + Elevation From Level. If it lands more than 10 mm from its intended point, it is moved there. If that fails, it goes to Needs Review. |
+| `reference plane` = **Reference Plane (auto-create)** | Creates (or reuses) a **horizontal reference plane** at *level elevation + Elevation From Level*, named `SmartHost_<Level>_+<elevation>mm` (e.g. `SmartHost_Level 1_+2800mm`; up-facing planes end in `_Up`). The plane covers the DWG link's extents plus 1 m. The family is hosted on it, with the CAD block rotation as its direction and facing Down or Up (the **Facing** column). All rows with the same elevation and facing share one plane, and later runs reuse it. Only face-based / work-plane-based families can be hosted this way; others are placed level-based with a warning. |
+| `vertical` = **Vertical plane (no wall)** | **No Revit host needed.** Each block gets a **vertical reference plane parallel to the nearest wall or column face**. **1. Find the nearest edge** within *Wall/column search* (600 mm, set above the grid): first the side faces of **walls and columns** (architectural and structural) in this model and in links, at the device height. If there are none, the **DWG line work** on the *DWG wall/column layers* (wildcards, default `*WALL*, *COL*, *A-WALL*, *S-COLS*`, or *All layers*). Lines shorter than 100 mm and hatch layers are ignored, and with *All layers* lines inside blocks are skipped. If nothing is found, the CAD block rotation is used and the block goes to Needs Review: "No wall/column within 600 mm - used block rotation". **2. Orientation:** the plane runs along that edge, and the family faces away from the wall/column, toward the side the block is on (flipped after placing if needed). **3. Position** (*Position* above the grid): *Snap to face* (default) puts the plane on the face and the device on the block point projected onto it. *Through block point* puts the plane through the block point, parallel to the face. A snap of more than 200 mm goes to Needs Review. **4. Reuse:** blocks on the same face share one plane `SmartHost_V_<Level>_<n>` (same line within 5 mm and 0.5°). The device goes at level + Elevation From Level. If it lands more than 10 mm from its intended point, it is moved there. If that fails, it goes to Needs Review. |
 
 The elevation is also the fallback height if a ceiling is not found.
 
@@ -126,7 +126,7 @@ Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, .
 - While placing, a **progress bar** shows the block count and the time left. **Cancel** stops and rolls everything back; nothing is changed, and you return to the mapping window.
 - The result window shows placed counts per family type, unmapped blocks, and failed/skipped blocks grouped by reason. Use **Open log** / **Log folder** to jump to the CSV log.
 - At the bottom, a **Timings** table shows where the time went: DWG reading, host detection (index build, per block, ray fallback), duplicate check, family creation (single and batched), rotation, planes, parameters, and commit. If a run is slow, this table shows which phase to look at.
-- A `cad2revit_log_<date>.csv` (or `cad2revit_preview_<date>.csv`) is saved in `Documents\\CAD2Revit\\Logs\\<project>\\`. It has one row per block with:
+- A `smarthost_log_<date>.csv` (or `smarthost_preview_<date>.csv`) is saved in `Documents\\SmartHostMEP\\Logs\\<project>\\`. It has one row per block with:
   `Status, CAD_Block, Family, Type, Level, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
 - Each placed element's **Comments** parameter contains `CAD: <block name>`. You can use it in schedules and filters, e.g. to select everything the tool placed.
@@ -145,7 +145,7 @@ Statuses in the log:
 
 ## 6. Settings
 
-Click **CAD2Revit > Tools > Settings** to open it in Notepad. Settings are stored in **`%AppData%\CAD2Revit\settings.ini`**, which is created on the first run. Open it in Notepad and change the values; the next command you run uses them. There is no need to restart Revit.
+Click **SmartHost MEP > Tools > Settings** to open it in Notepad. Settings are stored in **`%AppData%\SmartHostMEP\settings.ini`**, which is created on the first run. Open it in Notepad and change the values; the next command you run uses them. There is no need to restart Revit.
 
 | Setting | Default | Meaning |
 |---|---|---|

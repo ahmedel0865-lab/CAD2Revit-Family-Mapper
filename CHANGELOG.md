@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.26.0] - 2026-10-04
+### Renamed to SmartHost MEP
+Formerly **CAD2Revit Family Mapper**.
+- **Names.** Display name *SmartHost MEP* (ribbon tab, windows, Needs Review, messages). Code name *SmartHostMEP*: solution, projects, `SmartHostMEP.dll`, namespaces, folders and `SmartHostMEP.addin`.
+- **Same add-in for Revit.** The manifest keeps the same AddInId. The ribbon tab is now **SmartHost MEP**, with the panels **Host Placement** and **Tools**.
+- **Created elements** use the `SmartHost_` prefix:
+  - reference planes `SmartHost_<Level>_+3000mm` and `SmartHost_V_<Level>_<n>`;
+  - Comments `SmartHost: <block>` and `SmartHost: Host = Reference Plane`.
+- **Models made with the old version keep working.** Its `CAD2Revit_...` reference planes are found and reused (no second plane), and its `CAD: <block>` / `CAD2Revit: ...` Comments count in the duplicate check (no duplicates).
+- **Logs** are named `smarthost_log_<date>.csv` (and `smarthost_preview_...`), in `Documents\SmartHostMEP\Logs`.
+- **Settings and saved mappings** move to `%AppData%\SmartHostMEP`. On the first run they are copied once from the old folder (`%AppData%\CAD2Revit`), which is left as it was.
+- **Installer.** `Install.bat` removes the old `CAD2Revit.addin` and its folder from each Revit version, so the two are never loaded together. `Uninstall.bat` removes both.
+- **Build.** The CI artifact and release are named `SmartHostMEP-<version>`.
+- **Repository:** https://github.com/ahmedel0865-lab/SmartHost-MEP
+
 ## [0.24.0] - 2026-10-04
 ### Changed: Place At defaults to Symbol centre
 - New rows and the mapping window now use **Symbol centre**, so the family lands on the drawn CAD symbol, not on the block's base point.
@@ -36,8 +51,8 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ### Fixed: families on vertical reference planes placed far from their CAD blocks
 - **Cause.** The 0.16 *centre on the CAD point* correction (`CenterFamiliesOnCadPoint`, on by default, and written as `true` into every settings.ini since then) shifted each family by its bounding box. A family with geometry far from its insertion point (nested annotation, hidden lines) was pushed far away. That correction is now **off**, under a new key `CenterGeometryOnCadPoint` (default false). The old key is ignored.
 - **One plane per block.** Each block gets a vertical reference plane through its insertion point.
-  - It runs along the block's X direction, with its normal on the block's +Y, drawn from the level up to level + 3000 mm (`NewReferencePlane2`), and is named `CAD2Revit_V_<Level>_<n>`.
-- **Reuse only if colinear.** An existing CAD2Revit vertical plane (this run, or an earlier one, including the old `CAD2Revit vertical ...` planes) is reused only if the block point lies on it (< 5 mm) and its direction matches (< 0.5°). It is never reused because it is the nearest plane or on the same level or elevation.
+  - It runs along the block's X direction, with its normal on the block's +Y, drawn from the level up to level + 3000 mm (`NewReferencePlane2`), and is named `SmartHost_V_<Level>_<n>`.
+- **Reuse only if colinear.** An existing vertical plane (this run, or an earlier one, including the old `CAD2Revit vertical ...` planes) is reused only if the block point lies on it (< 5 mm) and its direction matches (< 0.5°). It is never reused because it is the nearest plane or on the same level or elevation.
 - **Position.** The family goes on the block point at level + Elevation From Level, on the plane's reference, with the plane direction as its reference direction.
 - **Verify and correct.**
   - After placing, a family that faces away from the block is flipped: work plane flip, or *flip facing* when `FacingOrientation` is opposite to the block.
@@ -46,7 +61,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ### Added: final distance check for all host types
 - After the run, with one regeneration, each placed element's location is compared with its CAD block in plan.
   - Anything farther than **Review if farther than (mm)** (new box above the grid, default 50, saved as `Review_Distance_mm`) is listed in **Needs Review** with its Element ID, and gets a warning in the result window.
-- Everything still runs in one transaction. The plane search is a simple scan of the CAD2Revit vertical planes, with no rays.
+- Everything still runs in one transaction. The plane search is a simple scan of the tool's vertical planes, with no rays.
 - New Core helpers (`VerticalPlacement.CanReuse`, `PlaneName`, `PlanDistanceMm`, `PlacedAwayReason`), with tests.
 
 ## [0.20.0] - 2026-09-30
@@ -90,14 +105,14 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 - **The other columns are still remembered** per project: Elevation From Level, Host Type, Rotation, Facing, Level and Category, plus the Slab (above) / Ceiling *Search range* and *Fallback reference plane height*. You only re-pick the families.
 - **Families come back only when you ask**: **Load...** fills the grid from a mapping file (families included), and **Auto-match** still pre-selects by name when you click it. Preview keeps your picks when you return to the mapping window.
 - **Clear All Families** button (next to Load / Save / Auto-match): sets every row back to `(Skip)` and leaves the other columns as they are.
-- **Warning before Run when elements are already there.** Before a Run, the tool checks every block location for an element that is already in the model: an instance of the same family (the existing duplicate check, same tolerance and level band), or one whose Comments say `CAD: <block>` (placed by CAD2Revit, even with another family). If any are found, it asks: *"X elements already exist at these locations."* **Skip them** (default) / **Place anyway** / **Cancel** (back to the mapping window). Skipped blocks are listed as duplicates in the result window and the log.
+- **Warning before Run when elements are already there.** Before a Run, the tool checks every block location for an element that is already in the model: an instance of the same family (the existing duplicate check, same tolerance and level band), or one whose Comments say `CAD: <block>` (placed by SmartHost MEP, even with another family). If any are found, it asks: *"X elements already exist at these locations."* **Skip them** (default) / **Place anyway** / **Cancel** (back to the mapping window). Skipped blocks are listed as duplicates in the result window and the log.
 - The duplicate check during a run also counts elements whose Comments say `CAD: <block>` for the same block.
 
 ## [0.18.0] - 2026-09-29
 ### Changed: Ceiling uses the same search and fallback as Slab (above)
 - **One shared search.** Slab (above) and Ceiling now use the same code (`HostFinder.FindUnderside`, with the host type choosing the categories): the nearest bottom face straight above the block, from the level up to the search range, in this model and in links. Ceiling searches Ceilings; Slab (above) searches Floors, Roofs and beams. Hosts are still collected once into the face index, with no ray per block.
 - **Ceiling found**: the face-based family is hosted on the ceiling's bottom face, facing down, with the CAD rotation. Level-based families are placed level-based at the ceiling's underside height (before: failed).
-- **No ceiling in range**: same fallback as Slab (above). The family goes on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, or level-based at that height. It is logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm` and its Comments get `CAD2Revit: Host = Reference Plane`. Before, it was placed unhosted at the row's elevation, and the search was capped at the next level or `HostSearchDistanceMm`.
+- **No ceiling in range**: same fallback as Slab (above). The family goes on one reference plane per level, `SmartHost_<Level>_+3000mm`, facing down, or level-based at that height. It is logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm` and its Comments get `CAD2Revit: Host = Reference Plane`. Before, it was placed unhosted at the row's elevation, and the search was capped at the next level or `HostSearchDistanceMm`.
 - **Needs Review** lists Ceiling fallbacks too (reason `No ceiling within 5000 mm`), with the same select/zoom, Copy IDs and Export to Excel.
 - **Counts** in Preview and the result window: `Ceiling: N hosted on ceiling, N on reference plane, N level-based`, next to the Slab (above) line.
 - The mapping window's two values are now labelled **Slab (above) and Ceiling: Search range (mm) / Fallback reference plane height (mm)**. They are saved in the same `Slab_Search_Range_mm` / `Slab_Fallback_Plane_mm` columns, so existing mapping files keep working.
@@ -107,7 +122,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ### Changed: Slab (above) hosts on slabs or beams, and a Needs Review list
 - **Nearest slab or beam.** Slab (above) now looks for Floors, Roofs **and Structural Framing (beams)**, in this model and in links, within the search range above the level. The nearest bottom face straight above the block wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. Hosts are still collected once into the face index, with no ray per block.
 - **Hosting** on the found slab/beam: bottom face, facing down, CAD rotation (unchanged).
-- **Fallback** (no slab or beam in range): unchanged, one reference plane per level at the fallback height (`CAD2Revit_<Level>_+3000mm`), or level-based at that height. The log text is now `No slab/beam within 5000 mm - placed on reference plane at +3000 mm`.
+- **Fallback** (no slab or beam in range): unchanged, one reference plane per level at the fallback height (`SmartHost_<Level>_+3000mm`), or level-based at that height. The log text is now `No slab/beam within 5000 mm - placed on reference plane at +3000 mm`.
 - **Comments.** Every fallback element's Comments is set to `CAD2Revit: Host = Reference Plane` (followed by ` | CAD: <block>` when writing block names is on), so it can be found with a filter or schedule.
 - **Needs Review window** after a run, when there are fallback elements: Element ID, Family : Type, CAD Block, X, Y (mm), Reason. Clicking a row selects and zooms to the element in Revit. Buttons: **Select All in Revit**, **Copy IDs** (comma-separated, for Manage > Select by ID), **Export to Excel** (.xlsx or .csv) and Close.
 - **Counts** in Preview and in the result window: `Slab (above): N hosted on slab, N hosted on beam, N on reference plane, N level-based`.
@@ -116,7 +131,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ### Changed: Slab (above) search range and fallback plane
 - **Search range.** Slab (above) looks for a slab from the row's level up to the **Slab search range** (default 5000 mm), and ignores anything higher, even when the level above is higher. It replaces "next level + `SlabSearchToleranceMm`", and the 0.15.3 extra search of sloped faces up to `HostSearchDistanceMm`. Floors and roofs, in this model and in links, are still collected once and looked up in memory: there is no ray per block.
 - **Slab found**: the face-based family is hosted on the slab's bottom face, facing down, with the CAD rotation (unchanged).
-- **No slab in range**: the family is hosted on one reference plane per level, `CAD2Revit_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). The plane is reused by every block that falls back and by later runs. Before, the plane height came from the biggest slab above or the level above.
+- **No slab in range**: the family is hosted on one reference plane per level, `SmartHost_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). The plane is reused by every block that falls back and by later runs. Before, the plane height came from the biggest slab above or the level above.
 - **Level-based families**: with no slab, they are placed level-based with Elevation From Level = the fallback height (still batch-created). Under a slab, they are placed level-based at the slab underside height; before, they failed. Legacy ceiling-hosted families with no slab still fail.
 - **Log and counts**: every fallback block is logged as `No slab within 5000 mm - placed on reference plane at +3000 mm` (or `placed level-based at +3000 mm`). Preview and the result window show the number of fallback blocks, and the full report lists it too.
 - **Mapping window**: *Slab search range (mm)* and *Fallback reference plane height (mm)* are at the top of the window. They are saved with the mapping (the project's remembered mapping and Save...) as the `Slab_Search_Range_mm` and `Slab_Fallback_Plane_mm` columns, and restored by Load.... Invalid values turn red and block Preview/Run.
@@ -136,10 +151,10 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 - The window stays attached to Revit and cannot be minimized.
 
 ## [0.15.1] - 2026-09-28
-### Fixed: Revit looks frozen after a CAD2Revit window is closed or hidden
-- Every CAD2Revit dialog (DWG picker, mapping window, results, lists) is now **owned by Revit's main window**, so it always stays on top of Revit. Before, the DWG picker, the result window and the list pickers had no owner and could drop behind Revit. Revit stays locked while a dialog is open, so it looked frozen and the dialog could not be found.
+### Fixed: Revit looks frozen after a SmartHost MEP window is closed or hidden
+- Every SmartHost MEP dialog (DWG picker, mapping window, results, lists) is now **owned by Revit's main window**, so it always stays on top of Revit. Before, the DWG picker, the result window and the list pickers had no owner and could drop behind Revit. Revit stays locked while a dialog is open, so it looked frozen and the dialog could not be found.
 - The mapping window and the result window can no longer be **minimized**. They have no taskbar button, so a minimized window could not be brought back while Revit stayed locked.
-- **Ribbon tab**: start-up never fails. If a *Mapper* or *Tools* panel already exists on the CAD2Revit tab (a second copy of the add-in, or the old pyRevit extension), it is reused or a separate panel is added, instead of the add-in failing to load and the buttons disappearing.
+- **Ribbon tab**: start-up never fails. If a *Mapper* or *Tools* panel already exists on the SmartHost MEP tab (a second copy of the add-in, or the old pyRevit extension), it is reused or a separate panel is added, instead of the add-in failing to load and the buttons disappearing.
 
 ## [0.15.0] - 2026-09-28
 ### Removed
@@ -163,10 +178,10 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 
 ## [0.13.0] - 2026-09-28
 ### Changed: one tool
-- The repository now contains **only the standalone Revit add-in**. The pyRevit extension (`CAD2Revit.extension/`) and its Python tests are removed.
+- The repository now contains **only the standalone Revit add-in**. The pyRevit extension and its Python tests are removed.
   - Everything the pyRevit version did is in the add-in, including face hosting on **sloped** ceilings and slabs (PR #3 was the pyRevit fix for this, now superseded).
   - The add-in already hosts on the exact point of the face with the CAD rotation projected into the face plane, for ceilings, slabs, roofs and beams, in linked models too.
-  - If you had installed the pyRevit version, remove it (`pyrevit extend remove CAD2Revit`) so only one CAD2Revit tab remains.
+  - If you had installed the pyRevit version, remove it (`pyrevit extend remove CAD2Revit`) so only one ribbon tab remains.
 - CI builds and tests only the add-in. Build output (`bin/`, `obj/`, `dist/`) is git-ignored.
 
 ## [0.12.0] - 2026-09-27
@@ -203,11 +218,11 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 - **Host Type "Slab (below)"**, for floor devices (floor boxes, floor sockets).
   - A ray is cast **down** from 300 mm above the level, and the family is hosted on the **top face** of the slab at that level, **facing up**.
 - **Slab fallbacks**, each logged as a warning:
-  - **No slab at a block** (a slab opening, or no slab there): the family is hosted on a reference plane at the **underside of that level's slab** (or the top, for Slab (below)). That slab is found from the floors' extents in the model and its links. If the level has no slab, the plane goes at the level above's elevation (or at the level itself for Slab (below)). The plane is created or reused as `CAD2Revit_<Level>_+<elev>mm`.
+  - **No slab at a block** (a slab opening, or no slab there): the family is hosted on a reference plane at the **underside of that level's slab** (or the top, for Slab (below)). That slab is found from the floors' extents in the model and its links. If the level has no slab, the plane goes at the level above's elevation (or at the level itself for Slab (below)). The plane is created or reused as `SmartHost_<Level>_+<elev>mm`.
   - **Family not face-based / work-plane-based**: placed level-based at *Elevation From Level*.
 - **Detected Host (Preview)** column in the mapping window.
   - After **Preview**, each row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
-  - Mixed results are counted, e.g. `... (38) · Reference plane CAD2Revit_Second Floor_+3250mm (4) · 1 failed`.
+  - Mixed results are counted, e.g. `... (38) · Reference plane SmartHost_Second Floor_+3250mm (4) · 1 failed`.
   - The value is cleared when you change that row's family, level or host type.
 - The log's **Host** column uses the same detailed names for all host types: category, type, level and link.
 ### Unchanged
@@ -251,7 +266,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ## [0.7.0] - 2026-09-26
 ### Added
 - **Level column** next to *Elevation From Level (mm)* in the mapping window. Each block can be placed on its own level in one run; it defaults to the level picked in step 1.
-  - Hosting, reference planes (`CAD2Revit_<Level>_+<elev>mm`), vertical planes, the ceiling search limit and the duplicate check all work per level.
+  - Hosting, reference planes (`SmartHost_<Level>_+<elev>mm`), vertical planes, the ceiling search limit and the duplicate check all work per level.
   - The log has a new **Level** column.
   - Mapping files have an optional **Level** column, written right before the offset.
 - **Block categories.** Every block is classified as Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation or Other.
@@ -265,7 +280,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ## [0.6.0] - 2026-09-25
 ### Added
 - **Host Type "Reference Plane (auto-create)"** (standalone add-in).
-  - Creates a **horizontal reference plane** at level + *Elevation From Level*, named `CAD2Revit_<Level>_+<elevation>mm`, spanning the DWG link extents plus 1 m.
+  - Creates a **horizontal reference plane** at level + *Elevation From Level*, named `SmartHost_<Level>_+<elevation>mm`, spanning the DWG link extents plus 1 m.
   - Hosts the family on it with `NewFamilyInstance(reference, point, CAD direction, symbol)`.
   - Existing planes with the same name are reused, so rows with the same elevation share one plane.
 - **Facing** column (Down / Up, default Down) sets which side the family faces. The plane normal is set to match; up-facing planes are named `..._Up`. After placement the facing is checked and the work plane flipped if needed.
@@ -300,7 +315,7 @@ When only one block goes wrong, the cause is usually in how that block was drawn
   - **Elevation From Level (mm)**, validated as a number;
   - optional **Rotation** and **Host Type** columns.
 - **Auto-select** of families whose names closely match the block name, including common CAD abbreviations (DET, SKT, SW, MCP, DB, 1G...). An *Auto-match* button re-runs it.
-- **Per-project memory**: the grid is saved when you click Preview/Run and pre-fills the window next time (`%AppData%\CAD2Revit\projects\`).
+- **Per-project memory**: the grid is saved when you click Preview/Run and pre-fills the window next time (`%AppData%\SmartHostMEP\projects\`).
 - **Load Mapping / Save Mapping** (XLSX or CSV, same format as before).
 - Preview returns to the mapping window with your choices kept.
 - Unit tests for name matching, project keys, and saving mappings with Skip rows.
@@ -308,13 +323,13 @@ When only one block goes wrong, the cause is usually in how that block was drawn
 ### Changed
 - Place Families step 1 now only asks for the DWG, level and nested-blocks option; the mapping file is optional (Load Mapping).
 - Blocks set to (Skip) are logged as `unmapped` ("not mapped (Skip)").
-- Logs are written to `Documents\CAD2Revit\Logs\<project>\`.
+- Logs are written to `Documents\SmartHostMEP\Logs\<project>\`.
 
 ## [0.3.0] - 2026-09-25
 ### Added
-- **Standalone Revit add-in (C#)** in `addin/`, so pyRevit is no longer required. Builds for Revit 2022, 2023 and 2024 (.NET Framework 4.8) and Revit 2025 and 2026 (.NET 8), with its own CAD2Revit ribbon tab (List Blocks, Place Families).
+- **Standalone Revit add-in (C#)** in `addin/`, so pyRevit is no longer required. Builds for Revit 2022, 2023 and 2024 (.NET Framework 4.8) and Revit 2025 and 2026 (.NET 8), with its own SmartHost MEP ribbon tab (List Blocks, Place Families).
 - Same features as 0.2.0: XLSX/CSV mapping, ceiling/face/wall/non-hosted placement (incl. linked hosts), one-dialog workflow, real preview, per-level duplicate check, one-transaction undo, summary window and CSV log.
-- Settings in `%AppData%\CAD2Revit\settings.ini` (created on first run; also remembers the last mapping file).
+- Settings in `%AppData%\SmartHostMEP\settings.ini` (created on first run; also remembers the last mapping file).
 - `Install.bat` / `Uninstall.bat`: per-user install for every Revit version found, no admin rights; unblocks downloaded DLLs.
 - `tools/package.sh` builds every version into one zip; GitHub Actions builds it on every push/PR and publishes it as a Release for `v*` tags.
 - C# unit tests for CSV/XLSX, mapping, report and settings.

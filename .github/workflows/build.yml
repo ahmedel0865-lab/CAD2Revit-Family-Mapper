@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,13 +22,17 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Version
+        id: version
+        run: echo "version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' addin/Directory.Build.props)" >> "$GITHUB_OUTPUT"
+
       - name: Revit add-in - test, build 2022-2026, package
         working-directory: addin
         run: bash tools/package.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CAD2Revit-addin
+          name: SmartHostMEP-${{ steps.version.outputs.version }}
           path: addin/dist/*.zip
           if-no-files-found: error
 
@@ -39,7 +45,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: CAD2Revit-addin
+          name: SmartHostMEP-${{ needs.build.outputs.version }}
       - uses: softprops/action-gh-release@v2
         with:
+          name: SmartHostMEP-${{ needs.build.outputs.version }}
           files: "*.zip"
