@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.0] - 2026-10-05
+### Improved: vertical planes pick the right wall more often
+- **The device must sit along the wall.** A wall or column face only counts when the block point projects onto it (within 100 mm of its ends). A wall that ends before the device, or stops at a door opening, is no longer used.
+- **Parallel faces win.** Among the faces within the search radius, one parallel to the device (within 15°) beats a closer perpendicular one, so at a room corner the device follows its own wall. If only a non-parallel face is found, it is used, and Needs Review says "Wall is N° off the block/symbol direction - check the orientation".
+- **Direction from the symbol's flat back.** When the CAD symbol has a single straight back line (the flat side of a socket's half circle, a switch's base line), that line gives the wall direction and the facing (from the back toward the rest of the symbol). This works whatever the block rotation or layer, and for mirrored blocks. Symbols without one (circles, crosses, plain rectangles) use the block rotation as before. It is detected once per block name.
+- The log shows the chosen face, its angle and the direction source ("symbol back line" or "block rotation").
+- New Core code `EdgeSnap.Choose` / `Covers` / `AngleOffDeg` and `SymbolBackLine`, with tests.
+
 ## [0.26.0] - 2026-10-04
 ### Renamed to SmartHost MEP
 Formerly **CAD2Revit Family Mapper**.

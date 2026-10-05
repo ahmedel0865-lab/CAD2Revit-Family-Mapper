@@ -148,6 +148,15 @@ namespace SmartHostMEP.Revit
             return result;
         }
 
+        /// <summary>The line work of one block's definition in its own coordinates (no scale or
+        /// rotation applied).</summary>
+        public static Core.BlockSymbol LocalSymbol(BlockRef b)
+        {
+            var symbol = new Core.BlockSymbol();
+            if (b.Instance != null) CollectLines(b.Instance.GetSymbolGeometry(), Transform.Identity, symbol, 0);
+            return symbol;
+        }
+
         static bool CollectLines(GeometryElement geom, Transform tf, Core.BlockSymbol symbol, int depth)
         {
             if (geom == null || depth > 6) return true;

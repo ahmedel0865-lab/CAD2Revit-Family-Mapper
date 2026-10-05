@@ -76,6 +76,28 @@ namespace SmartHostMEP.Core
             return Math.Sqrt(qx * qx + qy * qy);
         }
 
+        /// <summary>Every segment within <paramref name="radiusFt"/> of (x, y) whose payload passes
+        /// <paramref name="accept"/>, with its distance.</summary>
+        public List<EdgeHit<T>> Within(double x, double y, double radiusFt, Func<T, bool> accept = null)
+        {
+            var hits = new List<EdgeHit<T>>();
+            var done = new HashSet<int>();
+            for (long cx = C(x - radiusFt); cx <= C(x + radiusFt); cx++)
+                for (long cy = C(y - radiusFt); cy <= C(y + radiusFt); cy++)
+                {
+                    if (!_grid.TryGetValue((cx, cy), out var list)) continue;
+                    foreach (var i in list)
+                    {
+                        if (!done.Add(i)) continue;
+                        var s = _segs[i];
+                        double d = SegmentDistance(x, y, s.x1, s.y1, s.x2, s.y2);
+                        if (d > radiusFt || (accept != null && !accept(s.payload))) continue;
+                        hits.Add(new EdgeHit<T> { X1 = s.x1, Y1 = s.y1, X2 = s.x2, Y2 = s.y2, Payload = s.payload, DistanceFt = d });
+                    }
+                }
+            return hits;
+        }
+
         /// <summary>Nearest segment within <paramref name="radiusFt"/> whose payload passes
         /// <paramref name="accept"/>, or null.</summary>
         public EdgeHit<T> Nearest(double x, double y, double radiusFt, Func<T, bool> accept = null)
@@ -153,6 +175,65 @@ namespace SmartHostMEP.Core
                 MovedFt = new V3(block.X - onPlan.X, block.Y - onPlan.Y, 0).Length,
             };
         }
+
+        /// <summary>An edge counts as parallel to the device when its direction is within this
+        /// many degrees of the device's wall direction (symbol back line, or block X axis).</summary>
+        public const double AlignDeg = 15;
+        /// <summary>The device must sit along the edge: the block point projected onto the edge's
+        /// line may fall outside the segment by at most this much (mm).</summary>
+        public const double EndMarginMm = 100;
+
+        /// <summary>Angle (0-90 deg) between the edge a-b and direction <paramref name="dir"/>, ignoring sense.</summary>
+        public static double AngleOffDeg(V3 a, V3 b, V3 dir)
+        {
+            var e = new V3(b.X - a.X, b.Y - a.Y, 0).Normalize();
+            var d = new V3(dir.X, dir.Y, 0).Normalize();
+            double c = Math.Min(1, Math.Abs(e.Dot(d)));
+            return Math.Acos(c) * 180 / Math.PI;
+        }
+
+        /// <summary>True when the block point projects onto the segment a-b (within <see cref="EndMarginMm"/>
+        /// of its ends): the device sits along that wall, not beyond its end or across a door opening.</summary>
+        public static bool Covers(V3 block, V3 a, V3 b)
+        {
+            var d = new V3(b.X - a.X, b.Y - a.Y, 0);
+            double len = d.Length;
+            if (len < 1e-9) return false;
+            double t = new V3(block.X - a.X, block.Y - a.Y, 0).Dot(d * (1 / len));
+            double m = EndMarginMm / MmPerFoot;
+            return t >= -m && t <= len + m;
+        }
+
+        /// <summary>
+        /// The edge for a device at <paramref name="block"/> among <paramref name="hits"/>:
+        /// 1. only edges the device sits along (<see cref="Covers"/>);
+        /// 2. edges parallel to <paramref name="wallDir"/> (within <see cref="AlignDeg"/>) win over
+        ///    others, even if a little farther: at a corner the device's own wall wins over the
+        ///    perpendicular one;
+        /// 3. the closest of those. With no parallel edge, the closest covering edge.
+        /// <paramref name="angleOff"/> is the chosen edge's angle to <paramref name="wallDir"/>.
+        /// </summary>
+        public static EdgeHit<T> Choose<T>(IEnumerable<EdgeHit<T>> hits, V3 block, V3 wallDir, out double angleOff)
+        {
+            EdgeHit<T> bestAligned = null, bestOther = null;
+            double offAligned = 0, offOther = 0;
+            foreach (var h in hits)
+            {
+                var a = new V3(h.X1, h.Y1, 0);
+                var b = new V3(h.X2, h.Y2, 0);
+                if (!Covers(block, a, b)) continue;
+                double off = AngleOffDeg(a, b, wallDir);
+                if (off <= AlignDeg)
+                {
+                    if (bestAligned == null || h.DistanceFt < bestAligned.DistanceFt) { bestAligned = h; offAligned = off; }
+                }
+                else if (bestOther == null || h.DistanceFt < bestOther.DistanceFt) { bestOther = h; offOther = off; }
+            }
+            angleOff = bestAligned != null ? offAligned : offOther;
+            return bestAligned ?? bestOther;
+        }
+
+        public static string OffAngleReason(double deg) => $"Wall is {deg:0}° off the block/symbol direction - check the orientation";
 
         public static bool NeedsSnapReview(EdgePlan p) => p.MovedFt * MmPerFoot > SnapReviewMm;
     }

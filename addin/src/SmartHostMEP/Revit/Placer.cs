@@ -778,6 +778,19 @@ namespace SmartHostMEP.Revit
                 // plane, reference direction along the plane (upright, not mirrored).
                 // Facing from the block's real +Y axis (correct for mirrored blocks too).
                 var f = VerticalPlacement.Facing(b.FacingAngle + row.RotationDeg * Math.PI / 180.0);
+                // Host Type "Vertical plane": a symbol with a flat back (socket half circle, switch
+                // base line) gives the wall direction and the facing directly, whatever the block
+                // rotation: the device faces from its back line toward the rest of the symbol.
+                string dirSource = "block rotation";
+                if (row.Host == HostMode.Vertical)
+                {
+                    if (SymbolBack(b) is V3 back)
+                    {
+                        double r = row.RotationDeg * Math.PI / 180.0;
+                        f = new V3(back.X * Math.Cos(r) - back.Y * Math.Sin(r), back.X * Math.Sin(r) + back.Y * Math.Cos(r), 0);
+                        dirSource = "symbol back line";
+                    }
+                }
                 var facing = new XYZ(f.X, f.Y, 0);
                 var planePoint = target;
                 bool snapped = false;
@@ -788,11 +801,13 @@ namespace SmartHostMEP.Revit
                 if (row.Host == HostMode.Vertical)
                 {
                     EdgeHit<EdgeInfo> edge;
+                    double angleOff;
+                    var wallDir = new V3(-f.Y, f.X, 0);   // along the wall = Z x facing
                     using (_timer.Time(Phases.HostQuery))
                     {
                         if (_edges == null)
                             using (_timer.Time(Phases.HostIndex)) _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab);
-                        edge = _edges.Find(x, y, target.Z);
+                        edge = _edges.Find(x, y, target.Z, wallDir, out angleOff);
                     }
                     if (edge != null)
                     {
@@ -801,10 +816,16 @@ namespace SmartHostMEP.Revit
                         facing = new XYZ(ep.Facing.X, ep.Facing.Y, 0);
                         planePoint = new XYZ(ep.Point.X, ep.Point.Y, ep.Point.Z);
                         snapped = _slab.PlanePosition == PlanePosition.SnapToFace;
-                        notes.Add($"plane parallel to {edge.Payload.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : ""));
+                        notes.Add($"plane parallel to {edge.Payload.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : "") +
+                                  $" ({angleOff:0}° from the {dirSource})");
                         if (EdgeSnap.NeedsSnapReview(ep)) plan.Review.Add(EdgeSnap.SnapMovedReason(ep.MovedFt * MmPerFoot));
+                        if (angleOff > EdgeSnap.AlignDeg) plan.Review.Add(EdgeSnap.OffAngleReason(angleOff));
                     }
-                    else plan.Review.Add(EdgeSnap.NoEdgeReason(_slab.EdgeSearchMm));
+                    else
+                    {
+                        notes.Add("no wall/column along the device - plane from the " + dirSource);
+                        plan.Review.Add(EdgeSnap.NoEdgeReason(_slab.EdgeSearchMm));
+                    }
                 }
                 // The plane passes through the plane point (or is colinear with it, < 5 mm); the
                 // family goes on it at level + Elevation From Level, reference direction = the
@@ -996,6 +1017,27 @@ namespace SmartHostMEP.Revit
                 _symbolCentres[key] = local;
             }
             return local == null ? null : b.Transform.OfPoint(local);
+        }
+
+        readonly Dictionary<string, BackLine> _backLines = new Dictionary<string, BackLine>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Facing from the symbol's flat back line (see Core.SymbolBackLine), in model
+        /// coordinates (the block transform handles rotation and mirroring); null when the symbol
+        /// has no single straight back. Detected once per block name.</summary>
+        V3? SymbolBack(BlockRef b)
+        {
+            if (b.Instance == null || b.Transform == null) return null;
+            var key = b.Name ?? "";
+            if (!_backLines.TryGetValue(key, out var back))
+            {
+                try { back = SymbolBackLine.Find(DwgReader.LocalSymbol(b).Paths); }
+                catch (Exception) { back = null; }
+                _backLines[key] = back;
+            }
+            if (back == null) return null;
+            var v = b.Transform.OfVector(new XYZ(back.Inward.X, back.Inward.Y, 0));
+            var flat = new V3(v.X, v.Y, 0);
+            return flat.Length < 1e-9 ? (V3?)null : flat.Normalize();
         }
 
         static BlockRef AtPoint(BlockRef b, XYZ p) => new BlockRef

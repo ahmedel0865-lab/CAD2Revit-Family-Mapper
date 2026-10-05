@@ -42,16 +42,20 @@ namespace SmartHostMEP.Revit
             _radiusFt = Math.Max(_opts.EdgeSearchMm, 1) / EdgeSnap.MmPerFoot;
         }
 
-        /// <summary>Nearest Revit wall/column face within the radius that exists at height z,
-        /// else the nearest DWG wall/column line, else null.</summary>
-        public EdgeHit<EdgeInfo> Find(double x, double y, double z)
+        /// <summary>The Revit wall/column face for a device at (x, y, z), else the DWG wall/column
+        /// line, else null - chosen by <see cref="EdgeSnap.Choose"/>: within the radius, the device
+        /// must sit along it, and faces parallel to <paramref name="wallDir"/> (symbol back line or
+        /// block X axis) win over closer perpendicular ones. <paramref name="angleOff"/> = the chosen
+        /// face's angle to <paramref name="wallDir"/>.</summary>
+        public EdgeHit<EdgeInfo> Find(double x, double y, double z, V3 wallDir, out double angleOff)
         {
             if (_revit == null) BuildRevit();
             const double tol = 0.5;   // ft: walls/columns that reach the device height (with a margin)
-            var hit = _revit.Nearest(x, y, _radiusFt, e => z >= e.ZMin - tol && z <= e.ZMax + tol);
+            var block = new V3(x, y, 0);
+            var hit = EdgeSnap.Choose(_revit.Within(x, y, _radiusFt, e => z >= e.ZMin - tol && z <= e.ZMax + tol), block, wallDir, out angleOff);
             if (hit != null) return hit;
             if (_cad == null) BuildDwg();
-            return _cad.Nearest(x, y, _radiusFt);
+            return EdgeSnap.Choose(_cad.Within(x, y, _radiusFt), block, wallDir, out angleOff);
         }
 
         IEnumerable<(Document doc, RevitLinkInstance link, Transform tf, string name)> Sources()

@@ -82,6 +82,9 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12t | Column | Block 200 mm from a structural column's face: the plane is parallel to that face |
 | 12u | DWG walls only | No Revit walls, DWG walls on layer `A-WALL`: the plane follows the DWG wall line. Change the layer list to `X-*`: Needs Review "No wall/column within 600 mm - used block rotation". Tick *All layers*: it follows the wall line again |
 | 12v | Same face, one plane | Three sockets along the same wall face: one shared plane. A block 300 mm from the face with *Snap to face*: Needs Review "Moved 300 mm to snap to the wall/column face" |
+| 12w | Room corner | A socket rotated to wall A, 250 mm from A and 150 mm from the perpendicular wall B: the plane follows A (log: "0° from the ..."). Before 0.27 it followed B |
+| 12x | Wall end / door | A socket 400 mm past the end of a wall, next to a door opening, with another wall 400 mm behind it: the plane follows the wall it sits along, not the one that ends |
+| 12y | Symbol back line | A socket block (half circle with a flat back) inserted with the wrong rotation (0° on a vertical wall): it still faces the room (log: "from the symbol back line"). A round light symbol uses the block rotation |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.
