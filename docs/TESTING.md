@@ -85,6 +85,7 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12w | Room corner | A socket rotated to wall A, 250 mm from A and 150 mm from the perpendicular wall B: the plane follows A (log: "0° from the ..."). Before 0.27 it followed B |
 | 12x | Wall end / door | A socket 400 mm past the end of a wall, next to a door opening, with another wall 400 mm behind it: the plane follows the wall it sits along, not the one that ends |
 | 12y | Symbol back line | A socket block (half circle with a flat back) inserted with the wrong rotation (0° on a vertical wall): it still faces the room (log: "from the symbol back line"). A round light symbol uses the block rotation |
+| 12z | Multi-row edit | Ctrl+click three rows (also on their Revit Family dropdowns: the dropdowns do not open), pick a family in one of them: all three get it. Change Elevation and Host Type the same way. Shift+click selects a range. Click a CAD Block name: only that row stays selected, and edits change only it |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

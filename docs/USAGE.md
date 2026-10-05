@@ -94,7 +94,8 @@ The elevation is also the fallback height if a ceiling is not found.
 - `floor` is a short name for **Slab (below)** (top of slab). For devices on a slab **soffit**, use `slab`, `slab above` or `face`.
 
 - **Edit many rows at once:**
-  1. Select rows with **Ctrl+click**, **Shift+click**, or **Ctrl+A** / *Select all shown* (all rows after Find / Show).
+  1. Select rows with **Ctrl+click** (adds or removes one row) or **Shift+click** (every shown row between the last clicked row and this one), anywhere on the row: over the dropdowns too, they do not open while Ctrl/Shift is held. Or **Ctrl+A** / *Select all shown* (all rows after Find / Show).
+  - **Edit in the grid:** with several rows selected, change a cell in any of them (Revit Family, Level, Elevation, Rotation, Host Type, Facing, Place At, Category) and the same value is set on every selected row. Click the CAD Block name of a row to go back to selecting just that row.
   2. In the bar above the grid, choose the values to set: **Host Type**, **Level**, **Elevation (mm)**, **Facing** and/or **Category**. Fields left at *(keep)*, or an empty elevation, are not changed.
   3. Click **Apply to selected rows**.
 

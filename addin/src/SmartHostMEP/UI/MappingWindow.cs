@@ -6,6 +6,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Threading;
 using System.Windows.Media;
 using SmartHostMEP.Core;
 using Microsoft.Win32;
@@ -277,6 +279,10 @@ namespace SmartHostMEP.UI
             _grid.SelectionMode = DataGridSelectionMode.Extended;
             _grid.SelectionUnit = DataGridSelectionUnit.FullRow;
             _grid.SelectionChanged += (o, e) => { UpdateSelectionLabel(); ShowPreview(null); };
+            // Ctrl/Shift+click work anywhere on a row (also over the dropdowns), and a change made
+            // in one of several selected rows is applied to all of them.
+            _grid.PreviewMouseLeftButtonDown += OnGridMouseDown;
+            _grid.PreviewKeyDown += (o, e) => { if (e.Key == Key.Up || e.Key == Key.Down || e.Key == Key.PageUp || e.Key == Key.PageDown) _editGroup = null; };
             _grid.MouseLeave += (o, e) => ShowPreview(null);
             _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
             _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
@@ -484,7 +490,9 @@ namespace SmartHostMEP.UI
         void UpdateSelectionLabel()
         {
             int n = _grid.SelectedItems.Count;
-            _selectedLabel.Text = n == 0 ? "Select rows (Ctrl/Shift+click, Ctrl+A), then set:" : $"{n} row(s) selected - set:";
+            _selectedLabel.Text = n == 0 ? "Select rows (Ctrl/Shift+click, Ctrl+A), then set:"
+                                : n == 1 ? "1 row selected - set:"
+                                : $"{n} rows selected - edit any of them to change all, or set:";
         }
 
         void ApplyToSelected()
@@ -641,7 +649,102 @@ namespace SmartHostMEP.UI
             };
         }
 
-        void OnRowChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) => UpdateStatus();
+        void OnRowChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            UpdateStatus();
+            // Editing one of several selected rows: the same value goes to every selected row.
+            if (_propagating || _editGroup == null || !(sender is BlockRow src) || !_editGroup.Contains(src)) return;
+            if (!GroupProps.Contains(e.PropertyName)) return;
+            _propagating = true;
+            try
+            {
+                foreach (var r in _editGroup)
+                    if (!ReferenceEquals(r, src)) CopyProp(src, r, e.PropertyName);
+            }
+            finally { _propagating = false; }
+        }
+
+        // ---- Multi-row selection and editing ----------------------------------------------
+        /// <summary>The rows selected when an edit started in one of them (null: single-row editing).</summary>
+        List<BlockRow> _editGroup;
+        bool _propagating;
+        BlockRow _anchor;   // Shift+click range start
+        static readonly HashSet<string> GroupProps = new HashSet<string>
+        {
+            nameof(BlockRow.Family), nameof(BlockRow.Level), nameof(BlockRow.Elevation), nameof(BlockRow.Rotation),
+            nameof(BlockRow.Host), nameof(BlockRow.Facing), nameof(BlockRow.PlaceAt), nameof(BlockRow.Category),
+        };
+
+        static void CopyProp(BlockRow from, BlockRow to, string prop)
+        {
+            switch (prop)
+            {
+                case nameof(BlockRow.Family): to.Family = from.Family; break;
+                case nameof(BlockRow.Level): to.Level = from.Level; break;
+                case nameof(BlockRow.Elevation): to.Elevation = from.Elevation; break;
+                case nameof(BlockRow.Rotation): to.Rotation = from.Rotation; break;
+                case nameof(BlockRow.Host): to.Host = from.Host; to.HostBeforeAll = null; break;
+                case nameof(BlockRow.Facing): to.Facing = from.Facing; break;
+                case nameof(BlockRow.PlaceAt): to.PlaceAt = from.PlaceAt; break;
+                case nameof(BlockRow.Category): to.Category = from.Category; break;
+            }
+        }
+
+        static T Ancestor<T>(DependencyObject d) where T : DependencyObject
+        {
+            while (d != null && !(d is T))
+                d = d is Visual || d is System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+            return d as T;
+        }
+
+        void OnGridMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            var src = e.OriginalSource as DependencyObject;
+            var rowEl = Ancestor<DataGridRow>(src);
+            if (rowEl == null || !(rowEl.Item is BlockRow item)) return;   // header, scrollbar...
+            var mods = Keyboard.Modifiers;
+            if ((mods & ModifierKeys.Control) != 0)
+            {
+                // Ctrl+click: add / remove this row, wherever on the row (dropdowns do not open).
+                CommitEdits();
+                if (_grid.SelectedItems.Contains(item)) _grid.SelectedItems.Remove(item);
+                else _grid.SelectedItems.Add(item);
+                _anchor = item;
+                _grid.Focus();
+                e.Handled = true;
+                return;
+            }
+            if ((mods & ModifierKeys.Shift) != 0)
+            {
+                // Shift+click: every shown row from the last clicked one to this one.
+                CommitEdits();
+                var shown = _grid.Items.OfType<BlockRow>().ToList();
+                int a = _anchor != null ? shown.IndexOf(_anchor) : -1, b = shown.IndexOf(item);
+                if (a < 0) a = b;
+                _grid.SelectedItems.Clear();
+                for (int i = Math.Min(a, b); i <= Math.Max(a, b); i++) _grid.SelectedItems.Add(shown[i]);
+                _grid.Focus();
+                e.Handled = true;
+                return;
+            }
+            _anchor = item;
+            // Plain click in an editable cell of a row that is part of a multi-selection: keep the
+            // selection, and apply what is changed in this row to all selected rows. A click on the
+            // CAD Block name (read-only) selects just that row, as usual.
+            var cell = Ancestor<DataGridCell>(src);
+            var sel = _grid.SelectedItems.OfType<BlockRow>().ToList();
+            if (sel.Count > 1 && sel.Contains(item) && cell != null && !cell.Column.IsReadOnly)
+            {
+                _editGroup = sel;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_editGroup == null) return;
+                    foreach (var r in _editGroup)
+                        if (!_grid.SelectedItems.Contains(r)) _grid.SelectedItems.Add(r);
+                }), DispatcherPriority.Input);
+            }
+            else _editGroup = null;
+        }
 
         void UpdateStatus()
         {
@@ -663,6 +766,7 @@ namespace SmartHostMEP.UI
         {
             _grid.CommitEdit(DataGridEditingUnit.Cell, true);
             _grid.CommitEdit(DataGridEditingUnit.Row, true);
+            _editGroup = null;   // buttons (Apply, Auto-match, Load...) change rows themselves
         }
 
         // ---- Slab (above) options ------------------------------------------------------

@@ -49,7 +49,7 @@ flowchart LR
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.
 - **Revit Family starts at `(Skip)`** every time the tool opens, so you pick the families for this run yourself. **Auto-match** pre-selects families whose names match the block name (`SMOKE-DET` → *Smoke Detector*, common CAD abbreviations included) when you click it, and **Clear All Families** sets every row back to `(Skip)`.
 - **Level + elevation per row**: different blocks can go on different levels in one run.
-- **Edit many rows at once**: select rows (Ctrl/Shift+click, Ctrl+A) and set Host Type, Level, Elevation, Facing or Category together.
+- **Edit many rows at once**: select rows with **Ctrl+click** (add/remove one row) or **Shift+click** (a range), anywhere on the row, even over the dropdowns, or **Ctrl+A**. Then change any cell in one of the selected rows: Revit Family, Level, Elevation, Rotation, Host Type, Facing, Place At or Category is set on **all selected rows**. The bar above the grid can also set several fields at once.
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
 - **Remembers per project** Elevation From Level, Host Type, Rotation, Facing, Level and the Slab (above) / Ceiling search range and fallback height, but not the families. Load / Save mappings as **.xlsx or .csv**; **Load...** is the only way families are filled in from a file.
 

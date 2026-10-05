@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.0] - 2026-10-05
+### Added: select several rows and edit them together
+- **Ctrl+click** adds or removes a row and **Shift+click** selects a range, anywhere on the row, including over the Revit Family and other dropdowns (they no longer open or grab the click while Ctrl/Shift is held).
+- **Edit one, change all:** with several rows selected, changing a cell in any of them sets the same value on every selected row. This works for Revit Family, Level, Elevation, Rotation, Host Type, Facing, Place At and Category.
+- Clicking a row's CAD Block name selects just that row again. The bar above the grid still sets several fields at once.
+
 ## [0.27.0] - 2026-10-05
 ### Improved: vertical planes pick the right wall more often
 - **The device must sit along the wall.** A wall or column face only counts when the block point projects onto it (within 100 mm of its ends). A wall that ends before the device, or stops at a door opening, is no longer used.
