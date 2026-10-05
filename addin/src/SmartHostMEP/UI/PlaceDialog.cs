@@ -26,9 +26,15 @@ namespace SmartHostMEP.UI
         readonly CheckBox _nested = new CheckBox { Text = "Include blocks nested inside other blocks", AutoSize = true };
 
         public PlaceOptions Result { get; private set; }
+        /// <summary>"Pick in view" was clicked: the command lets the user click a DWG in the view,
+        /// then opens this dialog again with it selected.</summary>
+        public bool PickRequested { get; private set; }
+        public bool IncludeNested => _nested.Checked;
         Document _doc;
 
-        public PlaceDialog(Document doc, Settings settings)
+        /// <param name="preselect">DWG to select first (picked in the view, or selected in Revit); null:
+        /// the one used last time (settings LastDwg), else the first.</param>
+        public PlaceDialog(Document doc, Settings settings, ElementId preselect = null, bool? includeNested = null)
         {
             Text = "SmartHost MEP - Place Families (1/2)";
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -41,9 +47,13 @@ namespace SmartHostMEP.UI
 
             var imports = Items.Imports(doc);
             _dwg.Items.AddRange(imports.ToArray());
-            if (imports.Count > 0) _dwg.SelectedIndex = 0;
+            int sel = preselect != null ? imports.FindIndex(i => i.Element.Id == preselect) : -1;
+            if (sel < 0 && !string.IsNullOrEmpty(settings.LastDwg))
+                sel = imports.FindIndex(i => string.Equals(Items.DwgName(doc, i.Element), settings.LastDwg, StringComparison.OrdinalIgnoreCase));
+            if (imports.Count > 0) _dwg.SelectedIndex = Math.Max(sel, 0);
+            _dwg.DropDownWidth = 640;
             _doc = doc;
-            _nested.Checked = settings.IncludeNestedBlocks;
+            _nested.Checked = includeNested ?? settings.IncludeNestedBlocks;
 
             var grid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, RowCount = 3, Padding = new Padding(12), AutoSize = true };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
@@ -58,7 +68,10 @@ namespace SmartHostMEP.UI
             };
             grid.Controls.Add(L("DWG link / import"), 0, 0);
             grid.Controls.Add(_dwg, 1, 0);
-            grid.SetColumnSpan(_dwg, 2);
+            var pick = new Button { Text = "Pick in view...", AutoSize = true, Margin = new Padding(6, 2, 0, 2) };
+            new ToolTip().SetToolTip(pick, "Click the DWG in the Revit view instead of choosing it from the list (Esc to come back)");
+            pick.Click += (s, e) => { PickRequested = true; DialogResult = DialogResult.Retry; Close(); };
+            grid.Controls.Add(pick, 2, 0);
             grid.Controls.Add(_nested, 1, 1);
             grid.SetColumnSpan(_nested, 2);
             var note = new Label

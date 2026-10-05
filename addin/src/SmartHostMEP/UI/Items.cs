@@ -20,16 +20,20 @@ namespace SmartHostMEP.UI
             new FilteredElementCollector(doc).OfClass(typeof(ImportInstance)).Cast<ImportInstance>()
                 .Select(imp =>
                 {
-                    var type = doc.GetElement(imp.GetTypeId());
                     var kind = imp.IsLinked ? "Link" : "Import";
-                    if (imp.ViewSpecific) kind += ", view-only";
+                    string where = "";
+                    if (imp.ViewSpecific && doc.GetElement(imp.OwnerViewId) is View owner) where = ", view-only in '" + owner.Name + "'";
+                    else if (imp.LevelId != ElementId.InvalidElementId && doc.GetElement(imp.LevelId) is Level lvl) where = ", on " + lvl.Name;
                     return new Item<ImportInstance>
                     {
                         Element = imp,
-                        Name = $"{type?.Name ?? "DWG"} - {kind} (id {Compat.IdValue(imp.Id)})",
+                        Name = $"{DwgName(doc, imp)} - {kind}{where} (id {Compat.IdValue(imp.Id)})",
                     };
                 })
                 .OrderBy(i => i.Name).ToList();
+
+        /// <summary>The DWG's file/type name as Revit shows it.</summary>
+        public static string DwgName(Document doc, ImportInstance imp) => doc.GetElement(imp.GetTypeId())?.Name ?? "DWG";
 
         public static List<Item<Level>> Levels(Document doc) =>
             new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()

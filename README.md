@@ -95,7 +95,7 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
-2. **SmartHost MEP > Place Families** > pick the DWG > **Next**.
+2. **SmartHost MEP > Place Families** > pick the DWG from the list (every DWG link and import in the project, with its level or view) or click **Pick in view...** and click it in the drawing > **Next**. A DWG already selected in Revit, or the one used last time, is pre-selected.
 3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select close matches, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
 4. **Preview** > check the result and the *Detected Host* column > **Run**. One Ctrl+Z undoes it all.
 

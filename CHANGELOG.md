@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.29.0] - 2026-10-05
+### Added: pick the DWG in the view
+- **Pick in view...** button next to the DWG list: click the DWG link or import in the Revit view instead of choosing it from the list (only DWGs can be clicked; Esc goes back to the list).
+- The **DWG list** shows every DWG link and import in the project with its level (or its view, for view-only links), and opens wider so long names are readable.
+- **Pre-selected DWG:** a DWG selected in Revit before starting, else the DWG used last time (saved as `LastDwg` in settings.ini).
+
 ## [0.28.0] - 2026-10-05
 ### Added: select several rows and edit them together
 - **Ctrl+click** adds or removes a row and **Shift+click** selects a range, anywhere on the row, including over the Revit Family and other dropdowns (they no longer open or grab the click while Ctrl/Shift is held).

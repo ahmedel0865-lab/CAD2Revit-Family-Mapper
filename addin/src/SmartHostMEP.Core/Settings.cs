@@ -32,6 +32,7 @@ namespace SmartHostMEP.Core
         public bool WriteBlockNameToComments = true;
         // Remembered between runs
         public string LastMappingPath = "";
+        public string LastDwg = "";                    // DWG (link type name) picked last time: pre-selected next time
 
         public static string DefaultPath =>
             Path.Combine(AppStorage.Root, "settings.ini");
@@ -81,6 +82,7 @@ namespace SmartHostMEP.Core
                 case "centergeometryoncadpoint": CenterGeometryOnCadPoint = B(CenterGeometryOnCadPoint); break;
                 case "writeblocknametocomments": WriteBlockNameToComments = B(WriteBlockNameToComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
+                case "lastdwg": LastDwg = val; break;
             }
         }
 
@@ -121,6 +123,7 @@ namespace SmartHostMEP.Core
             sb.AppendLine();
             sb.AppendLine("# Remembered automatically.");
             sb.AppendLine("LastMappingPath = " + LastMappingPath);
+            sb.AppendLine("LastDwg = " + LastDwg);
             return sb.ToString();
         }
 

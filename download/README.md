@@ -1,6 +1,6 @@
 # Download
 
-**[SmartHostMEP-0.28.0.zip](SmartHostMEP-0.28.0.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
+**[SmartHostMEP-0.29.0.zip](SmartHostMEP-0.29.0.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
 
 1. Click the zip above, then click **Download** (or the download icon) on the next page.
 2. Close Revit, unzip, double-click `Install.bat`.

@@ -36,12 +36,36 @@ namespace SmartHostMEP.Commands
                 }
 
                 // 1. DWG (the starting level comes from the DWG; rows can change it).
+                // The DWG comes from the list, or is clicked in the view ("Pick in view"); a DWG
+                // already selected in Revit is pre-selected.
                 PlaceOptions opts;
-                using (var dlg = new PlaceDialog(doc, settings))
+                var uidocPick = uiapp.ActiveUIDocument;
+                ElementId pre = uidocPick.Selection.GetElementIds().FirstOrDefault(id => doc.GetElement(id) is ImportInstance);
+                bool? nested = null;
+                while (true)
                 {
-                    if (dlg.ShowDialog(RevitOwner.Win32) != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
-                    opts = dlg.Result;
+                    using (var dlg = new PlaceDialog(doc, settings, pre, nested))
+                    {
+                        var shown = dlg.ShowDialog(RevitOwner.Win32);
+                        if (dlg.PickRequested)
+                        {
+                            nested = dlg.IncludeNested;
+                            try
+                            {
+                                var picked = uidocPick.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
+                                    new ImportSelectionFilter(), "SmartHost MEP: click a DWG link or import in the view (Esc = back to the list)");
+                                if (picked != null) pre = picked.ElementId;
+                            }
+                            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc: back to the dialog */ }
+                            continue;
+                        }
+                        if (shown != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
+                        opts = dlg.Result;
+                        break;
+                    }
                 }
+                settings.LastDwg = Items.DwgName(doc, opts.Import);
+                Core.Settings.TrySave(settings);
                 if (opts.Level == null)
                 {
                     TaskDialog.Show("SmartHost MEP", "This model has no levels.");
@@ -167,6 +191,13 @@ namespace SmartHostMEP.Commands
                 TaskDialog.Show("SmartHost MEP - error", ex.ToString());
                 return Result.Failed;
             }
+        }
+
+        /// <summary>Only DWG links / imports can be clicked when picking the DWG in the view.</summary>
+        class ImportSelectionFilter : Autodesk.Revit.UI.Selection.ISelectionFilter
+        {
+            public bool AllowElement(Element elem) => elem is ImportInstance;
+            public bool AllowReference(Reference reference, XYZ position) => false;
         }
 
         enum ExistingChoice { Skip, PlaceAnyway, Cancel }
