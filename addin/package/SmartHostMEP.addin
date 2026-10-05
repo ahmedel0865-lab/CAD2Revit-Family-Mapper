@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>SmartHost MEP</Name>
+    <Assembly>SmartHostMEP\SmartHostMEP.dll</Assembly>
+    <AddInId>6f1c2a57-3b8e-4d0a-9c3e-2f7b5d9e8a41</AddInId>
+    <FullClassName>SmartHostMEP.App</FullClassName>
+    <VendorId>SmartHostMEP</VendorId>
+    <VendorDescription>SmartHost MEP (formerly SmartHost MEP) - https://github.com/ahmedel0865-lab/SmartHost-MEP</VendorDescription>
+  </AddIn>
+</RevitAddIns>
