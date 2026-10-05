@@ -31,7 +31,7 @@ Block scale is recorded in the log (`Block_Scale`) but not applied. Family size 
 - If no host is found and `FallbackToUnhosted = true`, the element is placed unhosted at the row's offset. For `wall` rows, face-based devices stand upright on a vertical plane. For `ceiling`/`face` rows, a face-based family lies on the level's work plane (facing up).
 
 ## Duplicate check
-An existing instance of the **same family** within 50 mm in plan, between the target level and the next level up, counts as a duplicate. Instances in linked models are not checked. If you change the mapping to a *different family* for a block, the old instances are not detected: delete them first (filter by Comments = `CAD: ...`).
+An existing instance of the **same family** within 50 mm in plan, between the target level and the next level up, counts as a duplicate. Instances in linked models are not checked. If you change the mapping to a *different family* for a block, the old instances are not detected: delete them first (with `WriteComments = true`, filter by Comments = `SmartHost: ...`).
 
 ## Other
 - Only one DWG and one level per run. Run once per floor.

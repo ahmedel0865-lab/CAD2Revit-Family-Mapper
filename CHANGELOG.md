@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.30.0] - 2026-10-05
+### Changed: the Comments parameter is left empty
+- Placed elements no longer get anything written into **Comments** (no `SmartHost: <block>`, no `SmartHost: Host = Reference Plane`). Fallback elements are still listed in **Needs Review** with their Element ID.
+- To write them again, set `WriteComments = true` in settings.ini. The old `WriteBlockNameToComments` key is ignored, because settings files written by earlier versions all say true.
+- The duplicate check still works: an instance of the same family at the block location counts, and Comments written by earlier runs (`SmartHost:`, `CAD:`, `CAD2Revit:`) are still recognised.
+
 ## [0.29.0] - 2026-10-05
 ### Added: pick the DWG in the view
 - **Pick in view...** button next to the DWG list: click the DWG link or import in the Revit view instead of choosing it from the list (only DWGs can be clicked; Esc goes back to the list).

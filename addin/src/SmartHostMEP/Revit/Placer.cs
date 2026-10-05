@@ -299,12 +299,13 @@ namespace SmartHostMEP.Revit
                             var inst = _doc.GetElement(c.Id);
                             if (inst == null) continue;
                             SetParam(inst, BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM, c.Level.Id);
-                            if (c.Result.SlabFallback ||   // findable later with a filter or schedule on Comments
-                                (c.Result.Review ?? "").StartsWith("No wall", StringComparison.Ordinal))
+                            // Comments are left untouched unless WriteComments = true in settings.ini.
+                            if (_settings.WriteComments)
+                            {
+                                bool fallback = c.Result.SlabFallback || (c.Result.Review ?? "").StartsWith("No wall", StringComparison.Ordinal);
                                 SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS,
-                                         NeedsReview.CommentText + (_settings.WriteBlockNameToComments ? " | " + ExistingIndex.Tag + c.BlockName : ""));
-                            else if (_settings.WriteBlockNameToComments)
-                                SetParam(inst, BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS, ExistingIndex.Tag + c.BlockName);
+                                         (fallback ? NeedsReview.CommentText + " | " : "") + ExistingIndex.Tag + c.BlockName);
+                            }
                             if (c.Offset.HasValue && !SetOffset(inst, c.Offset.Value) && Math.Abs(c.Offset.Value) > 1e-9)
                                 c.Result.Message = (c.Result.Message.Length > 0 ? c.Result.Message + "; " : "") + "could not set offset";
                         }

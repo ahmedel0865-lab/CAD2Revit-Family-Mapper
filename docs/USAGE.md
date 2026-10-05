@@ -63,7 +63,7 @@ SmartHost MEP is a **standalone Revit add-in**. It does not need pyRevit or any 
 - The dropdown lists loaded family types in the electrical categories: Lighting Fixtures, Lighting Devices (switches), Electrical Fixtures, Electrical Equipment, Fire Alarm Devices, Communication Devices, Data Devices, Security Devices, Nurse Call Devices and Telephone Devices. A family from another category is added to the list automatically when a loaded mapping file uses it.
 - **Families start at `(Skip)`:** every time the tool opens, the Revit Family of every row is `(Skip)`. Nothing is filled in from the last run or by name. Click **Auto-match** to pre-select families whose names closely match (e.g. `SMOKE-DET` → *Smoke Detector*, `SKT-DOUBLE` → *Duplex Receptacle*, `MCP` → *Manual Call Point*), or **Load...** a mapping file. Always check the pre-selections. **Clear All Families** sets every row back to `(Skip)`.
 - **Remembered per project:** the grid is saved automatically when you click Preview or Run. The next time you open the mapping window in the same project, Elevation From Level, Host Type, Rotation, Facing, Level, Category and the Slab (above) / Ceiling values are restored; the families are not. The file is `%AppData%\SmartHostMEP\projects\<project>_<id>.xlsx`, in the normal mapping format.
-- **Already placed?** Before a Run, if elements are already at the block locations (same family within the duplicate tolerance, or Comments `CAD: <block>`), the tool asks *"X elements already exist at these locations"*: **Skip them** (default), **Place anyway**, or **Cancel** to go back to the mapping window.
+- **Already placed?** Before a Run, if elements are already at the block locations (same family within the duplicate tolerance, or Comments `SmartHost: <block>` / `CAD: <block>` written by an earlier run), the tool asks *"X elements already exist at these locations"*: **Skip them** (default), **Place anyway**, or **Cancel** to go back to the mapping window.
 - **Load Mapping... / Save Mapping...** read and write the normal mapping file (XLSX or CSV, format below), e.g. to reuse one mapping across projects or share it with the team. Loading only changes the rows whose block names are in the file.
 
 4. Click **Preview**. The tool runs the full placement, including host searches, and then **undoes it**. The result window shows exactly what *Run* would do: counts per family type, unmapped blocks, failures with reasons. **Close the result window to return to the mapping window** with your choices kept, adjust, and preview again.
@@ -132,7 +132,7 @@ Header spelling is flexible (`Offset_From_Level (mm)`, `offset from level mm`, .
 - A `smarthost_log_<date>.csv` (or `smarthost_preview_<date>.csv`) is saved in `Documents\\SmartHostMEP\\Logs\\<project>\\`. It has one row per block with:
   `Status, CAD_Block, Family, Type, Level, ElementId, Host, X_mm, Y_mm, Z_mm, Rotation_deg, Block_Scale, Mirrored, Message`.
   Coordinates are Revit internal coordinates in mm. To find an element, copy its ElementId into *Manage > Select by ID*.
-- Each placed element's **Comments** parameter contains `CAD: <block name>`. You can use it in schedules and filters, e.g. to select everything the tool placed.
+- The **Comments** parameter of placed elements is left empty. Set `WriteComments = true` in settings.ini to write `SmartHost: <block name>` there (and `SmartHost: Host = Reference Plane` on fallback elements), for schedules and filters.
 - Running the tool again skips blocks that already have an instance of the same family within 50 mm on the same level (status `duplicate`). So after adding blocks to the DWG, re-running only adds the new ones.
 
 Statuses in the log:
@@ -161,7 +161,7 @@ Click **SmartHost MEP > Tools > Settings** to open it in Notepad. Settings are s
 | `SlabSearchToleranceMm` | 500 | Slab (above) searches up to the next level + this; Slab (below) searches this far below the level. |
 | `SearchRevitLinks` | true | Also host on faces in linked Revit models. |
 | `FallbackToUnhosted` | true | If no host is found, place unhosted at the row offset (`true`), or report as failed (`false`). |
-| `WriteBlockNameToComments` | true | Write `CAD: <block>` into Comments. |
+| `WriteComments` | false | Write `SmartHost: <block>` (and `SmartHost: Host = Reference Plane` on fallback elements) into Comments. Off: Comments is left empty. |
 | `DebugHosting` | false | `true`: each block's log *Message* gets a `DEBUG` line: linked yes/no, link name, host element id and category, face normal, and the final *Host* of the placed instance. Example: `DEBUG linked=yes link=STR.rvt element=412233 (Floors) normal=(0.000,0.000,-1.000); host=Revit link STR.rvt, host face ok`. Existing `settings.ini` files don't have this line; add `DebugHosting = true` yourself. |
 | `CenterGeometryOnCadPoint` | false | Vertical planes. `false`: the family's origin (insertion point) sits on the CAD point. `true`: the family's geometry (bounding box) is centred on the point along the plane instead. Replaces `CenterFamiliesOnCadPoint` (0.16–0.20), which is now ignored. |
 | `LastMappingPath` | | Remembered automatically. |

@@ -29,7 +29,9 @@ namespace SmartHostMEP.Core
         public bool DebugHosting = false;              // per-point hosting details in the log
         public bool CenterGeometryOnCadPoint = false;  // vertical planes: centre the family geometry on the CAD point (off: origin on the point)
         // Output
-        public bool WriteBlockNameToComments = true;
+        /// <summary>Write into the Comments parameter of placed elements ("SmartHost: &lt;block&gt;", and
+        /// "SmartHost: Host = Reference Plane" on fallback elements). Off by default: Comments is left untouched.</summary>
+        public bool WriteComments = false;
         // Remembered between runs
         public string LastMappingPath = "";
         public string LastDwg = "";                    // DWG (link type name) picked last time: pre-selected next time
@@ -80,7 +82,9 @@ namespace SmartHostMEP.Core
                 // "CenterFamiliesOnCadPoint" (0.16-0.20, default true) is ignored on purpose: settings.ini files
                 // written by those versions all say true, and centring by bounding box could push families far away.
                 case "centergeometryoncadpoint": CenterGeometryOnCadPoint = B(CenterGeometryOnCadPoint); break;
-                case "writeblocknametocomments": WriteBlockNameToComments = B(WriteBlockNameToComments); break;
+                // "WriteBlockNameToComments" (up to 0.29, default true) is ignored on purpose: settings.ini files
+                // written by those versions all say true. Comments are now left empty unless WriteComments = true.
+                case "writecomments": WriteComments = B(WriteComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
                 case "lastdwg": LastDwg = val; break;
             }
@@ -119,7 +123,7 @@ namespace SmartHostMEP.Core
             sb.AppendLine("# true = its geometry (bounding box) is centred on the point along the plane instead.");
             sb.AppendLine("CenterGeometryOnCadPoint = " + Bo(CenterGeometryOnCadPoint));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
-            sb.AppendLine("WriteBlockNameToComments = " + Bo(WriteBlockNameToComments));
+            sb.AppendLine("WriteComments = " + Bo(WriteComments));
             sb.AppendLine();
             sb.AppendLine("# Remembered automatically.");
             sb.AppendLine("LastMappingPath = " + LastMappingPath);
