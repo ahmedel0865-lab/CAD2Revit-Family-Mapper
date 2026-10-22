@@ -28,6 +28,10 @@ namespace SmartHostMEP.Core
         public bool FallbackToUnhosted = true;
         public bool DebugHosting = false;              // per-point hosting details in the log
         public bool CenterGeometryOnCadPoint = false;  // vertical planes: centre the family geometry on the CAD point (off: origin on the point)
+        // Vertical planes: DWG wall-line score weights (see Core.WallLineScorer)
+        public ScoreWeights LineScore = new ScoreWeights();
+        /// <summary>After Preview/Run, draw the line chosen for each vertical-plane block as detail lines.</summary>
+        public bool ShowDetection = false;
         // Output
         /// <summary>Write into the Comments parameter of placed elements ("SmartHost: &lt;block&gt;", and
         /// "SmartHost: Host = Reference Plane" on fallback elements). Off by default: Comments is left untouched.</summary>
@@ -84,6 +88,13 @@ namespace SmartHostMEP.Core
                 case "centergeometryoncadpoint": CenterGeometryOnCadPoint = B(CenterGeometryOnCadPoint); break;
                 // "WriteBlockNameToComments" (up to 0.29, default true) is ignored on purpose: settings.ini files
                 // written by those versions all say true. Comments are now left empty unless WriteComments = true.
+                case "linescoretouch": LineScore.Touch = D(LineScore.Touch); break;
+                case "linescoredistance": LineScore.Distance = D(LineScore.Distance); break;
+                case "linescorelength": LineScore.Length = D(LineScore.Length); break;
+                case "linescorecontinuity": LineScore.Continuity = D(LineScore.Continuity); break;
+                case "linescorecontinuitymax": LineScore.ContinuityMax = (int)Math.Max(0, D(LineScore.ContinuityMax)); break;
+                case "linescoreambiguouspercent": LineScore.AmbiguousPercent = D(LineScore.AmbiguousPercent); break;
+                case "showdetection": ShowDetection = B(ShowDetection); break;
                 case "writecomments": WriteComments = B(WriteComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
                 case "lastdwg": LastDwg = val; break;
@@ -122,6 +133,21 @@ namespace SmartHostMEP.Core
             sb.AppendLine("# Vertical planes: false (default) = the family's origin (insertion point) sits on the CAD point;");
             sb.AppendLine("# true = its geometry (bounding box) is centred on the point along the plane instead.");
             sb.AppendLine("CenterGeometryOnCadPoint = " + Bo(CenterGeometryOnCadPoint));
+            sb.AppendLine("# Vertical planes with no Revit wall/column within the search: each DWG line (any layer, longer than");
+            sb.AppendLine("# 300 mm, within the line search distance of the block outline) gets a score; the highest wins.");
+            sb.AppendLine("# Touch: the line touches the block outline or passes within 20 mm of the insertion point.");
+            sb.AppendLine("LineScoreTouch = " + F(LineScore.Touch));
+            sb.AppendLine("# Distance: up to this much for a line on the outline, down to 0 at the search distance.");
+            sb.AppendLine("LineScoreDistance = " + F(LineScore.Distance));
+            sb.AppendLine("# Length: up to this much for a line of 3000 mm or longer.");
+            sb.AppendLine("LineScoreLength = " + F(LineScore.Length));
+            sb.AppendLine("# Continuity: this much per other block touching the same line (5 mm / 0.5 deg), at most ContinuityMax blocks.");
+            sb.AppendLine("LineScoreContinuity = " + F(LineScore.Continuity));
+            sb.AppendLine("LineScoreContinuityMax = " + LineScore.ContinuityMax.ToString(Inv));
+            sb.AppendLine("# The two best lines closer than this (percent): Needs Review 'Ambiguous wall line'.");
+            sb.AppendLine("LineScoreAmbiguousPercent = " + F(LineScore.AmbiguousPercent));
+            sb.AppendLine("# Draw the chosen line of each vertical-plane block as detail lines after Preview/Run (also a checkbox in the window).");
+            sb.AppendLine("ShowDetection = " + Bo(ShowDetection));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
             sb.AppendLine("WriteComments = " + Bo(WriteComments));
             sb.AppendLine();

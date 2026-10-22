@@ -76,8 +76,7 @@ namespace SmartHostMEP.Core.Tests
             var near = EdgeSnap.Plan(new V3(150 * Mm, 1, 0), A, B, VerticalPlacement.Facing(0), PlanePosition.SnapToFace, 0);
             Assert.True(EdgeSnap.NeedsSnapReview(far));
             Assert.False(EdgeSnap.NeedsSnapReview(near));
-            Assert.Equal("Moved 250 mm to snap to the wall/column face", EdgeSnap.SnapMovedReason(250));
-            Assert.Equal("No wall/column within 600 mm - used block rotation", EdgeSnap.NoEdgeReason(600));
+            Assert.Equal("Moved 250 mm to snap to the wall line", EdgeSnap.SnapMovedReason(250));
         }
 
         [Fact]
@@ -103,25 +102,6 @@ namespace SmartHostMEP.Core.Tests
         }
 
         [Theory]
-        [InlineData("A-WALL", true)]
-        [InlineData("a-wall-ext", true)]
-        [InlineData("S-COLS", true)]
-        [InlineData("E-POWER", false)]
-        [InlineData("A-WALL-HATCH", false)]   // hatch layers never count
-        [InlineData("COLUMN", true)]
-        public void LayerFilterWildcards(string layer, bool expected) =>
-            Assert.Equal(expected, LayerFilter.Matches(layer, EdgeSnap.DefaultLayers, false));
-
-        [Fact]
-        public void AllLayersButNeverHatch()
-        {
-            Assert.True(LayerFilter.Matches("E-POWER", "", true));
-            Assert.False(LayerFilter.Matches("HATCH-01", "", true));
-            Assert.False(LayerFilter.Matches("E-POWER", "", false));
-            Assert.Equal(4, LayerFilter.Parse("*WALL*; *COL*, ,A-?").Count + 1);
-        }
-
-        [Theory]
         [InlineData(".csv")]
         [InlineData(".xlsx")]
         public void VerticalPlaneOptionsAreSavedWithTheMapping(string ext)
@@ -130,14 +110,12 @@ namespace SmartHostMEP.Core.Tests
             try
             {
                 Mapping.Save(path, new[] { new MapRow { Block = "SOCKET", Family = "F", TypeName = "T", Host = HostMode.Vertical } },
-                             new SlabOptions { EdgeSearchMm = 750, PlanePosition = PlanePosition.ThroughBlockPoint,
-                                               DwgLayers = "*WALL*, A-COL?", AllDwgLayers = true });
+                             new SlabOptions { EdgeSearchMm = 750, PlanePosition = PlanePosition.ThroughBlockPoint, LineSearchMm = 450 });
                 var m = Mapping.Load(path);
                 Assert.Empty(m.Errors);
                 Assert.Equal(750, m.Slab.EdgeSearchMm);
                 Assert.Equal(PlanePosition.ThroughBlockPoint, m.Slab.PlanePosition);
-                Assert.Equal("*WALL*, A-COL?", m.Slab.DwgLayers);
-                Assert.True(m.Slab.AllDwgLayers);
+                Assert.Equal(450, m.Slab.LineSearchMm);
             }
             finally { try { System.IO.File.Delete(path); } catch { } }
         }
@@ -148,8 +126,7 @@ namespace SmartHostMEP.Core.Tests
             var o = new SlabOptions();
             Assert.Equal(600, o.EdgeSearchMm);
             Assert.Equal(PlanePosition.SnapToFace, o.PlanePosition);
-            Assert.Equal("*WALL*, *COL*, *A-WALL*, *S-COLS*", o.DwgLayers);
-            Assert.False(o.AllDwgLayers);
+            Assert.Equal(300, o.LineSearchMm);
         }
 
         [Fact]

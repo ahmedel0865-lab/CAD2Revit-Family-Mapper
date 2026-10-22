@@ -26,6 +26,10 @@ namespace SmartHostMEP
                     "(slab, ceiling, wall, beam, reference plane - found automatically), Preview, then Run. " +
                     $"(version {version.ToString(3)})");
 
+                AddButton(panel, "SmartHostMEP.FixHostLine", "Fix Host\nLine", dll, typeof(Commands.FixHostLineCommand).FullName, "FixHostLine",
+                    "Click a placed element, then the DWG line it should sit on: it moves onto a vertical plane on that line, " +
+                    "facing away from the line toward its CAD block. Option: all elements of the same block on that line. Esc to finish.");
+
                 var tools = GetOrCreatePanel(app, "Tools");
                 AddButton(tools, "SmartHostMEP.Settings", "Settings", dll, typeof(Commands.SettingsCommand).FullName, "Settings",
                     "Open settings.ini (duplicate tolerance, host search distances, fallbacks...) in Notepad. " +

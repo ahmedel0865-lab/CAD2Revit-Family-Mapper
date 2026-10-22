@@ -11,15 +11,20 @@ namespace SmartHostMEP.Revit
     {
         public EdgeSource Source;
         public string Label = "";
+        public bool Linked;
         public double ZMin = double.MinValue, ZMax = double.MaxValue;
+
+        /// <summary>Preview text: "Revit wall", "Revit column (linked)".</summary>
+        public string SourceText => (Source == EdgeSource.Column ? "Revit column" : "Revit wall") + (Linked ? " (linked)" : "");
     }
 
     /// <summary>
-    /// Edges that orient vertical reference planes (Host Type "Vertical plane"): the plan lines
-    /// of wall side faces and column side faces, in this model and in Revit links, and - when no
-    /// Revit wall/column is near - the line work of the DWG on the wall/column layers.
-    /// Everything is collected ONCE per run into grid indexes (Core.EdgeIndex); each block then
-    /// only looks at the few segments in the cells around it.
+    /// Edges for vertical reference planes (Host Type "Vertical plane"):
+    /// 1. the plan lines of wall and column side faces, in this model and in Revit links, within the
+    ///    wall/column search distance (600 mm by default) - the closest one the device sits along;
+    /// 2. otherwise the best-scoring DWG line near the block outline, on any layer (Core.WallLineScorer).
+    /// Both are collected ONCE per run into grid indexes; each block only looks at the few segments
+    /// in the cells around it.
     /// </summary>
     class EdgeFinder
     {
@@ -27,35 +32,48 @@ namespace SmartHostMEP.Revit
         readonly bool _searchLinks;
         readonly ImportInstance _dwg;
         readonly SlabOptions _opts;
+        readonly ScoreWeights _weights;
+        readonly Func<string, bool> _skipBlock;
         readonly double _radiusFt;
-        EdgeIndex<EdgeInfo> _revit, _cad;
+        EdgeIndex<EdgeInfo> _revit;
+        WallLineScorer _lines;
 
         public int RevitEdges => _revit?.Count ?? 0;
-        public int DwgEdges => _cad?.Count ?? 0;
 
-        public EdgeFinder(Document doc, bool searchLinks, ImportInstance dwg, SlabOptions opts)
+        /// <param name="skipBlock">Raw DWG block names whose geometry is not wall line work (the device
+        /// symbols being placed, electrical blocks).</param>
+        public EdgeFinder(Document doc, bool searchLinks, ImportInstance dwg, SlabOptions opts, ScoreWeights weights = null,
+                          Func<string, bool> skipBlock = null)
         {
             _doc = doc;
             _searchLinks = searchLinks;
             _dwg = dwg;
             _opts = opts ?? new SlabOptions();
+            _weights = weights ?? new ScoreWeights();
+            _skipBlock = skipBlock ?? (n => false);
             _radiusFt = Math.Max(_opts.EdgeSearchMm, 1) / EdgeSnap.MmPerFoot;
         }
 
-        /// <summary>The Revit wall/column face for a device at (x, y, z), else the DWG wall/column
-        /// line, else null - chosen by <see cref="EdgeSnap.Choose"/>: within the radius, the device
-        /// must sit along it, and faces parallel to <paramref name="wallDir"/> (symbol back line or
-        /// block X axis) win over closer perpendicular ones. <paramref name="angleOff"/> = the chosen
-        /// face's angle to <paramref name="wallDir"/>.</summary>
-        public EdgeHit<EdgeInfo> Find(double x, double y, double z, V3 wallDir, out double angleOff)
+        /// <summary>Step 1: the closest Revit wall/column face within the search distance that reaches
+        /// the device height and that the device sits along, or null.</summary>
+        public EdgeHit<EdgeInfo> FindRevit(double x, double y, double z)
         {
             if (_revit == null) BuildRevit();
             const double tol = 0.5;   // ft: walls/columns that reach the device height (with a margin)
-            var block = new V3(x, y, 0);
-            var hit = EdgeSnap.Choose(_revit.Within(x, y, _radiusFt, e => z >= e.ZMin - tol && z <= e.ZMax + tol), block, wallDir, out angleOff);
-            if (hit != null) return hit;
-            if (_cad == null) BuildDwg();
-            return EdgeSnap.Choose(_cad.Within(x, y, _radiusFt), block, wallDir, out angleOff);
+            return EdgeSnap.Choose(_revit.Within(x, y, _radiusFt, e => z >= e.ZMin - tol && z <= e.ZMax + tol), new V3(x, y, 0));
+        }
+
+        /// <summary>Step 2: the DWG line scorer (built on first use). Register the run's blocks with
+        /// AddBlocks for continuity before choosing.</summary>
+        public WallLineScorer Lines
+        {
+            get
+            {
+                if (_lines == null)
+                    _lines = new WallLineScorer(_dwg == null ? new List<LineSeg>() : DwgLines.Read(_doc, _dwg, _skipBlock),
+                                                _opts.LineSearchMm, _weights);
+                return _lines;
+            }
         }
 
         IEnumerable<(Document doc, RevitLinkInstance link, Transform tf, string name)> Sources()
@@ -100,7 +118,7 @@ namespace SmartHostMEP.Revit
                     {
                         if (!(e is Wall w) || !(w.Location is LocationCurve lc)) continue;
                         var (z0, z1) = ZRange(w, tf);
-                        var info = new EdgeInfo { Source = EdgeSource.Wall, Label = "wall " + w.Name + suffix, ZMin = z0, ZMax = z1 };
+                        var info = new EdgeInfo { Source = EdgeSource.Wall, Label = "wall " + w.Name + suffix, Linked = link != null, ZMin = z0, ZMax = z1 };
                         var src = new WallSource { Wall = w, Curve = lc.Curve };
                         List<double> offsets;
                         try { offsets = src.Faces.Select(f => f.offset).Distinct().ToList(); }
@@ -129,7 +147,7 @@ namespace SmartHostMEP.Revit
                     try
                     {
                         var (z0, z1) = ZRange(e, tf);
-                        var info = new EdgeInfo { Source = EdgeSource.Column, Label = "column " + e.Name + suffix, ZMin = z0, ZMax = z1 };
+                        var info = new EdgeInfo { Source = EdgeSource.Column, Label = "column " + e.Name + suffix, Linked = link != null, ZMin = z0, ZMax = z1 };
                         foreach (var solid in Solids(e.get_Geometry(opts), 0))
                             foreach (Face f in solid.Faces)
                             {
@@ -158,68 +176,6 @@ namespace SmartHostMEP.Revit
                 else if (obj is GeometryInstance gi)
                     foreach (var inner in Solids(gi.GetInstanceGeometry(), depth + 1)) yield return inner;
             }
-        }
-
-        /// <summary>DWG line work on the wall/column layers (or all layers), segments of 100 mm and
-        /// more, no hatch layers. With "All layers" only the drawing's own line work is used (not
-        /// lines inside blocks, which are the device symbols); with a layer list, blocks are
-        /// searched too (walls are sometimes drawn as blocks or xrefs).</summary>
-        void BuildDwg()
-        {
-            _cad = new EdgeIndex<EdgeInfo>(_radiusFt);
-            if (_dwg == null) return;
-            var patterns = LayerFilter.Parse(_opts.DwgLayers);
-            bool all = _opts.AllDwgLayers;
-            if (!all && patterns.Count == 0) return;
-            var opts = new Options { ComputeReferences = false, IncludeNonVisibleObjects = false };
-            if (_dwg.ViewSpecific) opts.View = _doc.GetElement(_dwg.OwnerViewId) as View;
-            else opts.DetailLevel = ViewDetailLevel.Coarse;
-            var layerOk = new Dictionary<ElementId, (bool ok, string name)>();
-            (bool ok, string name) Layer(GeometryObject g)
-            {
-                var id = g.GraphicsStyleId;
-                if (id == null || id == ElementId.InvalidElementId) return (all, "");
-                if (layerOk.TryGetValue(id, out var r)) return r;
-                string name = "";
-                try { name = (_doc.GetElement(id) as GraphicsStyle)?.GraphicsStyleCategory?.Name ?? ""; } catch (Exception) { }
-                r = (LayerFilter.Matches(name, patterns, all), name);
-                layerOk[id] = r;
-                return r;
-            }
-            double minFt = EdgeSnap.MinSegmentMm / EdgeSnap.MmPerFoot;
-            void AddSeg(XYZ a, XYZ b, string layer)
-            {
-                if (new XYZ(b.X - a.X, b.Y - a.Y, 0).GetLength() < minFt) return;
-                _cad.Add(a.X, a.Y, b.X, b.Y, new EdgeInfo { Source = EdgeSource.Dwg, Label = "DWG line on layer " + layer });
-            }
-            void Walk(GeometryElement geo, Transform tf, int depth)
-            {
-                if (geo == null || depth > 6) return;
-                foreach (var obj in geo)
-                {
-                    if (obj is GeometryInstance gi)
-                    {
-                        // depth 0: the DWG itself; deeper: blocks (skipped with "All layers").
-                        if (depth == 0 || !all) Walk(gi.GetSymbolGeometry(), tf.Multiply(gi.Transform), depth + 1);
-                        continue;
-                    }
-                    if (!(obj is Curve) && !(obj is PolyLine)) continue;
-                    var (ok, layer) = Layer(obj);
-                    if (!ok) continue;
-                    if (obj is Line line) AddSeg(tf.OfPoint(line.GetEndPoint(0)), tf.OfPoint(line.GetEndPoint(1)), layer);
-                    else if (obj is PolyLine pl)
-                    {
-                        var pts = pl.GetCoordinates();
-                        for (int i = 0; i + 1 < pts.Count; i++) AddSeg(tf.OfPoint(pts[i]), tf.OfPoint(pts[i + 1]), layer);
-                    }
-                    else if (obj is Curve c && c.IsBound)
-                    {
-                        var pts = c.Tessellate();
-                        for (int i = 0; i + 1 < pts.Count; i++) AddSeg(tf.OfPoint(pts[i]), tf.OfPoint(pts[i + 1]), layer);
-                    }
-                }
-            }
-            try { Walk(_dwg.get_Geometry(opts), Transform.Identity, 0); } catch (Exception) { }
         }
     }
 }

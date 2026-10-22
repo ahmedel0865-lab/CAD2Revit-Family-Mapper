@@ -9,6 +9,8 @@ namespace SmartHostMEP.Revit
     public class BlockRef
     {
         public string Name;
+        /// <summary>The block name as stored in the DWG (before name simplification).</summary>
+        public string RawName = "";
         public Transform Transform;
         public int Depth;          // 1 = top-level block in the DWG
         public XYZ Point;          // insertion point, model internal coordinates (feet)
@@ -71,9 +73,11 @@ namespace SmartHostMEP.Revit
                 var bx = tf.BasisX;
                 double baseLen = link.BasisX.GetLength();
                 if (baseLen < 1e-12) baseLen = 1;
+                var raw = (SymbolName(doc, gi) ?? "").Trim();
                 result.Add(new BlockRef
                 {
-                    Name = (SymbolName(doc, gi) ?? "").Trim(),
+                    Name = raw,
+                    RawName = raw,
                     Transform = tf,
                     Depth = depth,
                     Point = tf.Origin,
@@ -90,7 +94,7 @@ namespace SmartHostMEP.Revit
             }
         }
 
-        static string SymbolName(Document doc, GeometryInstance gi)
+        internal static string SymbolName(Document doc, GeometryInstance gi)
         {
             try
             {

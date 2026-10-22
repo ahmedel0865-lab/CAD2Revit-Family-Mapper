@@ -49,12 +49,12 @@ namespace SmartHostMEP.Core
         public double EdgeSearchMm = EdgeSnap.DefaultSearchMm;
         /// <summary>Vertical planes: Snap to face (default) or Through block point.</summary>
         public PlanePosition PlanePosition = PlanePosition.SnapToFace;
-        /// <summary>Vertical planes: DWG layers with wall/column lines (wildcards), and "All layers".</summary>
-        public string DwgLayers = EdgeSnap.DefaultLayers;
-        public bool AllDwgLayers;
+        /// <summary>Vertical planes with no Revit wall/column: DWG lines (any layer) within this distance (mm)
+        /// of the block outline are scored (see Core.WallLineScorer).</summary>
+        public double LineSearchMm = WallLineScorer.DefaultRadiusMm;
 
         public SlabOptions Clone() => new SlabOptions { SearchRangeMm = SearchRangeMm, FallbackPlaneMm = FallbackPlaneMm, WallSearchMm = WallSearchMm, ReviewDistanceMm = ReviewDistanceMm,
-            EdgeSearchMm = EdgeSearchMm, PlanePosition = PlanePosition, DwgLayers = DwgLayers, AllDwgLayers = AllDwgLayers };
+            EdgeSearchMm = EdgeSearchMm, PlanePosition = PlanePosition, LineSearchMm = LineSearchMm };
     }
 
     public class MappingResult
@@ -83,7 +83,7 @@ namespace SmartHostMEP.Core
 
         /// <summary>Written on every row by <see cref="Save"/> (same value on each row).</summary>
         public static readonly string[] SlabHeader = { "Slab_Search_Range_mm", "Slab_Fallback_Plane_mm", "Wall_Search_Distance_mm", "Review_Distance_mm",
-            "Vertical_Edge_Search_mm", "Vertical_Plane_Position", "DWG_Wall_Layers", "DWG_All_Layers" };
+            "Vertical_Edge_Search_mm", "Vertical_Plane_Position", "Vertical_Line_Search_mm" };
 
         // Accepted header spellings, compared after lower-casing and removing
         // everything that is not a letter/digit ("Offset_From_Level (mm)" ==
@@ -106,8 +106,7 @@ namespace SmartHostMEP.Core
             ["reviewdistance"] = new[] { "reviewdistancemm", "reviewdistance", "maxdistancemm" },
             ["edgesearch"] = new[] { "verticaledgesearchmm", "edgesearchmm", "edgesearch" },
             ["planeposition"] = new[] { "verticalplaneposition", "planeposition" },
-            ["dwglayers"] = new[] { "dwgwalllayers", "dwglayers", "walllayers" },
-            ["dwgalllayers"] = new[] { "dwgalllayers", "alllayers" },
+            ["linesearch"] = new[] { "verticallinesearchmm", "linesearchmm", "linesearch" },
         };
 
         static readonly Dictionary<string, HostMode> HostValues = new Dictionary<string, HostMode>
@@ -207,7 +206,7 @@ namespace SmartHostMEP.Core
                 r.Facing.ToString(), string.IsNullOrEmpty(r.Category) ? BlockCategories.Classify(r.Block) : r.Category,
                 PlaceAtText(r.PlaceAt),
                 slab.SearchRangeMm, slab.FallbackPlaneMm, slab.WallSearchMm, slab.ReviewDistanceMm,
-                slab.EdgeSearchMm, PlanePositionText(slab.PlanePosition), slab.DwgLayers ?? "", slab.AllDwgLayers ? "yes" : "no",
+                slab.EdgeSearchMm, PlanePositionText(slab.PlanePosition), slab.LineSearchMm,
             }).ToList());
         }
 
@@ -293,12 +292,11 @@ namespace SmartHostMEP.Core
             var pos = FirstText("planeposition");
             bool hasPos = pos != null && ParsePlanePosition(pos).HasValue;
             if (hasPos) result.Slab.PlanePosition = ParsePlanePosition(pos).Value;
-            var layers = FirstText("dwglayers");
-            if (layers != null) result.Slab.DwgLayers = layers;
-            var all = FirstText("dwgalllayers");
-            if (all != null) result.Slab.AllDwgLayers = Norm(all) == "yes" || Norm(all) == "true" || all.Trim() == "1";
+            // DWG_Wall_Layers / DWG_All_Layers (0.23-0.30) are ignored: lines are scored on every layer.
+            var lineSearch = First("linesearch", v => v > 0);
+            if (lineSearch.HasValue) result.Slab.LineSearchMm = lineSearch.Value;
             result.HasSlabOptions = range.HasValue || plane.HasValue || wall.HasValue || review.HasValue || edge.HasValue ||
-                                    hasPos || layers != null || all != null;
+                                    hasPos || lineSearch.HasValue;
 
             int line = 1;
             foreach (var r in rows)

@@ -784,16 +784,18 @@ namespace SmartHostMEP.UI
             ToolTip = "All host types: after placing, any element farther than this (mm, in plan) from its CAD block is listed in Needs Review." };
 
         readonly TextBox _edgeSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Vertical planes: look this far (mm) from the block for the nearest wall or column face (this model and links), " +
-                      "then for a DWG wall/column line. The plane is made parallel to it." };
+            ToolTip = "Vertical planes: a Revit wall or column face (this model and links) within this distance (mm) of the block is used first. " +
+                      "Otherwise the best-scoring DWG line (see DWG line search), otherwise the block rotation (Needs Review)." };
         readonly ComboBox _planePosition = new ComboBox { Width = 140, ItemsSource = new[] { "Snap to face", "Through block point" },
             ToolTip = "Snap to face: the plane is on the wall/column face and the device sits on it (block point projected onto the face). " +
                       "Through block point: the plane passes through the block point, parallel to the face." };
-        readonly TextBox _dwgLayers = new TextBox { Width = 220, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "DWG layers with wall/column lines, used when no Revit wall or column is near: wildcards, comma separated " +
-                      "(e.g. *WALL*, *COL*, *A-WALL*, *S-COLS*). Hatch layers and lines shorter than 100 mm are ignored." };
-        readonly CheckBox _allDwgLayers = new CheckBox { Content = "All layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
-            ToolTip = "Use line work on every DWG layer (except hatch layers and lines inside blocks)." };
+        readonly TextBox _lineSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
+            ToolTip = "No Revit wall/column near the block: DWG lines on any layer, longer than 300 mm and within this distance (mm) " +
+                      "of the block outline, are scored (touching, distance, length, other blocks on the same line). The best one wins. " +
+                      "Weights are in settings.ini (LineScore...)." };
+        readonly CheckBox _showDetection = new CheckBox { Content = "Show detection", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
+            ToolTip = "After Preview/Run, draw the line chosen for each vertical-plane block as magenta detail lines in the plan view " +
+                      "(line style 'SmartHost Detection'). They are removed at the next Preview/Run." };
 
         UIElement BuildSlabOptions()
         {
@@ -811,9 +813,9 @@ namespace SmartHostMEP.UI
             bar.Children.Add(_edgeSearch);
             bar.Children.Add(new TextBlock { Text = "Position", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
             bar.Children.Add(_planePosition);
-            bar.Children.Add(new TextBlock { Text = "DWG wall/column layers", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
-            bar.Children.Add(_dwgLayers);
-            bar.Children.Add(_allDwgLayers);
+            bar.Children.Add(new TextBlock { Text = "DWG line search (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
+            bar.Children.Add(_lineSearch);
+            bar.Children.Add(_showDetection);
             bar.Children.Add(new TextBlock { Text = "Review if farther than (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 6, 0) });
             bar.Children.Add(_reviewDistance);
             ShowSlabOptions();
@@ -823,9 +825,10 @@ namespace SmartHostMEP.UI
             _reviewDistance.TextChanged += (o, e) => ReadSlabOptions();
             _edgeSearch.TextChanged += (o, e) => ReadSlabOptions();
             _planePosition.SelectionChanged += (o, e) => ReadSlabOptions();
-            _dwgLayers.TextChanged += (o, e) => ReadSlabOptions();
-            _allDwgLayers.Checked += (o, e) => { _dwgLayers.IsEnabled = false; ReadSlabOptions(); };
-            _allDwgLayers.Unchecked += (o, e) => { _dwgLayers.IsEnabled = true; ReadSlabOptions(); };
+            _lineSearch.TextChanged += (o, e) => ReadSlabOptions();
+            _showDetection.IsChecked = _s.Settings?.ShowDetection == true;
+            _showDetection.Checked += (o, e) => SetShowDetection(true);
+            _showDetection.Unchecked += (o, e) => SetShowDetection(false);
             return bar;
         }
 
@@ -837,9 +840,7 @@ namespace SmartHostMEP.UI
             _reviewDistance.Text = _s.Slab.ReviewDistanceMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _edgeSearch.Text = _s.Slab.EdgeSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
             _planePosition.SelectedItem = Mapping.PlanePositionText(_s.Slab.PlanePosition);
-            _dwgLayers.Text = _s.Slab.DwgLayers ?? "";
-            _allDwgLayers.IsChecked = _s.Slab.AllDwgLayers;
-            _dwgLayers.IsEnabled = !_s.Slab.AllDwgLayers;
+            _lineSearch.Text = _s.Slab.LineSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
@@ -864,8 +865,10 @@ namespace SmartHostMEP.UI
             if (edgeOk) _s.Slab.EdgeSearchMm = edge.Value;
             _edgeSearch.BorderBrush = edgeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             if (_planePosition.SelectedItem is string pos && Mapping.ParsePlanePosition(pos) is PlanePosition pp) _s.Slab.PlanePosition = pp;
-            _s.Slab.DwgLayers = _dwgLayers.Text ?? "";
-            _s.Slab.AllDwgLayers = _allDwgLayers.IsChecked == true;
+            var lineSearch = Mapping.ParseNumber(_lineSearch.Text);
+            bool lineOk = lineSearch.HasValue && lineSearch.Value > 0 && _lineSearch.Text.Trim().Length > 0;
+            if (lineOk) _s.Slab.LineSearchMm = lineSearch.Value;
+            _lineSearch.BorderBrush = lineOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
             return !rangeOk ? "Slab search range must be a number of mm greater than 0."
@@ -873,7 +876,15 @@ namespace SmartHostMEP.UI
                  : !wallOk ? "Wall search distance must be a number of mm greater than 0."
                  : !reviewOk ? "Review distance must be a number of mm greater than 0."
                  : !edgeOk ? "Vertical plane wall/column search must be a number of mm greater than 0."
+                 : !lineOk ? "DWG line search must be a number of mm greater than 0."
                  : null;
+        }
+
+        void SetShowDetection(bool on)
+        {
+            if (_s.Settings == null) return;
+            _s.Settings.ShowDetection = on;
+            Settings.TrySave(_s.Settings);
         }
 
         void Finish(MappingAction action)

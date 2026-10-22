@@ -132,6 +132,8 @@ namespace SmartHostMEP.Revit
             _timer = timer ?? new PhaseTimer();
             _dwg = dwg;
             _edges = null;
+            _blocksAdded = false;
+            Detections.Clear();
             _slab = mapping.Slab ?? new SlabOptions();
             var results = new List<PlacementResult>();
             var mapped = new List<(BlockRef, MapRow)>();
@@ -141,6 +143,7 @@ namespace SmartHostMEP.Revit
                 if (mapping.Rows.TryGetValue(b.Name, out var row)) mapped.Add((b, row));
                 else unmapped[b.Name] = (unmapped.TryGetValue(b.Name, out var n) ? n : 0) + 1;
             }
+            PrepareVertical(blocks, mapped, mapping);
             foreach (var kv in unmapped)
                 results.Add(new PlacementResult
                 {
@@ -779,53 +782,69 @@ namespace SmartHostMEP.Revit
                 // plane, reference direction along the plane (upright, not mirrored).
                 // Facing from the block's real +Y axis (correct for mirrored blocks too).
                 var f = VerticalPlacement.Facing(b.FacingAngle + row.RotationDeg * Math.PI / 180.0);
-                // Host Type "Vertical plane": a symbol with a flat back (socket half circle, switch
-                // base line) gives the wall direction and the facing directly, whatever the block
-                // rotation: the device faces from its back line toward the rest of the symbol.
-                string dirSource = "block rotation";
-                if (row.Host == HostMode.Vertical)
-                {
-                    if (SymbolBack(b) is V3 back)
-                    {
-                        double r = row.RotationDeg * Math.PI / 180.0;
-                        f = new V3(back.X * Math.Cos(r) - back.Y * Math.Sin(r), back.X * Math.Sin(r) + back.Y * Math.Cos(r), 0);
-                        dirSource = "symbol back line";
-                    }
-                }
                 var facing = new XYZ(f.X, f.Y, 0);
                 var planePoint = target;
                 bool snapped = false;
-                // Host Type "Vertical plane": the plane is parallel to the nearest wall/column face
-                // (this model and links), else to the nearest DWG wall/column line, within the search
-                // radius; the family faces away from it, toward the block. Snap to face: the device
-                // sits on the face (block point projected onto it). Nothing near: block rotation.
+                string source = "Block rotation";
+                // Host Type "Vertical plane", per block:
+                // 1. a Revit wall/column face (this model or a link) within the wall/column search;
+                // 2. otherwise the best-scoring DWG line near the block outline (any layer);
+                // 3. otherwise the block rotation, with Needs Review "No wall line found".
+                // The plane is on the chosen line, along it; the family faces away from it, toward the block.
                 if (row.Host == HostMode.Vertical)
                 {
-                    EdgeHit<EdgeInfo> edge;
-                    double angleOff;
-                    var wallDir = new V3(-f.Y, f.X, 0);   // along the wall = Z x facing
+                    EdgeHit<EdgeInfo> wall;
+                    ScoredLine line = null;
                     using (_timer.Time(Phases.HostQuery))
                     {
-                        if (_edges == null)
-                            using (_timer.Time(Phases.HostIndex)) _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab);
-                        edge = _edges.Find(x, y, target.Z, wallDir, out angleOff);
+                        var edges = Edges();
+                        wall = edges.FindRevit(target.X, target.Y, target.Z);
+                        if (wall == null)
+                        {
+                            if (!_blocksAdded)
+                            {
+                                using (_timer.Time(Phases.HostIndex)) edges.Lines.AddBlocks(_outlines);
+                                _blocksAdded = true;
+                            }
+                            line = edges.Lines.Choose(OutlineOf(b, target), OutlineIndex(b));
+                        }
                     }
-                    if (edge != null)
+                    V3? a = null, e2 = null;
+                    string label = null;
+                    if (wall != null)
                     {
-                        var ep = EdgeSnap.Plan(V(target), new V3(edge.X1, edge.Y1, 0), new V3(edge.X2, edge.Y2, 0), f,
-                                               _slab.PlanePosition, target.Z);
+                        a = new V3(wall.X1, wall.Y1, 0);
+                        e2 = new V3(wall.X2, wall.Y2, 0);
+                        source = wall.Payload.SourceText;
+                        label = wall.Payload.Label;
+                    }
+                    else if (line != null)
+                    {
+                        a = new V3(line.Seg.X1, line.Seg.Y1, 0);
+                        e2 = new V3(line.Seg.X2, line.Seg.Y2, 0);
+                        source = WallLineScorer.SourceText(line);
+                        label = $"DWG line on layer {(line.Seg.Layer.Length > 0 ? line.Seg.Layer : "0")} (score {line.Score:0}" +
+                                (line.SecondScore > 0 ? $", next best {line.SecondScore:0}" : "") + ")";
+                        if (line.Ambiguous) plan.Review.Add(WallLineScorer.AmbiguousReason);
+                    }
+                    if (a.HasValue)
+                    {
+                        var ep = EdgeSnap.Plan(V(target), a.Value, e2.Value, f, _slab.PlanePosition, target.Z);
                         facing = new XYZ(ep.Facing.X, ep.Facing.Y, 0);
                         planePoint = new XYZ(ep.Point.X, ep.Point.Y, ep.Point.Z);
                         snapped = _slab.PlanePosition == PlanePosition.SnapToFace;
-                        notes.Add($"plane parallel to {edge.Payload.Label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto the face" : "") +
-                                  $" ({angleOff:0}° from the {dirSource})");
+                        notes.Add($"plane on {label}" + (snapped ? $", snapped {ep.MovedFt * MmPerFoot:0} mm onto it" : ""));
                         if (EdgeSnap.NeedsSnapReview(ep)) plan.Review.Add(EdgeSnap.SnapMovedReason(ep.MovedFt * MmPerFoot));
-                        if (angleOff > EdgeSnap.AlignDeg) plan.Review.Add(EdgeSnap.OffAngleReason(angleOff));
+                        Detections.Add(new DetectionLine
+                        {
+                            A = new XYZ(a.Value.X, a.Value.Y, target.Z), B = new XYZ(e2.Value.X, e2.Value.Y, target.Z),
+                            Block = new XYZ(target.X, target.Y, target.Z), OnLine = new XYZ(ep.Point.X, ep.Point.Y, target.Z), Label = source,
+                        });
                     }
                     else
                     {
-                        notes.Add("no wall/column along the device - plane from the " + dirSource);
-                        plan.Review.Add(EdgeSnap.NoEdgeReason(_slab.EdgeSearchMm));
+                        notes.Add("no Revit wall/column or DWG wall line near the block - plane from the block rotation");
+                        plan.Review.Add(WallLineScorer.NoLineReason);
                     }
                 }
                 // The plane passes through the plane point (or is colinear with it, < 5 mm); the
@@ -839,7 +858,8 @@ namespace SmartHostMEP.Revit
                 using (_timer.Time(Phases.Create))
                     inst = _doc.Create.NewFamilyInstance(planeRef, onPlane, along, sym);
                 target = onPlane;
-                hostText = "Vertical plane " + planeName;
+                hostText = row.Host == HostMode.Vertical ? "Vertical plane: " + source : "Vertical plane " + planeName;
+                if (row.Host == HostMode.Vertical) notes.Add("plane " + planeName);
                 plan.FinalHost = "Reference Plane " + planeName + " (vertical)";
                 using (_timer.Time(Phases.Verify))
                 {
@@ -992,6 +1012,72 @@ namespace SmartHostMEP.Revit
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
         ImportInstance _dwg;      // the DWG being placed (for its wall/column line work)
         EdgeFinder _edges;        // vertical plane orientation (built on first use)
+        bool _blocksAdded;        // vertical blocks registered with the line scorer (continuity)
+        readonly List<BlockOutline> _outlines = new List<BlockOutline>();
+        readonly Dictionary<GeometryInstance, int> _outlineIndex = new Dictionary<GeometryInstance, int>();
+        HashSet<string> _skipRaw = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, XYZ[]> _symbolBoxes = new Dictionary<string, XYZ[]>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Vertical-plane blocks of the last run: the line chosen for each (for "Show detection").</summary>
+        public List<DetectionLine> Detections { get; } = new List<DetectionLine>();
+
+        EdgeFinder Edges()
+        {
+            if (_edges == null)
+                using (_timer.Time(Phases.HostIndex))
+                    _edges = new EdgeFinder(_doc, _settings.SearchRevitLinks, _dwg, _slab, _settings.LineScore, n => _skipRaw.Contains(n));
+            return _edges;
+        }
+
+        /// <summary>Before the loop: the outline of every vertical-plane block (for continuity), and
+        /// the DWG blocks whose geometry is not wall line work - the mapped blocks and electrical ones.</summary>
+        void PrepareVertical(List<BlockRef> blocks, List<(BlockRef, MapRow)> mapped, MappingResult mapping)
+        {
+            _outlines.Clear();
+            _outlineIndex.Clear();
+            _skipRaw = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var b in blocks)
+                if (mapping.Rows.ContainsKey(b.Name) || BlockCategories.Classify(b.Name) == BlockCategories.Electrical)
+                    _skipRaw.Add(string.IsNullOrEmpty(b.RawName) ? b.Name : b.RawName);
+            foreach (var (b, row) in mapped)
+            {
+                if (row.Host != HostMode.Vertical || b.Instance == null || _outlineIndex.ContainsKey(b.Instance)) continue;
+                var p = row.PlaceAt == PlaceAt.SymbolCentre ? SymbolCentre(b) ?? b.Point : b.Point;
+                _outlineIndex[b.Instance] = _outlines.Count;
+                _outlines.Add(OutlineOf(b, p));
+            }
+        }
+
+        int OutlineIndex(BlockRef b) => b.Instance != null && _outlineIndex.TryGetValue(b.Instance, out var i) ? i : -1;
+
+        /// <summary>The block's outline in plan: its symbol's bounding box (computed once per block
+        /// name) through the block transform, so it follows rotation and mirroring; the point is
+        /// where the family goes. No line work: the point alone.</summary>
+        BlockOutline OutlineOf(BlockRef b, XYZ point)
+        {
+            var key = b.Name ?? "";
+            if (!_symbolBoxes.TryGetValue(key, out var box))
+            {
+                box = null;
+                try
+                {
+                    var bb = b.Instance?.GetSymbolGeometry()?.GetBoundingBox();
+                    if (bb != null)
+                    {
+                        var tf = bb.Transform ?? Transform.Identity;
+                        box = new[]
+                        {
+                            tf.OfPoint(new XYZ(bb.Min.X, bb.Min.Y, 0)), tf.OfPoint(new XYZ(bb.Max.X, bb.Min.Y, 0)),
+                            tf.OfPoint(new XYZ(bb.Max.X, bb.Max.Y, 0)), tf.OfPoint(new XYZ(bb.Min.X, bb.Max.Y, 0)),
+                        };
+                    }
+                }
+                catch (Exception) { box = null; }
+                _symbolBoxes[key] = box;
+            }
+            if (box == null || b.Transform == null) return BlockOutline.AtPoint(point.X, point.Y);
+            return BlockOutline.FromCorners(box.Select(c => V(b.Transform.OfPoint(c))).ToList(), point.X, point.Y);
+        }
 
         /// <summary>Base point farther than this (mm, plan) from the drawn symbol: Needs Review.</summary>
         const double BaseOffsetReviewMm = 150;
@@ -1020,30 +1106,9 @@ namespace SmartHostMEP.Revit
             return local == null ? null : b.Transform.OfPoint(local);
         }
 
-        readonly Dictionary<string, BackLine> _backLines = new Dictionary<string, BackLine>(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>Facing from the symbol's flat back line (see Core.SymbolBackLine), in model
-        /// coordinates (the block transform handles rotation and mirroring); null when the symbol
-        /// has no single straight back. Detected once per block name.</summary>
-        V3? SymbolBack(BlockRef b)
-        {
-            if (b.Instance == null || b.Transform == null) return null;
-            var key = b.Name ?? "";
-            if (!_backLines.TryGetValue(key, out var back))
-            {
-                try { back = SymbolBackLine.Find(DwgReader.LocalSymbol(b).Paths); }
-                catch (Exception) { back = null; }
-                _backLines[key] = back;
-            }
-            if (back == null) return null;
-            var v = b.Transform.OfVector(new XYZ(back.Inward.X, back.Inward.Y, 0));
-            var flat = new V3(v.X, v.Y, 0);
-            return flat.Length < 1e-9 ? (V3?)null : flat.Normalize();
-        }
-
         static BlockRef AtPoint(BlockRef b, XYZ p) => new BlockRef
         {
-            Name = b.Name, Transform = b.Transform, Depth = b.Depth, Point = p, Rotation = b.Rotation,
+            Name = b.Name, RawName = b.RawName, Transform = b.Transform, Depth = b.Depth, Point = p, Rotation = b.Rotation,
             FacingAngle = b.FacingAngle, Mirrored = b.Mirrored, ScaleX = b.ScaleX, ScaleY = b.ScaleY, Instance = b.Instance,
         };
 
@@ -1098,7 +1163,7 @@ namespace SmartHostMEP.Revit
         /// 3. if its origin landed more than 10 mm from the point, it is moved back onto it and a
         ///    WARNING is logged (shown in the result window).
         /// </summary>
-        double SnapToPoint(FamilyInstance inst, XYZ point, XYZ normal, XYZ along, XYZ facing, List<string> notes)
+        internal double SnapToPoint(FamilyInstance inst, XYZ point, XYZ normal, XYZ along, XYZ facing, List<string> notes)
         {
             _doc.Regenerate();
             // Facing: the family must face the CAD block's direction. Its Z axis must be the plane

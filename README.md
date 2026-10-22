@@ -36,7 +36,8 @@ flowchart LR
 
 | Panel | Button | What it does |
 |---|---|---|
-| Mapper | **Place Families** | Pick the DWG, then map, preview and place everything in the mapping window. |
+| Host Placement | **Place Families** | Pick the DWG, then map, preview and place everything in the mapping window. |
+| Host Placement | **Fix Host Line** | Click a placed element, then the DWG line it should sit on: it moves onto a vertical plane on that line. Option: every element of the same block on that line. |
 | Tools | **Settings** | Opens `settings.ini` (tolerances, host search distances, fallbacks) in Notepad. |
 | Tools | **Help** | Version, user guide, and quick links to the logs and the saved project mappings. |
 
@@ -57,12 +58,22 @@ flowchart LR
 - Places families at the block insertion points with the CAD rotation (plus a per-row adjustment). DWG units, link position, rotation and shared coordinates are handled automatically.
 - Hosts per row: **None (level-based)**, **Ceiling**, **Slab (above)**, **Slab (below)**, **Wall**, **Reference Plane (auto-create)**, **Face** (ceilings/slabs/roofs/beams) or **Vertical plane** (no wall needed), including hosts in linked Revit models.
 - **Wall** hosting puts the family on the wall face **on the side the CAD block is drawn**, at the CAD point projected onto that face, flat on the wall and facing out towards the block. The CAD rotation is ignored; the wall direction is used, including on curved walls. The nearest wall within the **Wall search distance** (500 mm, set in the window) at the row's height is used, in this model and in links. Blocks with no wall in range, moved more than 200 mm to reach the face, or on a wall in a link are listed in **Needs Review**.
-- **Vertical plane** placement:
-  - **Smart orientation.** The plane is made **parallel to the nearest wall or column face** within 600 mm. It looks first at walls and columns in this model and in links, then at **DWG lines on the wall/column layers** (editable, e.g. `*WALL*, *COL*`, or *All layers*). The family faces away from the wall, toward the block. With nothing near, it uses the block rotation and lists the block in **Needs Review**.
-  - **Which wall** (v0.27): only walls/columns the device actually **sits along** count (the block point must project onto the wall, not past its end or into a door opening). Among those, a face **parallel to the device** (within 15°) wins over a closer perpendicular one, so at a room corner the socket follows its own wall. If only a non-parallel face is found, it is used and listed in Needs Review ("Wall is N° off the block/symbol direction").
-  - **Device direction from the symbol.** When the CAD symbol has a flat back (the straight side of a socket's half circle, a switch's base line), that line gives the wall direction and the facing (from the back toward the rest of the symbol), whatever the block rotation or layer. Symbols without a single flat back (circles, crosses, plain rectangles) use the block rotation as before. The log says which was used.
+- **Vertical plane** placement. Each block is checked in this order:
+  1. A **Revit wall or column** face (this model or a link) within the *Wall/column search* (600 mm), at the device height. The closest one that the device sits along is used: the block point projects onto it, not past its end or into a door opening. Block rotation and symbol shape play no part.
+  2. Otherwise, the **best-scoring DWG line** near the block, on **any layer**. Candidates are straight lines longer than 300 mm within the *DWG line search* (300 mm, set in the window) of the block **outline** (the symbol's bounding box, not just the insertion point). Left out: the block's own geometry and other mapped or electrical blocks, wires and tails (lines that start or end at the outline), dimensions, hatch lines and arcs such as door swings. Each candidate gets a score:
+     - **touch**: the line touches the outline, or passes within 20 mm of the insertion point (biggest bonus);
+     - **distance**: closer to the outline scores more;
+     - **length**: longer lines score more, capped at 3000 mm;
+     - **continuity**: other blocks touching the same line (within 5 mm and 0.5°) add to the score.
+
+     The weights are in `settings.ini` (`LineScoreTouch`, `LineScoreDistance`, `LineScoreLength`, `LineScoreContinuity`, `LineScoreContinuityMax`, `LineScoreAmbiguousPercent`). The highest score wins. If the next best line scores within 10 %, the best one is still used and the element is listed in **Needs Review** as "Ambiguous wall line".
+  3. Otherwise, the **block rotation**, listed in Needs Review as "No wall line found".
+  - **The plane** is on the chosen line and runs along it. The block point is projected onto it, and the family faces away from the line, toward the block side.
   - **Position** (set in the window): **Snap to face** (default) puts the device on the face, at the block point projected onto it. **Through block point** keeps the block point. A snap of more than 200 mm is listed in Needs Review.
-  - Planes are named `SmartHost_V_<Level>_<n>`, drawn from the level up to level + 3000 mm. Blocks on the same face share one plane (same line within 5 mm and 0.5°). Walls, columns and DWG lines are indexed once in a grid.
+  - Planes are named `SmartHost_V_<Level>_<n>`, drawn from the level up to level + 3000 mm. Elements on the same line share one plane (within 5 mm and 0.5°). Walls, columns and DWG lines are read once and indexed in a grid, all in the run's single transaction.
+  - **Detected Host** (Preview) says where each plane came from: `Vertical plane: Revit wall (linked)`, `Touching line (layer: A-WALL)`, `Nearest line (score 74)` or `Block rotation`.
+  - **Show detection** (checkbox in the window): after Preview or Run, the line chosen for each block is drawn as magenta detail lines in the plan view (line style `SmartHost Detection`), with a short line from the block to where it went. The next Preview or Run removes them.
+  - **Fix Host Line** (ribbon): click a placed element, then the DWG line it should sit on. The element moves onto a plane on that line (an existing one is reused), facing away from the line toward its CAD block, and its Needs Review mark in Comments is removed. Tick *Apply to all elements of the same block on this line* to move the others too. Repeat, then Esc to finish; Ctrl+Z undoes one fix.
   - The family goes on the block point at level + elevation, facing the block. If it lands more than 10 mm off, it is moved back. If it still can't be corrected, it is listed in **Needs Review**.
 - **Place At** (per row): **Symbol centre** (the centre of the drawn symbol, default) or **Base point** (the block's insertion point). Symbol centre suits blocks drawn away from their base point, for example a wall light whose base point is on the wall line and whose circle is in the room. Pick Base point when the insertion point is the exact location. With Base point, blocks whose base point is far from the symbol are flagged in **Needs Review** ("Block base point is N mm from its symbol"). **Mirrored blocks** face the side their symbol is drawn on.
 - **Final distance check, all host types**: any element placed farther than the **review distance** (50 mm, set in the window) from its **intended point** is listed in **Needs Review** with its Element ID. The intended point is the CAD block, or the face point it was snapped to.
@@ -142,8 +153,8 @@ Saved mappings also carry two columns, `Slab_Search_Range_mm` and `Slab_Fallback
 ```
 addin/                            standalone Revit add-in (C#)  <- main product
   src/SmartHostMEP/                  Revit add-in
-    App.cs                        ribbon: Mapper (Place Families), Tools (Settings, Help)
-    Commands/                     the three ribbon commands
+    App.cs                        ribbon: Host Placement (Place Families, Fix Host Line), Tools (Settings, Help)
+    Commands/                     the ribbon commands
     Revit/                        DWG reader, host finder, reference/vertical planes, placer
     UI/                           mapping window (WPF), step-1 dialog, result window
   src/SmartHostMEP.Core/             Revit-free logic (unit tested): CSV/XLSX, mapping, name

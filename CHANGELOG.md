@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.31.0] - 2026-10-22
+### Changed: vertical planes pick the wall line by score
+For Host Type **Vertical plane**, each block now goes through three steps:
+1. **Revit wall or column** (this model or a link) within the *Wall/column search* (600 mm): the closest face the device sits along.
+2. **Otherwise, the best-scoring DWG line** near the block, on any layer:
+   - Candidates are straight lines longer than 300 mm within the new *DWG line search* (300 mm, in the window, saved with the mapping as `Vertical_Line_Search_mm`) of the block **outline**, the symbol's bounding box.
+   - Left out: the block's own geometry and other mapped or electrical blocks, wires and tails (a line or polyline that starts or ends at the outline), dimension blocks, hatch and dimension layers, and arcs such as door swings.
+   - Score: **touch** (the line touches the outline or passes within 20 mm of the insertion point, biggest bonus), **distance** to the outline, **length** (capped at 3000 mm) and **continuity** (other blocks touching the same line, within 5 mm and 0.5°). The weights are new settings.ini keys: `LineScoreTouch` 100, `LineScoreDistance` 50, `LineScoreLength` 30, `LineScoreContinuity` 10, `LineScoreContinuityMax` 5 and `LineScoreAmbiguousPercent` 10.
+   - The highest score wins. If the next best line (on another line) scores within 10 %, it is still used, and the element is listed in Needs Review as **"Ambiguous wall line"**.
+3. **Otherwise, the block rotation**, listed in Needs Review as **"No wall line found"**.
+
+The plane is on the chosen line and runs along it. The block point is projected onto it, the family faces away from the line toward the block, and elements on the same line share one plane. A snap of more than 200 mm is listed in Needs Review as "Moved N mm to snap to the wall line".
+
+### Removed
+- The DWG wall/column layer list and *All layers*: lines on every layer are scored. The old `DWG_Wall_Layers` / `DWG_All_Layers` mapping columns are ignored.
+- The symbol back line, and the rule that faces parallel to the block or symbol direction (within 15°) beat closer ones. The block rotation is only used in step 3, or to pick a side when the block sits exactly on the line.
+
+### Added
+- **Detected Host** (Preview) shows where each plane came from: `Vertical plane: Revit wall (linked)`, `Touching line (layer: A-WALL)`, `Nearest line (score 74)` or `Block rotation`. The log has the plane name and the scores.
+- **Show detection** checkbox (also `ShowDetection` in settings.ini): after Preview or Run, the chosen line of each block is drawn as magenta detail lines in the plan view (line style `SmartHost Detection`), with a short line from the block to where it went. The next Preview or Run removes them.
+- **Fix Host Line** ribbon button (Host Placement panel):
+  - Click a placed element, then the DWG line it should sit on.
+  - The element is recreated on a vertical plane on that line (an existing plane is reused), with the same type, height and parameters, facing away from the line toward its CAD block. The Needs Review mark is removed from its Comments.
+  - Option *Apply to all elements of the same block on this line*.
+  - It repeats until Esc, and each fix is one Ctrl+Z. The element gets a new Element ID.
+- Performance stays the same: one geometry read of the DWG, grid indexes for lines and faces, colinear grouping without a pairwise scan, and one transaction for the run. Detection lines are drawn in their own transaction, so they stay after a Preview.
+- New Core class `WallLineScorer` (scores, tails, outlines, same-line groups), with tests.
+
 ## [0.30.0] - 2026-10-05
 ### Changed: the Comments parameter is left empty
 - Placed elements no longer get anything written into **Comments** (no `SmartHost: <block>`, no `SmartHost: Host = Reference Plane`). Fallback elements are still listed in **Needs Review** with their Element ID.

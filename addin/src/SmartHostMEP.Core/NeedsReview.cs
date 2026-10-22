@@ -51,6 +51,12 @@ namespace SmartHostMEP.Core
             return i > 0 ? part.Substring(0, i) : part;
         }
 
+        /// <summary>Comments without the Needs Review mark (Fix Host Line):
+        /// "SmartHost: Host = Reference Plane | SmartHost: A" -> "SmartHost: A".</summary>
+        public static string WithoutMark(string comments) =>
+            string.Join(" | ", (comments ?? "").Split(new[] { " | " }, StringSplitOptions.None)
+                .Where(part => part.Trim() != CommentText));
+
         /// <summary>"123,456,789" for Manage &gt; Select by ID.</summary>
         public static string CopyIds(IEnumerable<ReviewItem> items) =>
             string.Join(",", items.Where(i => i.ElementId.HasValue).Select(i => i.ElementId.Value.ToString(CultureInfo.InvariantCulture)));

@@ -145,6 +145,16 @@ namespace SmartHostMEP.Commands
                         TaskDialog.Show("SmartHost MEP", "Cancelled. Everything was rolled back - nothing was changed in the model.");
                         continue;   // back to the mapping window
                     }
+                    // Show detection: the line chosen for each vertical-plane block, as detail lines
+                    // (own transaction, so they stay after a Preview). The previous ones are always removed.
+                    try
+                    {
+                        var view = doc.ActiveView is ViewPlan vp && Detection.CanDraw(vp) ? (View)vp
+                            : new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+                                .FirstOrDefault(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == opts.Level.Id);
+                        Detection.Show(doc, view, settings.ShowDetection ? placer.Detections : null);
+                    }
+                    catch (Exception) { /* review aid only */ }
                     string logPath;
                     total.Stop();
                     timer.Add(Phases.Total, total.Elapsed + readDwgTime + setupTime);

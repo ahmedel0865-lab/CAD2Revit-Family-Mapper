@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace SmartHostMEP.Core
 {
@@ -135,7 +134,7 @@ namespace SmartHostMEP.Core
     }
 
     /// <summary>
-    /// Vertical reference plane orientation from the nearest wall/column face or DWG wall line:
+    /// Vertical reference plane orientation from the Revit wall/column face or the chosen DWG line:
     /// the plane is parallel to that edge, the family faces away from it toward the side the
     /// block is on, and (Snap to face) the device sits on the face, at the block point projected
     /// onto it - or (Through block point) the plane passes through the block point.
@@ -145,11 +144,8 @@ namespace SmartHostMEP.Core
         public const double MmPerFoot = 304.8;
         public const double DefaultSearchMm = 600;
         public const double SnapReviewMm = 200;
-        public const double MinSegmentMm = 100;
-        public const string DefaultLayers = "*WALL*, *COL*, *A-WALL*, *S-COLS*";
 
-        public static string NoEdgeReason(double radiusMm) => $"No wall/column within {radiusMm:0} mm - used block rotation";
-        public static string SnapMovedReason(double mm) => $"Moved {mm:0} mm to snap to the wall/column face";
+        public static string SnapMovedReason(double mm) => $"Moved {mm:0} mm to snap to the wall line";
 
         /// <summary>The plan for a block at <paramref name="block"/> and the edge a-b.
         /// <paramref name="blockFacing"/> decides the side only when the block lies on the edge.</summary>
@@ -176,21 +172,9 @@ namespace SmartHostMEP.Core
             };
         }
 
-        /// <summary>An edge counts as parallel to the device when its direction is within this
-        /// many degrees of the device's wall direction (symbol back line, or block X axis).</summary>
-        public const double AlignDeg = 15;
         /// <summary>The device must sit along the edge: the block point projected onto the edge's
         /// line may fall outside the segment by at most this much (mm).</summary>
         public const double EndMarginMm = 100;
-
-        /// <summary>Angle (0-90 deg) between the edge a-b and direction <paramref name="dir"/>, ignoring sense.</summary>
-        public static double AngleOffDeg(V3 a, V3 b, V3 dir)
-        {
-            var e = new V3(b.X - a.X, b.Y - a.Y, 0).Normalize();
-            var d = new V3(dir.X, dir.Y, 0).Normalize();
-            double c = Math.Min(1, Math.Abs(e.Dot(d)));
-            return Math.Acos(c) * 180 / Math.PI;
-        }
 
         /// <summary>True when the block point projects onto the segment a-b (within <see cref="EndMarginMm"/>
         /// of its ends): the device sits along that wall, not beyond its end or across a door opening.</summary>
@@ -204,61 +188,18 @@ namespace SmartHostMEP.Core
             return t >= -m && t <= len + m;
         }
 
-        /// <summary>
-        /// The edge for a device at <paramref name="block"/> among <paramref name="hits"/>:
-        /// 1. only edges the device sits along (<see cref="Covers"/>);
-        /// 2. edges parallel to <paramref name="wallDir"/> (within <see cref="AlignDeg"/>) win over
-        ///    others, even if a little farther: at a corner the device's own wall wins over the
-        ///    perpendicular one;
-        /// 3. the closest of those. With no parallel edge, the closest covering edge.
-        /// <paramref name="angleOff"/> is the chosen edge's angle to <paramref name="wallDir"/>.
-        /// </summary>
-        public static EdgeHit<T> Choose<T>(IEnumerable<EdgeHit<T>> hits, V3 block, V3 wallDir, out double angleOff)
+        /// <summary>The Revit wall/column face for a device at <paramref name="block"/>: the closest
+        /// of <paramref name="hits"/> that the device sits along (<see cref="Covers"/>), or null.
+        /// Only distance counts - not the block rotation or symbol.</summary>
+        public static EdgeHit<T> Choose<T>(IEnumerable<EdgeHit<T>> hits, V3 block)
         {
-            EdgeHit<T> bestAligned = null, bestOther = null;
-            double offAligned = 0, offOther = 0;
+            EdgeHit<T> best = null;
             foreach (var h in hits)
-            {
-                var a = new V3(h.X1, h.Y1, 0);
-                var b = new V3(h.X2, h.Y2, 0);
-                if (!Covers(block, a, b)) continue;
-                double off = AngleOffDeg(a, b, wallDir);
-                if (off <= AlignDeg)
-                {
-                    if (bestAligned == null || h.DistanceFt < bestAligned.DistanceFt) { bestAligned = h; offAligned = off; }
-                }
-                else if (bestOther == null || h.DistanceFt < bestOther.DistanceFt) { bestOther = h; offOther = off; }
-            }
-            angleOff = bestAligned != null ? offAligned : offOther;
-            return bestAligned ?? bestOther;
+                if (Covers(block, new V3(h.X1, h.Y1, 0), new V3(h.X2, h.Y2, 0)) && (best == null || h.DistanceFt < best.DistanceFt))
+                    best = h;
+            return best;
         }
-
-        public static string OffAngleReason(double deg) => $"Wall is {deg:0}° off the block/symbol direction - check the orientation";
 
         public static bool NeedsSnapReview(EdgePlan p) => p.MovedFt * MmPerFoot > SnapReviewMm;
-    }
-
-    /// <summary>DWG layer filter: comma/semicolon separated wildcards (* and ?), case-insensitive.
-    /// Hatch layers never match (hatch lines are not wall edges).</summary>
-    public static class LayerFilter
-    {
-        public static List<Regex> Parse(string patterns) =>
-            (patterns ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(p => p.Trim()).Where(p => p.Length > 0)
-                .Select(p => new Regex("^" + Regex.Escape(p).Replace("\\*", ".*").Replace("\\?", ".") + "$",
-                                       RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-                .ToList();
-
-        public static bool IsHatch(string layer) => (layer ?? "").IndexOf("HATCH", StringComparison.OrdinalIgnoreCase) >= 0;
-
-        public static bool Matches(string layer, IList<Regex> patterns, bool allLayers)
-        {
-            if (IsHatch(layer)) return false;
-            if (allLayers) return true;
-            var name = layer ?? "";
-            return patterns.Any(r => r.IsMatch(name));
-        }
-
-        public static bool Matches(string layer, string patterns, bool allLayers) => Matches(layer, Parse(patterns), allLayers);
     }
 }
