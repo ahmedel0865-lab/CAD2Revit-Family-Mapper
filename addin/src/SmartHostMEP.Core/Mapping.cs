@@ -30,6 +30,8 @@ namespace SmartHostMEP.Core
         public string Category = "";          // Electrical / Architectural / ... ("" = auto)
         public PlaceAt PlaceAt = PlaceAt.SymbolCentre;
         public int Line;   // row number in the source file (for messages)
+        /// <summary>Needs Review reason added to every element of this block (e.g. "Ambiguous symbol match"); not saved.</summary>
+        public string Review = "";
 
         public string Label => Family + " : " + TypeName;
     }

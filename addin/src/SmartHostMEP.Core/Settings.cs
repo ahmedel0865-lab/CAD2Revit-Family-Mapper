@@ -32,6 +32,8 @@ namespace SmartHostMEP.Core
         public ScoreWeights LineScore = new ScoreWeights();
         /// <summary>After Preview/Run, draw the line chosen for each vertical-plane block as detail lines.</summary>
         public bool ShowDetection = false;
+        // Auto-match by symbol geometry (see Core.SymbolMatcher)
+        public SymbolScoreWeights SymbolScore = new SymbolScoreWeights();
         // Output
         /// <summary>Write into the Comments parameter of placed elements ("SmartHost: &lt;block&gt;", and
         /// "SmartHost: Host = Reference Plane" on fallback elements). Off by default: Comments is left untouched.</summary>
@@ -94,6 +96,14 @@ namespace SmartHostMEP.Core
                 case "linescorecontinuity": LineScore.Continuity = D(LineScore.Continuity); break;
                 case "linescorecontinuitymax": LineScore.ContinuityMax = (int)Math.Max(0, D(LineScore.ContinuityMax)); break;
                 case "linescoreambiguouspercent": LineScore.AmbiguousPercent = D(LineScore.AmbiguousPercent); break;
+                case "symbolscoreshape": SymbolScore.Shape = D(SymbolScore.Shape); break;
+                case "symbolscorecounts": SymbolScore.Counts = D(SymbolScore.Counts); break;
+                case "symbolscoreaspect": SymbolScore.Aspect = D(SymbolScore.Aspect); break;
+                case "symbolscoreraster": SymbolScore.Raster = D(SymbolScore.Raster); break;
+                case "symbolscorename": SymbolScore.Name = D(SymbolScore.Name); break;
+                case "symbolautomatchscore": SymbolScore.AutoMatch = D(SymbolScore.AutoMatch); break;
+                case "symbolminimumscore": SymbolScore.Minimum = D(SymbolScore.Minimum); break;
+                case "symbolambiguouspercent": SymbolScore.AmbiguousPercent = D(SymbolScore.AmbiguousPercent); break;
                 case "showdetection": ShowDetection = B(ShowDetection); break;
                 case "writecomments": WriteComments = B(WriteComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
@@ -148,6 +158,23 @@ namespace SmartHostMEP.Core
             sb.AppendLine("LineScoreAmbiguousPercent = " + F(LineScore.AmbiguousPercent));
             sb.AppendLine("# Draw the chosen line of each vertical-plane block as detail lines after Preview/Run (also a checkbox in the window).");
             sb.AppendLine("ShowDetection = " + Bo(ShowDetection));
+            sb.AppendLine("# Auto-match by symbol geometry: each CAD block symbol is compared with the symbol of every loaded");
+            sb.AppendLine("# family (Ref. Level, Front or Back view). Score 0-100 = weighted mix of the parts below.");
+            sb.AppendLine("# Shape: overlap of the two outlines (best of 4 rotations x mirrored).");
+            sb.AppendLine("SymbolScoreShape = " + F(SymbolScore.Shape));
+            sb.AppendLine("# Counts: number of lines, arcs and circles.");
+            sb.AppendLine("SymbolScoreCounts = " + F(SymbolScore.Counts));
+            sb.AppendLine("# Aspect: width / height.");
+            sb.AppendLine("SymbolScoreAspect = " + F(SymbolScore.Aspect));
+            sb.AppendLine("# Raster: 64 x 64 picture overlap (backup). 0 = off.");
+            sb.AppendLine("SymbolScoreRaster = " + F(SymbolScore.Raster));
+            sb.AppendLine("# Name: similar block and family names add at most this many points (tie-breaker only).");
+            sb.AppendLine("SymbolScoreName = " + F(SymbolScore.Name));
+            sb.AppendLine("# Selected automatically at this score or more; below SymbolMinimumScore the block stays unmatched.");
+            sb.AppendLine("SymbolAutoMatchScore = " + F(SymbolScore.AutoMatch));
+            sb.AppendLine("SymbolMinimumScore = " + F(SymbolScore.Minimum));
+            sb.AppendLine("# The two best families closer than this (percent): Needs Review 'Ambiguous symbol match'.");
+            sb.AppendLine("SymbolAmbiguousPercent = " + F(SymbolScore.AmbiguousPercent));
             sb.AppendLine("# Write 'CAD: <block name>' into each placed element's Comments.");
             sb.AppendLine("WriteComments = " + Bo(WriteComments));
             sb.AppendLine();

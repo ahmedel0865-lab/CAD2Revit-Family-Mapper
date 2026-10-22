@@ -98,6 +98,8 @@ namespace SmartHostMEP.Commands
                         return Result.Cancelled;
                     bool preview = win.Action == MappingAction.Preview;
 
+                    // Remember the families picked by hand for the next Auto-match.
+                    try { session.Learn(); } catch (Exception) { }
                     // Remember this grid for the project (next time it is pre-filled).
                     try
                     {
@@ -252,7 +254,19 @@ namespace SmartHostMEP.Commands
             FamilyCatalog.Load(doc, session);
             session.LevelNames = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
                 .OrderBy(l => l.ProjectElevation).Select(l => l.Name).ToList();
-            var symbols = DwgReader.ExtractSymbols(blocks);
+            var symbols = DwgReader.ExtractSymbols(blocks, doc);
+            // Auto-match by symbol geometry: the families' symbols are read when Auto-match is clicked.
+            session.LoadFamilySymbols = progress =>
+            {
+                var cache = new SignatureCache();
+                var list = FamilySignatures.Load(doc, session.Options, cache, progress, out var st);
+                session.SymbolInfo = $"Family symbols: {st.WithSymbol} of {st.Families} families have one" +
+                    $" ({st.FromCache} from the cache, {st.Opened} opened" +
+                    (st.Skipped > 0 ? $", {st.Skipped} system/in-place skipped" : "") +
+                    (st.Failed > 0 ? $", {st.Failed} could not be opened" : "") + ")" +
+                    (st.Cancelled ? ". Stopped: the rest were not read." : ".");
+                return list;
+            };
             foreach (var kv in DwgReader.CountByName(blocks).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
                 session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, opts.Level.Name)
                 {

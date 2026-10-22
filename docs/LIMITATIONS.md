@@ -33,6 +33,12 @@ Block scale is recorded in the log (`Block_Scale`) but not applied. Family size 
 ## Duplicate check
 An existing instance of the **same family** within 50 mm in plan, between the target level and the next level up, counts as a duplicate. Instances in linked models are not checked. If you change the mapping to a *different family* for a block, the old instances are not detected: delete them first (with `WriteComments = true`, filter by Comments = `SmartHost: ...`).
 
+## Auto-match by symbol
+- Only the line work of the family's **Ref. Level**, **Front** or **Back** view is compared (symbolic/detail lines, detail components, annotation symbols, imported CAD in that view). A family whose plan symbol is only its 3D geometry has no symbol and is matched by name only.
+- Rotation is removed by turning the smallest rectangle around the symbol square to the axes; 90° steps and mirroring are then tried. Symbols that differ only in small details (e.g. a single vs. a double socket drawn the same size) can score close to each other: check rows marked `?` (Ambiguous symbol match).
+- Text inside a block is not part of the DWG geometry Revit exposes, so a letter drawn as text ("EM", "WP") does not count. Hatch, wipeout, text, attribute and dimension line work is left out by layer name only.
+- The first Auto-match on a project opens every loadable family in the dropdown once, which can take a minute or more with many families. Later runs use the cache in `%TEMP%`. The cache notices a reloaded or edited family by its Revit version id; if a match ever looks stale, delete `%TEMP%\SmartHostMEP\SymbolCache`.
+
 ## Other
 - Only one DWG and one level per run. Run once per floor.
 - Views/sheets are not affected; the tool uses a temporary 3D view for host searches and deletes it at the end of the run.

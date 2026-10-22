@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.32.0] - 2026-10-22
+### Changed: Auto-match compares symbols, not just names
+**Auto-match** now matches each CAD block to a loaded family by the shape of its 2D symbol. No family folder is needed: it uses the families already loaded in the project.
+1. **Block symbol:** the block's lines, arcs, circles and polylines. Text, attributes, hatch and wipeouts are left out (by layer name). The symbol is moved to the origin, its rotation is removed and it is scaled to unit size.
+2. **Family symbol:** for each family in the Revit Family dropdown, the views **Ref. Level**, **Front** and **Back** are read in that order, and the first one with line work is used: symbolic and detail lines, detail components and annotation symbols, and imported CAD in that view. It is normalized the same way.
+   - Only **loadable families** are opened (with Edit Family, closed without saving). System families, in-place families and families that cannot be opened are skipped.
+3. **Cache:** family symbols are saved in `%TEMP%\SmartHostMEP\SymbolCache` (never next to the project), so a family is only opened again when it is new or changed (reloaded or edited). Families without a symbol are remembered too. If the folder is deleted, it is rebuilt on the next Auto-match. The first Auto-match on a project can take a while; a progress bar with Cancel is shown.
+4. **Pre-filter:** pairs whose category, element counts or aspect ratio are clearly different are not compared.
+5. **Score 0-100:**
+   - shape overlap: mean distance between points sampled along the two symbols, both ways (chamfer distance), tested at 0/90/180/270° and mirrored;
+   - element counts (lines, arcs, circles);
+   - aspect ratio;
+   - a 64 x 64 raster overlap, as a backup;
+   - name similarity only as a tie-breaker (at most 2 points).
+
+   The weights are new settings.ini keys: `SymbolScoreShape` 55, `SymbolScoreCounts` 15, `SymbolScoreAspect` 15, `SymbolScoreRaster` 15, `SymbolScoreName` 2.
+6. **Learns from you:** every family you pick or fix by hand is saved (block name + symbol → family type) in `%AppData%\SmartHostMEP\learned-matches.txt` when you click Preview or Run. Auto-match uses it first next time, also for the same symbol under another block name. Automatic matches are never saved there, so they never replace a manual choice.
+7. **Match rules:**
+   - score **80** or more (`SymbolAutoMatchScore`): the family is selected;
+   - if the second best family is within **10 %** (`SymbolAmbiguousPercent`), the best one is still selected and its elements are listed in Needs Review as **"Ambiguous symbol match"**;
+   - **50-79**: offered in *Top 3 Candidates* but not selected;
+   - below **50** (`SymbolMinimumScore`): the block stays unmatched.
+   - Blocks without line work, and families without a symbol, are still matched by name as before.
+   - Rows that already have a family are never changed.
+
+### Added
+- Grid columns **Score** (of the selected family; `(n)` = best candidate not selected, `?` = ambiguous, `Learned` = from your earlier choice), **Source View** (the family view that matched) and **Top 3 Candidates** (a dropdown with the three best families and their scores; picking one selects it and counts as a manual choice).
+- The symbol preview now also shows full circles (they were missing before).
+- New Core classes `SymbolSignature`, `SymbolMatcher`, `SignatureCache` and `LearnedMatches`, with tests.
+
 ## [0.31.0] - 2026-10-22
 ### Changed: vertical planes pick the wall line by score
 For Host Type **Vertical plane**, each block now goes through three steps:

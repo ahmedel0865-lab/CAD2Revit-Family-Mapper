@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Linq;
 using System.Windows.Data;
 using System.Windows.Media;
 using SmartHostMEP.Core;
@@ -73,12 +74,69 @@ namespace SmartHostMEP.UI
                 if (value == null || value == _family) return;   // null = transient state while filtering
                 _family = value;
                 AutoMatched = false;
+                MatchReview = "";
                 DetectedHost = "";
                 Changed(nameof(Family));
                 Changed(nameof(FamilyLabel));
                 Changed(nameof(IsSkipped));
+                Changed(nameof(ScoreText));
+                Changed(nameof(SourceView));
+                Changed(nameof(SelectedCandidate));
             }
         }
+
+        // ---- Auto-match by symbol geometry ----------------------------------------------------
+
+        List<SymbolCandidate> _candidates = new List<SymbolCandidate>();
+        /// <summary>The best families for this block from the last Auto-match (at most 3, best first).</summary>
+        public List<SymbolCandidate> Candidates
+        {
+            get => _candidates;
+            set
+            {
+                _candidates = value ?? new List<SymbolCandidate>();
+                Changed(nameof(Candidates));
+                Changed(nameof(ScoreText));
+                Changed(nameof(SourceView));
+                Changed(nameof(SelectedCandidate));
+            }
+        }
+        /// <summary>Finds the dropdown entry of a candidate (set by the session).</summary>
+        public Func<SymbolCandidate, FamilyOption> ResolveCandidate { get; set; }
+        /// <summary>Needs Review reason of the automatic choice ("Ambiguous symbol match"), else "".</summary>
+        public string MatchReview { get; set; } = "";
+
+        SymbolCandidate Current => _family.IsSkip ? null
+            : _candidates.FirstOrDefault(c => string.Equals(c.Label, _family.Label, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Match score of the selected family ("" when it is not one of the candidates).</summary>
+        public string ScoreText
+        {
+            get
+            {
+                var c = Current;
+                if (c == null) return _candidates.Count > 0 && _family.IsSkip ? $"({_candidates[0].Score:0})" : "";
+                return c.Learned ? "Learned" : c.Score.ToString("0", Inv) + (MatchReview.Length > 0 ? " ?" : "");
+            }
+        }
+        /// <summary>The family view the matched symbol came from.</summary>
+        public string SourceView => Current?.View ?? "";
+
+        /// <summary>The "Top 3" dropdown: picking a candidate selects its family (a manual choice).</summary>
+        public SymbolCandidate SelectedCandidate
+        {
+            get => Current;
+            set
+            {
+                if (value == null || ResolveCandidate == null) return;
+                var opt = ResolveCandidate(value);
+                if (opt != null) Family = opt;
+            }
+        }
+
+        /// <summary>Signature of the block symbol (built on first use).</summary>
+        public SymbolSignature Signature => _signature ?? (_signature = SymbolSignature.From(Symbol));
+        SymbolSignature _signature;
 
         public string FamilyLabel => _family.Label;
         public bool IsSkipped => _family.IsSkip;
@@ -189,6 +247,7 @@ namespace SmartHostMEP.UI
             LevelName = string.Equals(_level, DefaultLevel, StringComparison.OrdinalIgnoreCase) ? "" : _level,
             Category = _category,
             PlaceAt = Mapping.ParsePlaceAt(_placeAt) ?? Core.PlaceAt.SymbolCentre,
+            Review = AutoMatched ? MatchReview : "",
         };
 
         /// <summary>Apply a mapping-file row to this grid row.</summary>
@@ -280,24 +339,132 @@ namespace SmartHostMEP.UI
             return n;
         }
 
-        /// <summary>Pre-select a family for every (Skip) row whose name closely matches
-        /// (optionally only rows accepted by <paramref name="filter"/>).</summary>
-        public int AutoMatch(Func<BlockRow, bool> filter = null)
+        /// <summary>Reads the symbols of the loaded families (opens families not in the cache; set by
+        /// the command). Argument: progress(done, total, family) returning false to stop.</summary>
+        public Func<Func<int, int, string, bool>, List<FamilySymbolEntry>> LoadFamilySymbols;
+        /// <summary>What the last family symbol read did ("Family symbols: 40 read, 12 opened ...").</summary>
+        public string SymbolInfo = "";
+        /// <summary>Remembered manual matches (loaded on first use).</summary>
+        public LearnedMatches Learned;
+
+        public class AutoMatchSummary
         {
-            var candidates = new List<FamilyOption>();
-            foreach (var o in Options) if (!o.IsSkip) candidates.Add(o);
-            var labels = candidates.ConvertAll(o => o.Label);
+            public int Learned, BySymbol, Ambiguous, ByName, Suggested, FamiliesWithSymbol;
+            public int Selected => Learned + BySymbol + ByName;
+        }
+
+        FamilyOption ResolveLabel(string label) =>
+            label != null && AllTypes.TryGetValue(label, out var o) ? Resolve(o.Family, o.TypeName) : null;
+
+        /// <summary>
+        /// Auto-match (rows accepted by <paramref name="filter"/>): every row gets its top 3 families by
+        /// symbol geometry; rows still on (Skip) get a family when one was matched manually before
+        /// (same block and symbol), else when the best scores at least the AutoMatch score (Needs Review
+        /// "Ambiguous symbol match" when the second is close). Rows already mapped are never changed.
+        /// Blocks without line work fall back to name matching; so do families without a symbol (only
+        /// for blocks that no family with a symbol matched).
+        /// </summary>
+        public AutoMatchSummary AutoMatch(List<FamilySymbolEntry> families, Func<BlockRow, bool> filter = null)
+        {
+            families = families ?? new List<FamilySymbolEntry>();
+            var summary = new AutoMatchSummary { FamiliesWithSymbol = families.Count };
+            var matcher = new SymbolMatcher(Settings?.SymbolScore);
+            if (Learned == null) Learned = new LearnedMatches();
+            var nameCandidates = new List<FamilyOption>();
+            foreach (var o in Options) if (!o.IsSkip) nameCandidates.Add(o);
+            var labels = nameCandidates.ConvertAll(o => o.Label);
+            // Families without a symbol can only be matched by name.
+            var withSymbol = new HashSet<string>(families.Select(f => f.Family), StringComparer.OrdinalIgnoreCase);
+            var noSymbol = nameCandidates.Where(o => !withSymbol.Contains(o.Family)).ToList();
+            var noSymbolLabels = noSymbol.ConvertAll(o => o.Label);
+            foreach (var row in Rows)
+            {
+                if (filter != null && !filter(row)) continue;
+                row.ResolveCandidate = c => ResolveLabel(c.Label);
+                var sig = row.Signature;
+                var ranked = families.Count > 0 ? matcher.Rank(sig, row.BlockName, row.Category, families) : new List<SymbolCandidate>();
+                bool open = row.Family.IsSkip;
+
+                // 1. A manual match remembered for this block and symbol.
+                if (open)
+                {
+                    foreach (var m in Learned.Find(row.BlockName, sig.Hash()))
+                    {
+                        var opt = Resolve(m.Family, m.TypeName);
+                        if (opt == null || opt.IsSkip) continue;
+                        var same = ranked.FirstOrDefault(c => string.Equals(c.Label, opt.Label, StringComparison.OrdinalIgnoreCase));
+                        var learned = new SymbolCandidate
+                        {
+                            Family = opt.Family, Label = opt.Label, Learned = true,
+                            Score = same?.Score ?? 100, Geometry = same?.Geometry ?? 100, View = same?.View ?? "",
+                        };
+                        ranked.Remove(same);
+                        ranked.Insert(0, learned);
+                        if (ranked.Count > SymbolMatcher.TopCount) ranked.RemoveAt(ranked.Count - 1);
+                        row.Candidates = ranked;
+                        row.Family = opt;
+                        row.AutoMatched = true;
+                        UseFamilyCategory(row);
+                        summary.Learned++;
+                        open = false;
+                        break;
+                    }
+                    if (!open) continue;
+                }
+                row.Candidates = ranked;
+                if (!open) continue;
+
+                // 2. Symbol geometry.
+                if (!sig.IsEmpty && families.Count > 0)
+                {
+                    var d = matcher.Decide(ranked);
+                    var opt = d.Chosen == null ? null : ResolveLabel(d.Chosen.Label);
+                    if (opt == null)
+                    {
+                        if (d.Best != null) summary.Suggested++;
+                        else if (ByName(row, noSymbol, noSymbolLabels)) summary.ByName++;
+                        continue;
+                    }
+                    row.Family = opt;
+                    row.AutoMatched = true;
+                    row.MatchReview = d.Ambiguous ? SymbolMatcher.AmbiguousReason : "";
+                    row.Candidates = ranked;   // refresh the score text with the review mark
+                    UseFamilyCategory(row);
+                    summary.BySymbol++;
+                    if (d.Ambiguous) summary.Ambiguous++;
+                    continue;
+                }
+
+                // 3. No symbol to compare: the block name.
+                if (ByName(row, nameCandidates, labels)) summary.ByName++;
+            }
+            return summary;
+        }
+
+        /// <summary>Name matching (no symbol to compare): selects the closest name among <paramref name="options"/>.</summary>
+        static bool ByName(BlockRow row, List<FamilyOption> options, List<string> labels)
+        {
+            int i = FamilyMatcher.BestMatch(row.BlockName, labels, out _);
+            if (i < 0) return false;
+            row.Family = options[i];
+            row.AutoMatched = true;
+            UseFamilyCategory(row);
+            return true;
+        }
+
+        /// <summary>Remembers every row whose family was picked by hand (not by Auto-match) for the
+        /// next Auto-match. Returns how many rows were remembered.</summary>
+        public int Learn()
+        {
+            if (Learned == null) Learned = new LearnedMatches();
             int n = 0;
             foreach (var row in Rows)
             {
-                if (!row.Family.IsSkip || (filter != null && !filter(row))) continue;
-                int i = FamilyMatcher.BestMatch(row.BlockName, labels, out _);
-                if (i < 0) continue;
-                row.Family = candidates[i];
-                row.AutoMatched = true;
-                UseFamilyCategory(row);
+                if (row.Family.IsSkip || row.AutoMatched) continue;
+                Learned.Add(row.BlockName, row.Signature.Hash(), row.Family.Family, row.Family.TypeName);
                 n++;
             }
+            Learned.Save();
             return n;
         }
 

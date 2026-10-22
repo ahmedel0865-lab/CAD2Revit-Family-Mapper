@@ -24,6 +24,8 @@ namespace SmartHostMEP.UI
         long _lastPump = -1000;
 
         public bool Cancelled { get; private set; }
+        /// <summary>Shown after Cancel is clicked.</summary>
+        public string CancelText { get; set; } = "Cancelling - rolling back...";
 
         public ProgressWindow(string title, IntPtr owner)
         {
@@ -42,7 +44,7 @@ namespace SmartHostMEP.UI
             {
                 Cancelled = true;
                 cancel.Enabled = false;
-                _label.Text = "Cancelling - rolling back...";
+                _label.Text = CancelText;
             };
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 30 };
             bottom.Controls.Add(cancel);
@@ -56,14 +58,18 @@ namespace SmartHostMEP.UI
         }
 
         /// <summary>Update the bar. Returns false once Cancel was clicked.</summary>
-        public bool Report(int done, int total)
+        public bool Report(int done, int total) => Report(done, total, null);
+
+        /// <summary>Update the bar with <paramref name="text"/> (default: "Placing block N of M").
+        /// Returns false once Cancel was clicked.</summary>
+        public bool Report(int done, int total, string text)
         {
             if (Cancelled) return false;
             if (_clock.ElapsedMilliseconds - _lastPump < 150 && done < total) return true;
             _bar.Value = total > 0 ? Math.Min(1000, (int)(1000L * done / total)) : 0;
             var secs = _clock.Elapsed.TotalSeconds;
             string eta = done > 0 && done < total ? $"  -  about {Math.Max(1, secs / done * (total - done)):0} s left" : "";
-            _label.Text = $"Placing block {Math.Min(done + 1, total):N0} of {total:N0}{eta}";
+            _label.Text = (text ?? $"Placing block {Math.Min(done + 1, total):N0} of {total:N0}") + eta;
             Pump();
             return !Cancelled;
         }

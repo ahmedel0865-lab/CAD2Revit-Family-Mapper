@@ -636,6 +636,7 @@ namespace SmartHostMEP.Revit
             if (plan.Failed != null) return WithDebug(plan.Failed, plan);
             var res0 = PlaceOne(b, row, sym, level, finder, ctx, dups, familyOfType, batches, batchLevel, created, plan);
             if (plan.SlabFallback) res0.SlabFallback = true;
+            if (!string.IsNullOrEmpty(row.Review)) plan.Review.Add(row.Review);
             if (res0.Status == Status.Placed && plan.Review.Count > 0) res0.Review = string.Join("; ", plan.Review.Distinct());
             if (res0.Status == Status.Placed) res0.SlabHost = plan.SlabHost;
             return res0;

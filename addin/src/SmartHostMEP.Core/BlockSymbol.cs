@@ -3,6 +3,9 @@ using System.Collections.Generic;
 
 namespace SmartHostMEP.Core
 {
+    /// <summary>What a path of a symbol was drawn as (for the element counts of Auto-match).</summary>
+    public enum SymbolKind { Line, Polyline, Arc, Circle }
+
     /// <summary>
     /// The 2D line work of a CAD block definition (lines, arcs, polylines...), as flat
     /// polylines in the block's own coordinates. Used for the symbol preview in the
@@ -18,6 +21,25 @@ namespace SmartHostMEP.Core
         public int PointCount { get; private set; }
         public bool Truncated { get; private set; }
         public bool IsEmpty => Paths.Count == 0;
+        /// <summary>Element counts (Auto-match): straight segments (lines and polyline segments),
+        /// open arcs and other curves, and closed circles/ellipses.</summary>
+        public int Lines, Arcs, Circles;
+
+        /// <summary>Adds one polyline and counts it as <paramref name="kind"/>; returns false once the
+        /// point budget is used up.</summary>
+        public bool AddPath(IList<double> xy, SymbolKind kind)
+        {
+            if (xy == null || xy.Count < 4) return true;
+            if (!AddPath(xy)) return false;
+            switch (kind)
+            {
+                case SymbolKind.Line: Lines++; break;
+                case SymbolKind.Polyline: Lines += xy.Count / 2 - 1; break;
+                case SymbolKind.Arc: Arcs++; break;
+                case SymbolKind.Circle: Circles++; break;
+            }
+            return true;
+        }
 
         /// <summary>Adds one polyline; returns false once the point budget is used up.</summary>
         public bool AddPath(IList<double> xy)

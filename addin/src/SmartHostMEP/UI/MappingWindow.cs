@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using System.Windows.Media;
 using SmartHostMEP.Core;
@@ -136,7 +137,7 @@ namespace SmartHostMEP.UI
             left.Children.Add(new TextBlock { Text = "Mapping file:", Foreground = Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
             left.Children.Add(MakeButton("Load...", (s, e) => LoadMapping(), "Load a mapping (XLSX or CSV) into the grid"));
             left.Children.Add(MakeButton("Save...", (s, e) => SaveMapping(), "Save the grid as a mapping file (XLSX or CSV)"));
-            left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch(), "Pre-select families whose names match the block names (rows still on Skip)"));
+            left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch(), "Match blocks to loaded families by their symbol (lines, arcs, circles), then by earlier manual choices and names. Rows already mapped are not changed."));
             left.Children.Add(MakeButton("Clear All Families", (s, e) => ClearFamilies(), "Set the Revit Family of every row back to (Skip); the other columns stay"));
             left.Children.Add(_status);
             DockPanel.SetDock(left, Dock.Left);
@@ -343,6 +344,44 @@ namespace SmartHostMEP.UI
                 MinWidth = 250,
             });
 
+            // Auto-match by symbol geometry: score and source view of the selected family, and the
+            // top 3 families (picking one selects it; manual picks are remembered for next time).
+            var scoreStyle = new Style(typeof(TextBlock));
+            scoreStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            scoreStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
+            _grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = new TextBlock { Text = "Score", ToolTip = "Symbol match score (0-100) of the selected family. (n) = best candidate, not selected (below the auto-match score). ? = ambiguous: Needs Review. Learned = your earlier manual match." },
+                Binding = new Binding(nameof(BlockRow.ScoreText)) { Mode = BindingMode.OneWay },
+                IsReadOnly = true,
+                Width = new DataGridLength(62),
+                ElementStyle = scoreStyle,
+            });
+            _grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = new TextBlock { Text = "Source View", ToolTip = "The family view whose symbol was matched (Ref. Level, Front or Back)" },
+                Binding = new Binding(nameof(BlockRow.SourceView)) { Mode = BindingMode.OneWay },
+                IsReadOnly = true,
+                Width = new DataGridLength(90),
+                ElementStyle = TrimmedPlainStyle(),
+            });
+            var top = new FrameworkElementFactory(typeof(ComboBox));
+            top.SetBinding(ItemsControl.ItemsSourceProperty, new Binding(nameof(BlockRow.Candidates)) { Mode = BindingMode.OneWay });
+            top.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(BlockRow.SelectedCandidate))
+            {
+                Mode = BindingMode.TwoWay,
+                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+            });
+            top.SetValue(ItemsControl.DisplayMemberPathProperty, nameof(SymbolCandidate.Text));
+            top.SetValue(FrameworkElement.MarginProperty, new Thickness(1));
+            top.SetValue(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center);
+            _grid.Columns.Add(new DataGridTemplateColumn
+            {
+                Header = new TextBlock { Text = "Top 3 Candidates", ToolTip = "The best families by symbol after Auto-match (score  Family : Type). Pick one to use it." },
+                CellTemplate = new DataTemplate { VisualTree = top },
+                Width = new DataGridLength(250),
+            });
+
             // 3. Level + Elevation From Level (mm), validated
             _grid.Columns.Add(new DataGridComboBoxColumn
             {
@@ -415,6 +454,14 @@ namespace SmartHostMEP.UI
             var skipped = new DataTrigger { Binding = new Binding(nameof(BlockRow.IsSkipped)), Value = true };
             skipped.Setters.Add(new Setter(Control.ForegroundProperty, Muted));
             style.Triggers.Add(skipped);
+            return style;
+        }
+
+        static Style TrimmedPlainStyle()
+        {
+            var style = new Style(typeof(TextBlock));
+            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
             return style;
         }
 
@@ -964,12 +1011,38 @@ namespace SmartHostMEP.UI
         void AutoMatch()
         {
             CommitEdits();
-            int n = _s.AutoMatch();
+            List<FamilySymbolEntry> families = null;
+            if (_s.LoadFamilySymbols != null)
+            {
+                try
+                {
+                    var handle = new WindowInteropHelper(this).Handle;
+                    using (var progress = new ProgressWindow("SmartHost MEP - Reading family symbols", handle) { CancelText = "Stopping..." })
+                        families = _s.LoadFamilySymbols((done, total, name) =>
+                            progress.Report(done, total, total == 0 ? "" : $"Reading family {Math.Min(done + 1, total):N0} of {total:N0}: {name}"));
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Could not read the family symbols - matching by name only.\n\n" + ex.Message, "SmartHost MEP",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                Activate();
+            }
+            var r = _s.AutoMatch(families);
             UpdateStatus();
-            MessageBox.Show(this, n == 0
-                    ? "No further close matches found. Rows already mapped are not changed."
-                    : $"Pre-selected a family for {n} block(s) whose names closely match. Please check them.",
-                "SmartHost MEP");
+            var w = _s.Settings?.SymbolScore ?? new SymbolScoreWeights();
+            var lines = new List<string>
+            {
+                r.Selected == 0 ? "No family was selected automatically." : $"A family was selected for {r.Selected} block(s):",
+            };
+            if (r.Learned > 0) lines.Add($"  - {r.Learned} from your earlier manual matches");
+            if (r.BySymbol > 0) lines.Add($"  - {r.BySymbol} by symbol (score {w.AutoMatch:0} or more)" +
+                                          (r.Ambiguous > 0 ? $", {r.Ambiguous} of them close to another family: Needs Review 'Ambiguous symbol match'" : ""));
+            if (r.ByName > 0) lines.Add($"  - {r.ByName} by name (no symbol to compare)");
+            if (r.Suggested > 0) lines.Add($"\n{r.Suggested} block(s) have candidates scoring {w.Minimum:0}-{w.AutoMatch - 1:0}: pick one in 'Top 3 Candidates'.");
+            if (!string.IsNullOrEmpty(_s.SymbolInfo)) lines.Add("\n" + _s.SymbolInfo);
+            lines.Add("\nRows already mapped are not changed. Please check the selected families.");
+            MessageBox.Show(this, string.Join("\n", lines), "SmartHost MEP - Auto-match");
         }
 
         void ClearFamilies()

@@ -132,9 +132,13 @@ namespace SmartHostMEP.Revit
 
         /// <summary>The 2D symbol (line work of the block definition) for every block name,
         /// read from the first instance of each name. Unscaled, unrotated, in feet.</summary>
-        public static Dictionary<string, Core.BlockSymbol> ExtractSymbols(IEnumerable<BlockRef> blocks)
+        /// <summary>The symbol of each block name (preview and Auto-match): lines, arcs, circles and
+        /// polylines, with element counts. With <paramref name="doc"/>, line work on hatch, wipeout,
+        /// text, attribute and dimension layers is left out.</summary>
+        public static Dictionary<string, Core.BlockSymbol> ExtractSymbols(IEnumerable<BlockRef> blocks, Document doc = null)
         {
             var result = new Dictionary<string, Core.BlockSymbol>(StringComparer.OrdinalIgnoreCase);
+            var skip = doc == null ? null : SymbolGeometry.LayerFilter(doc);
             foreach (var b in blocks)
             {
                 if (b.Instance == null || result.ContainsKey(b.Name)) continue;
@@ -144,7 +148,7 @@ namespace SmartHostMEP.Revit
                     // Symbol geometry is in the block's own coordinates; the DWG link scale is
                     // removed so sizes read in real units.
                     double unit = 1.0 / Math.Max(1e-12, b.Transform.BasisX.GetLength() / Math.Max(1e-12, b.ScaleX));
-                    CollectLines(b.Instance.GetSymbolGeometry(), Transform.Identity.ScaleBasis(unit), symbol, 0);
+                    SymbolGeometry.Collect(b.Instance.GetSymbolGeometry(), Transform.Identity.ScaleBasis(unit), symbol, SymbolGeometry.Plan, skip, circles: true);
                 }
                 catch (Exception) { /* preview only: ignore unreadable geometry */ }
                 result[b.Name] = symbol;
@@ -161,40 +165,8 @@ namespace SmartHostMEP.Revit
             return symbol;
         }
 
-        static bool CollectLines(GeometryElement geom, Transform tf, Core.BlockSymbol symbol, int depth)
-        {
-            if (geom == null || depth > 6) return true;
-            foreach (var obj in geom)
-            {
-                bool more = true;
-                switch (obj)
-                {
-                    case PolyLine pl:
-                        more = symbol.AddPath(Flatten(pl.GetCoordinates(), tf));
-                        break;
-                    case Curve c when c.IsBound:
-                        more = symbol.AddPath(Flatten(c.Tessellate(), tf));
-                        break;
-                    case GeometryInstance nested:   // blocks inside the block
-                        more = CollectLines(nested.GetSymbolGeometry(), tf.Multiply(nested.Transform), symbol, depth + 1);
-                        break;
-                }
-                if (!more) return false;
-            }
-            return true;
-        }
-
-        static List<double> Flatten(IList<XYZ> points, Transform tf)
-        {
-            var xy = new List<double>(points.Count * 2);
-            foreach (var p in points)
-            {
-                var q = tf.OfPoint(p);
-                xy.Add(q.X);
-                xy.Add(q.Y);
-            }
-            return xy;
-        }
+        static bool CollectLines(GeometryElement geom, Transform tf, Core.BlockSymbol symbol, int depth) =>
+            SymbolGeometry.Collect(geom, tf, symbol, SymbolGeometry.Plan, null, circles: false, depth: depth);
 
         public static Dictionary<string, int> CountByName(IEnumerable<BlockRef> blocks)
         {
