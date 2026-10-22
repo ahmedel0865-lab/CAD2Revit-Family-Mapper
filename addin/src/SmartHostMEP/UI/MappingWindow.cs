@@ -1042,7 +1042,36 @@ namespace SmartHostMEP.UI
             if (r.Suggested > 0) lines.Add($"\n{r.Suggested} block(s) have candidates scoring {w.Minimum:0}-{w.AutoMatch - 1:0}: pick one in 'Top 3 Candidates'.");
             if (!string.IsNullOrEmpty(_s.SymbolInfo)) lines.Add("\n" + _s.SymbolInfo);
             lines.Add("\nRows already mapped are not changed. Please check the selected families.");
-            MessageBox.Show(this, string.Join("\n", lines), "SmartHost MEP - Auto-match");
+            var report = WriteAutoMatchReport(r);
+            if (report != null)
+            {
+                lines.Add("\nOpen the report (each family's symbol view, each block's scores)?");
+                if (MessageBox.Show(this, string.Join("\n", lines), "SmartHost MEP - Auto-match", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(report) { UseShellExecute = true }); } catch (Exception) { }
+            }
+            else MessageBox.Show(this, string.Join("\n", lines), "SmartHost MEP - Auto-match");
+        }
+
+        /// <summary>%TEMP%\SmartHostMEP\AutoMatch-report.txt: what each family and block got. Null if it cannot be written.</summary>
+        string WriteAutoMatchReport(MappingSession.AutoMatchSummary r)
+        {
+            try
+            {
+                var path = Path.Combine(Path.GetTempPath(), AppStorage.FolderName, "AutoMatch-report.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                var text = new List<string> { "SmartHost MEP - Auto-match report  " + DateTime.Now.ToString("yyyy-MM-dd HH:mm"), "", _s.SymbolInfo, "",
+                                              "FAMILIES (family, symbol view: what was read)" };
+                text.AddRange(_s.SymbolReport);
+                text.Add("");
+                text.Add("BLOCKS (block, its symbol, result, top 3 candidates)");
+                text.AddRange(r.Lines);
+                File.WriteAllLines(path, text);
+                return path;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         void ClearFamilies()

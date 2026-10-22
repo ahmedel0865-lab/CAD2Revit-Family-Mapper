@@ -265,6 +265,7 @@ namespace SmartHostMEP.Commands
                     (st.Skipped > 0 ? $", {st.Skipped} system/in-place skipped" : "") +
                     (st.Failed > 0 ? $", {st.Failed} could not be opened" : "") + ")" +
                     (st.Cancelled ? ". Stopped: the rest were not read." : ".");
+                session.SymbolReport = st.Lines;
                 return list;
             };
             foreach (var kv in DwgReader.CountByName(blocks).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))

@@ -9,7 +9,7 @@ namespace SmartHostMEP.Core
     {
         /// <summary>Shape overlap (chamfer distance of the sampled points, best of 8 orientations).</summary>
         public double Shape = 55;
-        /// <summary>Element counts (lines, arcs, circles).</summary>
+        /// <summary>Element mix: share of the line work that is curved (arcs, circles) vs straight.</summary>
         public double Counts = 15;
         public double Aspect = 15;
         /// <summary>64 x 64 raster overlap (backup for symbols the sampled points describe poorly).</summary>
@@ -62,7 +62,7 @@ namespace SmartHostMEP.Core
 
     /// <summary>
     /// Scores CAD block symbols against family symbols (0..100). Cheap checks first (category,
-    /// element counts, aspect ratio), then the shape: the mean distance between the two point sets
+    /// curved share, aspect ratio), then the shape: the mean distance between the two point sets
     /// both ways (chamfer distance), for each of the 4 right-angle rotations and their mirror images;
     /// the best orientation counts.
     /// </summary>
@@ -70,13 +70,13 @@ namespace SmartHostMEP.Core
     {
         public const string AmbiguousReason = "Ambiguous symbol match";
         /// <summary>Chamfer distance (normalized frame, larger side = 1) at which the shape score reaches 0.</summary>
-        public const double ShapeZero = 0.10;
+        public const double ShapeZero = 0.15;
         /// <summary>Chamfer distance up to this counts as a perfect fit (sampling and distance-grid noise).</summary>
-        public const double ShapeExact = 0.015;
+        public const double ShapeExact = 0.02;
         /// <summary>Pre-filter: aspect ratios farther apart than this are never compared.</summary>
-        public const double MaxAspectGap = 0.4;
-        /// <summary>Pre-filter: element totals more than this many times apart (and more than 6 apart) are never compared.</summary>
-        public const double MaxCountRatio = 5;
+        public const double MaxAspectGap = 0.5;
+        /// <summary>Pre-filter: curved shares farther apart than this are never compared (e.g. a circle and a square).</summary>
+        public const double MaxCurvedGap = 0.7;
         public const int TopCount = 3;
 
         readonly SymbolScoreWeights _w;
@@ -93,12 +93,7 @@ namespace SmartHostMEP.Core
             var fc = BlockCategories.FromRevitCategory(familyCategory);
             if (bc != null && bc != BlockCategories.Other && bc != BlockCategories.Annotation && fc != null && fc != bc) return false;
             if (Math.Abs(block.Aspect - family.Aspect) > MaxAspectGap) return false;
-            int a = block.Elements, b = family.Elements;
-            if (a > 0 && b > 0)
-            {
-                int lo = Math.Min(a, b), hi = Math.Max(a, b);
-                if (hi > lo * MaxCountRatio && hi - lo > 6) return false;
-            }
+            if (Math.Abs(block.Curved - family.Curved) > MaxCurvedGap) return false;
             return true;
         }
 
@@ -150,21 +145,10 @@ namespace SmartHostMEP.Core
             return 0.5 * ((double)hitA / na + (double)hitB / nb);
         }
 
-        public static double CountSimilarity(SymbolSignature a, SymbolSignature b)
-        {
-            double sum = 0;
-            int kinds = 0;
-            void Kind(int x, int y)
-            {
-                if (x == 0 && y == 0) return;
-                kinds++;
-                sum += (double)Math.Min(x, y) / Math.Max(x, y);
-            }
-            Kind(a.Lines, b.Lines);
-            Kind(a.Arcs, b.Arcs);
-            Kind(a.Circles, b.Circles);
-            return kinds == 0 ? 1 : sum / kinds;
-        }
+        /// <summary>Element mix 0..1: how alike the curved shares are. Told from the geometry, not from
+        /// the element types, so lines vs polylines or a circle vs a 64-sided polyline do not matter.</summary>
+        public static double CountSimilarity(SymbolSignature a, SymbolSignature b) =>
+            Math.Max(0, 1 - Math.Abs(a.Curved - b.Curved));
 
         public static double AspectSimilarity(SymbolSignature a, SymbolSignature b) =>
             Math.Max(0, 1 - Math.Abs(a.Aspect - b.Aspect) / Math.Max(0.1, Math.Max(a.Aspect, b.Aspect)));

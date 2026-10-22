@@ -162,7 +162,7 @@ namespace SmartHostMEP.Core
             sb.AppendLine("# family (Ref. Level, Front or Back view). Score 0-100 = weighted mix of the parts below.");
             sb.AppendLine("# Shape: overlap of the two outlines (best of 4 rotations x mirrored).");
             sb.AppendLine("SymbolScoreShape = " + F(SymbolScore.Shape));
-            sb.AppendLine("# Counts: number of lines, arcs and circles.");
+            sb.AppendLine("# Counts: element mix, the share of the line work that is curved (arcs, circles) vs straight.");
             sb.AppendLine("SymbolScoreCounts = " + F(SymbolScore.Counts));
             sb.AppendLine("# Aspect: width / height.");
             sb.AppendLine("SymbolScoreAspect = " + F(SymbolScore.Aspect));

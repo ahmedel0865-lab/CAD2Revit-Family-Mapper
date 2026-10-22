@@ -93,6 +93,7 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12ab | Auto-match by symbol | Load a socket family whose Ref. Level view has the socket symbol drawn with symbolic lines. A DWG with the same socket block, scaled and rotated 90°, under a name unlike the family's. Auto-match: the first time a progress bar reads the families; the row gets the socket family, Score 80+, Source View *Ref. Level*, and Top 3 Candidates lists it first. Auto-match again: no families are opened (cache in `%TEMP%\SmartHostMEP\SymbolCache`) |
 | 12ac | Ambiguous / below 50 | Two families with nearly the same symbol: the block gets one of them, Score shows `?`, and after Run it is in Needs Review as "Ambiguous symbol match". A block unlike any family: stays (Skip), Top 3 empty |
 | 12ad | Learned | Pick another family by hand for a block, Preview. Clear All Families, Auto-match: the block gets your family, Score *Learned* |
+| 12ad2 | 3D-only family / report | A light family with no symbolic lines (only 3D geometry): Source View `Ref. Level (3D)`. Open the report after Auto-match: every family has a line (view used, or why none), every block its top 3 |
 | 12ae | Only loadable families | A project with an in-place family in the dropdown categories: Auto-match does not open it (the message says it was skipped) |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 

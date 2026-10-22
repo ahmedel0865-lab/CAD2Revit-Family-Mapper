@@ -344,12 +344,16 @@ namespace SmartHostMEP.UI
         public Func<Func<int, int, string, bool>, List<FamilySymbolEntry>> LoadFamilySymbols;
         /// <summary>What the last family symbol read did ("Family symbols: 40 read, 12 opened ...").</summary>
         public string SymbolInfo = "";
+        /// <summary>One line per family from the last symbol read (Auto-match report).</summary>
+        public List<string> SymbolReport = new List<string>();
         /// <summary>Remembered manual matches (loaded on first use).</summary>
         public LearnedMatches Learned;
 
         public class AutoMatchSummary
         {
             public int Learned, BySymbol, Ambiguous, ByName, Suggested, FamiliesWithSymbol;
+            /// <summary>One line per block for the Auto-match report.</summary>
+            public List<string> Lines = new List<string>();
             public int Selected => Learned + BySymbol + ByName;
         }
 
@@ -373,8 +377,9 @@ namespace SmartHostMEP.UI
             var nameCandidates = new List<FamilyOption>();
             foreach (var o in Options) if (!o.IsSkip) nameCandidates.Add(o);
             var labels = nameCandidates.ConvertAll(o => o.Label);
-            // Families without a symbol can only be matched by name.
-            var withSymbol = new HashSet<string>(families.Select(f => f.Family), StringComparer.OrdinalIgnoreCase);
+            // Families without a drawn 2D symbol can also be matched by name (an outline of their 3D
+            // geometry is a weak signature).
+            var withSymbol = new HashSet<string>(families.Where(f => !(f.Signature.View ?? "").EndsWith("(3D)")).Select(f => f.Family), StringComparer.OrdinalIgnoreCase);
             var noSymbol = nameCandidates.Where(o => !withSymbol.Contains(o.Family)).ToList();
             var noSymbolLabels = noSymbol.ConvertAll(o => o.Label);
             foreach (var row in Rows)
@@ -382,7 +387,8 @@ namespace SmartHostMEP.UI
                 if (filter != null && !filter(row)) continue;
                 row.ResolveCandidate = c => ResolveLabel(c.Label);
                 var sig = row.Signature;
-                var ranked = families.Count > 0 ? matcher.Rank(sig, row.BlockName, row.Category, families) : new List<SymbolCandidate>();
+                // The category only filters when it was set by hand (the automatic guess can be wrong).
+                var ranked = families.Count > 0 ? matcher.Rank(sig, row.BlockName, row.CategoryIsAuto ? null : row.Category, families) : new List<SymbolCandidate>();
                 bool open = row.Family.IsSkip;
 
                 // 1. A manual match remembered for this block and symbol.
@@ -437,6 +443,13 @@ namespace SmartHostMEP.UI
 
                 // 3. No symbol to compare: the block name.
                 if (ByName(row, nameCandidates, labels)) summary.ByName++;
+            }
+            foreach (var row in Rows)
+            {
+                if (filter != null && !filter(row)) continue;
+                var how = row.Family.IsSkip ? "unmatched" : !row.AutoMatched ? "kept (mapped before)" : "-> " + row.Family.Label + " [" + row.ScoreText + "]";
+                var top = string.Join(" | ", row.Candidates.Select(c => c.Text + (c.View.Length > 0 ? " (" + c.View + ")" : "")));
+                summary.Lines.Add($"{row.BlockName}\t{row.Signature}\t{how}\t{(top.Length > 0 ? top : "no family scored " + matcher.Weights.Minimum.ToString("0", CultureInfo.InvariantCulture) + "+")}");
             }
             return summary;
         }

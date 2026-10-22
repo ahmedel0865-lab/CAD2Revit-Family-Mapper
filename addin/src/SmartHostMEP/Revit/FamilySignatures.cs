@@ -10,9 +10,7 @@ namespace SmartHostMEP.Revit
     /// <summary>
     /// The 2D symbol of each loaded family offered in the mapping window (Auto-match by symbol
     /// geometry). Only loadable families are opened (Edit Family); system and in-place families are
-    /// skipped. In the family, the views Ref. Level, Front and Back are read in that order and the
-    /// first one with line work counts: symbolic and detail lines, detail components and annotation
-    /// symbols, and imported CAD owned by that view. Signatures are cached (see SignatureCache), so a
+    /// skipped. See <see cref="Symbol"/> for which views and geometry count. Signatures are cached (see SignatureCache), so a
     /// family is only opened when it is new or changed.
     /// </summary>
     static class FamilySignatures
@@ -23,6 +21,8 @@ namespace SmartHostMEP.Revit
         {
             public int Families, FromCache, Opened, WithSymbol, Skipped, Failed;
             public bool Cancelled;
+            /// <summary>One line per family for the Auto-match report.</summary>
+            public List<string> Lines = new List<string>();
         }
 
         /// <summary>Signatures of the families of <paramref name="options"/> (one entry per family).
@@ -48,19 +48,32 @@ namespace SmartHostMEP.Revit
                 if (!byName.TryGetValue(g.Key, out var family) || family.IsInPlace || !family.IsEditable)
                 {
                     stats.Skipped++;
+                    stats.Lines.Add($"{g.Key}\tskipped: {(family == null ? "family not found" : family.IsInPlace ? "in-place family" : "not editable (system family)")}");
                     continue;
                 }
                 var key = SignatureCache.Key(g.Key, Stamp(family));
+                string from = "cache";
                 if (cache.TryGet(key, out var sig)) stats.FromCache++;
                 else
                 {
-                    sig = Read(doc, family, out bool ok);
-                    if (!ok) { stats.Failed++; continue; }
+                    sig = Read(doc, family, out bool ok, out string error);
+                    if (!ok)
+                    {
+                        stats.Failed++;
+                        stats.Lines.Add($"{g.Key}\tcould not be opened: {error}");
+                        continue;
+                    }
                     stats.Opened++;
+                    from = "opened";
                     cache.Put(key, sig);
                 }
-                if (sig == null || sig.IsEmpty) continue;
+                if (sig == null || sig.IsEmpty)
+                {
+                    stats.Lines.Add($"{g.Key}\tno symbol in any plan or Front/Back view ({from}): matched by name only");
+                    continue;
+                }
                 stats.WithSymbol++;
+                stats.Lines.Add($"{g.Key}\t{sig.View}: {sig} ({from})");
                 result.Add(new FamilySymbolEntry
                 {
                     Family = g.Key,
@@ -83,9 +96,10 @@ namespace SmartHostMEP.Revit
 
         /// <summary>Opens the family, reads its symbol and closes it without saving. ok = false when
         /// the family could not be opened (it is tried again next time).</summary>
-        static SymbolSignature Read(Document doc, Family family, out bool ok)
+        static SymbolSignature Read(Document doc, Family family, out bool ok, out string error)
         {
             ok = false;
+            error = "";
             Document fam = null;
             try
             {
@@ -94,8 +108,9 @@ namespace SmartHostMEP.Revit
                 ok = true;
                 return Symbol(fam);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                error = ex.Message;
                 return null;
             }
             finally
@@ -104,19 +119,32 @@ namespace SmartHostMEP.Revit
             }
         }
 
-        /// <summary>The symbol of the first of Ref. Level, Front, Back that has line work (empty if none).</summary>
+        /// <summary>
+        /// The family's symbol: the 2D line work (symbolic/detail lines, detail components, annotation
+        /// symbols, imported CAD) of the first view that has any, in this order: plan views (Ref. Level
+        /// first), then the Front and Back elevations. A family with no 2D symbol gets the outline of its
+        /// 3D geometry as seen in its plan view (edges flattened), then in Front/Back. Views are found by
+        /// type, so families made in other languages work too. Empty if nothing is drawn anywhere.
+        /// </summary>
         public static SymbolSignature Symbol(Document fam)
         {
             var views = new FilteredElementCollector(fam).OfClass(typeof(View)).Cast<View>().Where(v => !v.IsTemplate).ToList();
+            bool Has(View v, string word) => (v.Name ?? "").IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0;
+            var plans = views.Where(v => v is ViewPlan)
+                .OrderBy(v => Has(v, ViewOrder[0]) ? 0 : Has(v, "Ref") ? 1 : 2).ThenBy(v => v.Name).ToList();
+            var elevations = views.Where(v => v.ViewType == ViewType.Elevation)
+                .OrderBy(v => Has(v, ViewOrder[1]) ? 0 : Has(v, ViewOrder[2]) ? 1 : 2).ThenBy(v => v.Name).Take(2).ToList();
+            var order = plans.Concat(elevations).ToList();
+
             var owned = new FilteredElementCollector(fam).WhereElementIsNotElementType().ToElements()
                 .Where(e => e.OwnerViewId != null && e.OwnerViewId != ElementId.InvalidElementId)
                 .GroupBy(e => Compat.IdValue(e.OwnerViewId)).ToDictionary(g => g.Key, g => g.ToList());
             var skip = SymbolGeometry.LayerFilter(fam);
-            foreach (var name in ViewOrder)
+
+            // 1. 2D symbol.
+            foreach (var view in order)
             {
-                var view = views.FirstOrDefault(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase))
-                           ?? views.FirstOrDefault(v => (v.Name ?? "").IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
-                if (view == null || !owned.TryGetValue(Compat.IdValue(view.Id), out var elements)) continue;
+                if (!owned.TryGetValue(Compat.IdValue(view.Id), out var elements)) continue;
                 var symbol = new BlockSymbol();
                 var project = SymbolGeometry.OnView(view);
                 var opts = new Options { View = view, ComputeReferences = false };
@@ -137,6 +165,28 @@ namespace SmartHostMEP.Revit
                     catch (Exception) { /* unreadable element: the rest still counts */ }
                 }
                 if (!symbol.IsEmpty) return SymbolSignature.From(symbol, view.Name);
+            }
+
+            // 2. No 2D symbol: the 3D geometry as the view shows it.
+            foreach (var view in order)
+            {
+                var symbol = new BlockSymbol();
+                var project = SymbolGeometry.OnView(view);
+                var opts = new Options { View = view, ComputeReferences = false };
+                IEnumerable<Element> shown;
+                try { shown = new FilteredElementCollector(fam, view.Id).WhereElementIsNotElementType().ToElements(); }
+                catch (Exception) { continue; }
+                foreach (var e in shown)
+                {
+                    if (!(e is GenericForm || e is FamilyInstance || e is ImportInstance || e is FreeFormElement)) continue;
+                    if (e.OwnerViewId != null && e.OwnerViewId != ElementId.InvalidElementId) continue;   // 2D: read above
+                    try
+                    {
+                        if (!SymbolGeometry.Collect(e.get_Geometry(opts), Transform.Identity, symbol, project, skip, circles: true, solids: true)) break;
+                    }
+                    catch (Exception) { }
+                }
+                if (!symbol.IsEmpty) return SymbolSignature.From(symbol, view.Name + " (3D)");
             }
             return new SymbolSignature();
         }

@@ -135,12 +135,29 @@ namespace SmartHostMEP.Core.Tests
         {
             var m = new SymbolMatcher();
             var light = Sig(Light());
-            Assert.True(m.Geometry(light, Sig(Socket())) < 50);
+            Assert.True(m.Geometry(light, Sig(Socket())) < 70);   // both round-ish: offered at most, never selected
             Assert.True(m.Geometry(light, Sig(Panel())) < 50);
             // Circle alone vs the circle with a cross: related, but not an automatic match.
             var circle = new BlockSymbol();
             circle.AddPath(Circle(0, 0, 300), SymbolKind.Circle);
             Assert.True(m.Geometry(light, Sig(circle)) < 80);
+        }
+
+        [Fact]
+        public void TheSameSymbolDrawnSlightlyDifferentlyStillMatches()
+        {
+            // The family's socket: legs a bit longer, the arc with fewer segments, the base line split in two.
+            int n = 8;
+            var arc = new double[(n + 1) * 2];
+            for (int i = 0; i <= n; i++)
+            {
+                double a = Math.PI * i / n;
+                arc[2 * i] = 150 * Math.Cos(a);
+                arc[2 * i + 1] = 150 * Math.Sin(a);
+            }
+            var fam = Build(new List<double[]> { arc, Seg(-150, 0, 0, 0), Seg(0, 0, 150, 0), Seg(-75, 0, -75, -120), Seg(50, 0, 50, -75) }, 0, 0, 0, false);
+            fam.Lines = 4; fam.Arcs = 1;
+            Assert.True(new SymbolMatcher().Geometry(Sig(Socket(300, 90)), Sig(fam)) >= 80);
         }
 
         [Fact]
@@ -153,10 +170,12 @@ namespace SmartHostMEP.Core.Tests
             Assert.False(SymbolMatcher.PreFilter(light, Sig(Light()), BlockCategories.Mechanical, "Lighting Fixtures"));
             Assert.True(SymbolMatcher.PreFilter(light, Sig(Light()), BlockCategories.Other, "Lighting Fixtures"));
             Assert.True(SymbolMatcher.PreFilter(light, Sig(Light()), BlockCategories.Electrical, "Lighting Fixtures"));
-            // Element counts 2 vs 40.
-            var many = Light();
-            many.Lines = 40;
-            Assert.False(SymbolMatcher.PreFilter(Sig(Light()), Sig(many)));
+            // All curved vs all straight (a circle and a square of the same size).
+            var circle = new BlockSymbol();
+            circle.AddPath(Circle(0, 0, 300));
+            var square = new BlockSymbol();
+            square.AddPath(Rect(-300, -300, 300, 300));
+            Assert.False(SymbolMatcher.PreFilter(Sig(circle), Sig(square)));
         }
 
         static FamilySymbolEntry Fam(string name, BlockSymbol s, string category = "Lighting Fixtures", string view = "Ref. Level", params string[] types) =>
@@ -177,8 +196,9 @@ namespace SmartHostMEP.Core.Tests
                 Fam("Panelboard", Panel(), "Electrical Equipment"),
             };
             var ranked = m.Rank(Sig(Socket(250, 90)), "SKT-DBL", BlockCategories.Other, fams);
-            Assert.Single(ranked);   // only the socket reaches 50
             Assert.Equal("Duplex Receptacle", ranked[0].Family);
+            Assert.DoesNotContain(ranked, c => c.Family == "Panelboard");   // below 50
+            Assert.True(ranked.Count < 2 || ranked[1].Score < 80);
             Assert.Equal("Front", ranked[0].View);
             Assert.True(ranked[0].Score >= 95);
         }
@@ -356,6 +376,23 @@ namespace SmartHostMEP.Core.Tests
                 Assert.Contains("SymbolAutoMatchScore = 85", st.ToIni());
             }
             finally { try { File.Delete(path); } catch { } }
+        }
+
+        [Fact]
+        public void CurvedShareComesFromTheGeometry()
+        {
+            // A circle as one 48-sided polyline, a light drawn with lines, and a square.
+            var circle = new BlockSymbol();
+            circle.AddPath(Circle(0, 0, 300), SymbolKind.Polyline);
+            Assert.True(Sig(circle).Curved > 0.95);
+            var square = new BlockSymbol();
+            square.AddPath(Rect(0, 0, 1, 1), SymbolKind.Polyline);
+            Assert.Equal(0, Sig(square).Curved, 3);
+            Assert.InRange(Sig(Light()).Curved, 0.5, 0.8);   // circle + two diameters
+            // Element types do not matter: the same light with its circle counted as 48 lines.
+            var asLines = Light();
+            asLines.Circles = 0; asLines.Lines = 50;
+            Assert.True(new SymbolMatcher().Geometry(Sig(Light()), Sig(asLines)) > 99);
         }
 
         [Fact]

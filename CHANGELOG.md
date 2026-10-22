@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.33.0] - 2026-10-22
+### Fixed: symbol Auto-match found no symbol for most families
+- **More families have a symbol:**
+  - Views are found by their type, not their name: every plan view (Ref. Level first), then the Front and Back elevations. Families made in another language, or with renamed views, now work.
+  - A family with no 2D symbol (no symbolic lines, detail components or annotation symbols) now uses the outline of its 3D geometry as its plan view shows it. *Source View* shows e.g. `Ref. Level (3D)`. Such families can still be matched by name too, since an outline is a weaker match.
+- **Drawing differences matter less:**
+  - The element mix is now the share of curved vs straight line work, read from the geometry. A circle drawn as a polyline, or a rectangle drawn as four lines instead of one polyline, no longer lowers the score or drops the family in the pre-filter.
+  - The shape score tolerates more difference between the CAD block and the family symbol.
+  - The automatic category guess no longer filters families out; only a category you set by hand does.
+- **Auto-match report:** after Auto-match you can open `%TEMP%\SmartHostMEP\AutoMatch-report.txt`. It lists each family (which view its symbol came from, or why it has none: in-place, not editable, nothing drawn, could not be opened) and each block (its symbol, the result and the top 3 scores).
+- The symbol cache from 0.32 is rebuilt once (new format).
+
 ## [0.32.0] - 2026-10-22
 ### Changed: Auto-match compares symbols, not just names
 **Auto-match** now matches each CAD block to a loaded family by the shape of its 2D symbol. No family folder is needed: it uses the families already loaded in the project.

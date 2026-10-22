@@ -49,10 +49,11 @@ namespace SmartHostMEP.Revit
         /// <summary>
         /// Adds the line work of <paramref name="geom"/> to <paramref name="symbol"/>: polylines, bound
         /// curves and nested instances; with <paramref name="circles"/> also full circles and ellipses
-        /// (unbound curves). Returns false once the symbol's point budget is used up.
+        /// (unbound curves); with <paramref name="solids"/> also the edges of solids (3D geometry).
+        /// Returns false once the symbol's point budget is used up.
         /// </summary>
         public static bool Collect(GeometryElement geom, Transform tf, BlockSymbol symbol, Func<XYZ, double[]> project,
-                                   Func<GeometryObject, bool> skip, bool circles, int depth = 0)
+                                   Func<GeometryObject, bool> skip, bool circles, int depth = 0, bool solids = false)
         {
             if (geom == null || depth > 6) return true;
             foreach (var obj in geom)
@@ -60,7 +61,15 @@ namespace SmartHostMEP.Revit
                 if (obj == null) continue;
                 bool more = true;
                 if (obj is GeometryInstance nested)   // blocks inside the block, nested families
-                    more = Collect(nested.GetSymbolGeometry(), tf.Multiply(nested.Transform), symbol, project, skip, circles, depth + 1);
+                    more = Collect(nested.GetSymbolGeometry(), tf.Multiply(nested.Transform), symbol, project, skip, circles, depth + 1, solids);
+                else if (solids && obj is Solid solid)
+                {
+                    // 3D geometry seen in the view: the edges of its solids, flattened.
+                    foreach (Edge edge in solid.Edges)
+                    {
+                        if (!(more = symbol.AddPath(Flatten(edge.Tessellate(), tf, project), SymbolKind.Line))) break;
+                    }
+                }
                 else if (skip != null && skip(obj))
                     continue;
                 else if (obj is PolyLine pl)

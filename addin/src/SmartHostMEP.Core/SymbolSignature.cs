@@ -15,7 +15,7 @@ namespace SmartHostMEP.Core
     public class SymbolSignature
     {
         /// <summary>Bump when the normalization changes: cached signatures of older versions are recomputed.</summary>
-        public const int Version = 1;
+        public const int Version = 2;
         public const int SampleCount = 128;
         public const int RasterSize = 64;
 
@@ -24,6 +24,9 @@ namespace SmartHostMEP.Core
         public int Lines, Arcs, Circles;
         /// <summary>Short side / long side of the symbol after removing its rotation (0..1).</summary>
         public double Aspect;
+        /// <summary>Share (0..1) of the line work's length that is curved (arcs, circles), told from the
+        /// geometry itself, so a circle drawn as a many-sided polyline still counts as curved.</summary>
+        public double Curved;
         /// <summary>64 rows of 64 bits; cell (0, 0) at the bottom left of the [-0.5, 0.5] square.</summary>
         public ulong[] Raster = new ulong[RasterSize];
         /// <summary>The family view the symbol was read from (Ref. Level, Front, Back); "" for CAD blocks.</summary>
@@ -44,12 +47,24 @@ namespace SmartHostMEP.Core
         {
             var sig = new SymbolSignature { Lines = lines, Arcs = arcs, Circles = circles, View = view ?? "" };
             var segs = new List<double[]>();
+            double curvedLen = 0, totalLen = 0;
             if (paths != null)
                 foreach (var p in paths)
+                {
+                    var own = new List<double[]>();
                     for (int i = 0; i + 3 < p.Length; i += 2)
                         if (Math.Abs(p[i + 2] - p[i]) + Math.Abs(p[i + 3] - p[i + 1]) > 1e-12)
-                            segs.Add(new[] { p[i], p[i + 1], p[i + 2], p[i + 3] });
+                            own.Add(new[] { p[i], p[i + 1], p[i + 2], p[i + 3] });
+                    for (int i = 0; i < own.Count; i++)
+                    {
+                        double len = Length(own[i]);
+                        totalLen += len;
+                        if ((i > 0 && IsBend(own[i - 1], own[i])) || (i + 1 < own.Count && IsBend(own[i], own[i + 1]))) curvedLen += len;
+                    }
+                    segs.AddRange(own);
+                }
             if (segs.Count == 0) return sig;
+            sig.Curved = totalLen > 0 ? curvedLen / totalLen : 0;
 
             // 1. Rotation: the smallest rectangle around the line work (one side on an edge of its
             // convex hull) is turned square to the axes. Nearly equal choices (round symbols) take the
@@ -159,6 +174,19 @@ namespace SmartHostMEP.Core
             }
             h.RemoveAt(h.Count - 1);
             return h;
+        }
+
+        static double Length(double[] g) => Math.Sqrt((g[2] - g[0]) * (g[2] - g[0]) + (g[3] - g[1]) * (g[3] - g[1]));
+
+        /// <summary>Two joined segments turning by a small angle (0.5-35 deg): part of a curve.</summary>
+        static bool IsBend(double[] a, double[] b)
+        {
+            double ax = a[2] - a[0], ay = a[3] - a[1], bx = b[2] - b[0], by = b[3] - b[1];
+            double la = Math.Sqrt(ax * ax + ay * ay), lb = Math.Sqrt(bx * bx + by * by);
+            if (la <= 0 || lb <= 0) return false;
+            double cos = Math.Max(-1, Math.Min(1, (ax * bx + ay * by) / (la * lb)));
+            double deg = Math.Acos(cos) * 180 / Math.PI;
+            return deg > 0.5 && deg < 35;
         }
 
         /// <summary><paramref name="count"/> points spread evenly (by length) along the segments.</summary>
@@ -326,7 +354,7 @@ namespace SmartHostMEP.Core
             var raster = new byte[RasterSize * 8];
             for (int j = 0; j < RasterSize; j++) BitConverter.GetBytes(Raster[j]).CopyTo(raster, j * 8);
             return string.Join("\t", (View ?? "").Replace('\t', ' '), Lines.ToString(Inv), Arcs.ToString(Inv), Circles.ToString(Inv),
-                Aspect.ToString("0.#####", Inv), Convert.ToBase64String(pts), Convert.ToBase64String(raster));
+                Aspect.ToString("0.#####", Inv), Convert.ToBase64String(pts), Convert.ToBase64String(raster), Curved.ToString("0.####", Inv));
         }
 
         /// <summary>Reads <see cref="ToText"/>; null when the text is damaged.</summary>
@@ -351,6 +379,7 @@ namespace SmartHostMEP.Core
                 var raster = Convert.FromBase64String(f[6]);
                 if (raster.Length != RasterSize * 8) return null;
                 for (int j = 0; j < RasterSize; j++) sig.Raster[j] = BitConverter.ToUInt64(raster, j * 8);
+                if (f.Length > 7) sig.Curved = double.Parse(f[7], NumberStyles.Float, Inv);
                 return sig;
             }
             catch (Exception)
@@ -360,6 +389,6 @@ namespace SmartHostMEP.Core
         }
 
         public override string ToString() =>
-            IsEmpty ? "(no symbol)" : string.Format(Inv, "{0} lines, {1} arcs, {2} circles, aspect {3:0.00}", Lines, Arcs, Circles, Aspect);
+            IsEmpty ? "(no symbol)" : string.Format(Inv, "{0} lines, {1} arcs, {2} circles, aspect {3:0.00}, curved {4:0%}", Lines, Arcs, Circles, Aspect, Curved);
     }
 }
