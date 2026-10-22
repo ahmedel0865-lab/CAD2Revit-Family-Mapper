@@ -409,3 +409,35 @@ namespace SmartHostMEP.Core.Tests
         }
     }
 }
+
+namespace SmartHostMEP.Core.Tests
+{
+    public class SymbolMatchRulesTests
+    {
+        [Fact]
+        public void A3DOutlineIsNeverSelectedAutomatically()
+        {
+            var m = new SymbolMatcher();
+            var d = m.Decide(new List<SymbolCandidate> { new SymbolCandidate { Family = "Box", Label = "Box : A", Score = 98, Outline3D = true } });
+            Assert.Null(d.Chosen);
+            Assert.Equal("Box", d.Best.Family);
+            Assert.True(new SymbolSignature { View = "Ref. Level" + SymbolSignature.Outline3DSuffix }.IsOutline3D);
+            Assert.False(new SymbolSignature { View = "Ref. Level" }.IsOutline3D);
+        }
+
+        [Fact]
+        public void HugeBlocksHaveNoSignature()
+        {
+            // A whole floor plan drawn as a block (30 m): no signature, matched by name only.
+            var plan = new BlockSymbol();
+            plan.AddPath(new[] { 0.0, 0, 30000 / 304.8, 0, 30000 / 304.8, 10000 / 304.8 });
+            var sig = SymbolSignature.FromBlock(plan);
+            Assert.True(sig.IsEmpty);
+            Assert.True(sig.TooBig);
+            Assert.Contains("not a device symbol", sig.ToString());
+            var socket = new BlockSymbol();
+            socket.AddPath(new[] { 0.0, 0, 1, 0, 1, 0.5 });
+            Assert.False(SymbolSignature.FromBlock(socket).IsEmpty);
+        }
+    }
+}

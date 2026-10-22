@@ -45,6 +45,8 @@ namespace SmartHostMEP.Core
         public double Geometry;       // 0..100, geometry only
         public string View = "";      // family view the symbol came from
         public bool Learned;          // from a previous manual match
+        /// <summary>The family has no 2D symbol; its 3D outline was compared. Offered, never selected automatically.</summary>
+        public bool Outline3D;
 
         public string Text => $"{Score:0}  {Label}";
         public override string ToString() => Text;
@@ -193,18 +195,19 @@ namespace SmartHostMEP.Core
                 }
                 double score = Math.Min(100, geo + _w.Name * Math.Max(0, name));
                 if (score < _w.Minimum) continue;
-                result.Add(new SymbolCandidate { Family = f.Family, Label = label, Score = score, Geometry = geo, View = f.Signature.View ?? "" });
+                result.Add(new SymbolCandidate { Family = f.Family, Label = label, Score = score, Geometry = geo, View = f.Signature.View ?? "", Outline3D = f.Signature.IsOutline3D });
             }
             return result.OrderByDescending(c => c.Score).ThenBy(c => c.Label, StringComparer.OrdinalIgnoreCase).Take(TopCount).ToList();
         }
 
         /// <summary>Applies the match rules to ranked candidates: the best is chosen at AutoMatch or
-        /// more, and is ambiguous when the second is within AmbiguousPercent of it.</summary>
+        /// more (never a 3D outline: many devices are plain boxes in 3D), and is ambiguous when the
+        /// second is within AmbiguousPercent of it.</summary>
         public SymbolDecision Decide(List<SymbolCandidate> ranked)
         {
             var d = new SymbolDecision { Candidates = ranked ?? new List<SymbolCandidate>() };
             var best = d.Best;
-            if (best == null || best.Score < _w.AutoMatch) return d;
+            if (best == null || best.Score < _w.AutoMatch || best.Outline3D) return d;
             d.Chosen = best;
             if (d.Candidates.Count > 1 && d.Candidates[1].Score >= best.Score * (1 - _w.AmbiguousPercent / 100.0))
                 d.Ambiguous = true;

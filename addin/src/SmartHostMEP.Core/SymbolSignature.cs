@@ -15,7 +15,7 @@ namespace SmartHostMEP.Core
     public class SymbolSignature
     {
         /// <summary>Bump when the normalization changes: cached signatures of older versions are recomputed.</summary>
-        public const int Version = 2;
+        public const int Version = 3;
         public const int SampleCount = 128;
         public const int RasterSize = 64;
 
@@ -34,13 +34,33 @@ namespace SmartHostMEP.Core
 
         public int Elements => Lines + Arcs + Circles;
         public bool IsEmpty => Points == null || Points.Length < 4;
+        /// <summary>The outline of 3D geometry (a family with no 2D symbol): a weak signature.</summary>
+        public bool IsOutline3D => (View ?? "").EndsWith(Outline3DSuffix, StringComparison.Ordinal);
+        public const string Outline3DSuffix = " (3D)";
         public int PointCount => Points == null ? 0 : Points.Length / 2;
 
         // ---- building ------------------------------------------------------------------------
 
+        /// <summary>Symbols larger than this (mm, either side) are not device symbols (a whole plan or
+        /// xref drawn as a block) and get no signature: they are matched by name only.</summary>
+        public const double MaxSizeMm = 6000;
+
+        /// <summary>True when the symbol was left out for being larger than <see cref="MaxSizeMm"/>.</summary>
+        public bool TooBig;
+
         public static SymbolSignature From(BlockSymbol symbol, string view = "") =>
             symbol == null ? new SymbolSignature { View = view ?? "" }
                            : From(symbol.Paths, symbol.Lines, symbol.Arcs, symbol.Circles, view);
+
+        /// <summary>Signature of a CAD block symbol (geometry in feet); empty and <see cref="TooBig"/>
+        /// when it is larger than <see cref="MaxSizeMm"/>.</summary>
+        public static SymbolSignature FromBlock(BlockSymbol symbol)
+        {
+            var b = symbol?.Bounds();
+            if (b != null && Math.Max(b[2] - b[0], b[3] - b[1]) * 304.8 > MaxSizeMm)
+                return new SymbolSignature { TooBig = true };
+            return From(symbol);
+        }
 
         /// <summary>Builds the signature of the given paths (flat x, y polylines in any units).</summary>
         public static SymbolSignature From(IList<double[]> paths, int lines, int arcs, int circles, string view = "")
@@ -389,6 +409,6 @@ namespace SmartHostMEP.Core
         }
 
         public override string ToString() =>
-            IsEmpty ? "(no symbol)" : string.Format(Inv, "{0} lines, {1} arcs, {2} circles, aspect {3:0.00}, curved {4:0%}", Lines, Arcs, Circles, Aspect, Curved);
+            TooBig ? $"(larger than {MaxSizeMm:0} mm: not a device symbol)" : IsEmpty ? "(no symbol)" : string.Format(Inv, "{0} lines, {1} arcs, {2} circles, aspect {3:0.00}, curved {4:0%}", Lines, Arcs, Circles, Aspect, Curved);
     }
 }

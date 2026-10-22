@@ -136,31 +136,37 @@ namespace SmartHostMEP.Revit
                 .OrderBy(v => Has(v, ViewOrder[1]) ? 0 : Has(v, ViewOrder[2]) ? 1 : 2).ThenBy(v => v.Name).Take(2).ToList();
             var order = plans.Concat(elevations).ToList();
 
-            var owned = new FilteredElementCollector(fam).WhereElementIsNotElementType().ToElements()
-                .Where(e => e.OwnerViewId != null && e.OwnerViewId != ElementId.InvalidElementId)
-                .GroupBy(e => Compat.IdValue(e.OwnerViewId)).ToDictionary(g => g.Key, g => g.ToList());
             var skip = SymbolGeometry.LayerFilter(fam);
 
-            // 1. 2D symbol.
+            // 1. 2D symbol: the line work the view shows that is not 3D geometry. Symbolic lines are
+            // not owned by one view (they show in every parallel view), so the view is asked what it
+            // shows: symbolic and detail lines; and the curves (not the solids) of detail components,
+            // annotation symbols, nested families (their own symbolic lines and annotations) and
+            // imported CAD.
             foreach (var view in order)
             {
-                if (!owned.TryGetValue(Compat.IdValue(view.Id), out var elements)) continue;
+                IList<Element> shown;
+                try { shown = new FilteredElementCollector(fam, view.Id).WhereElementIsNotElementType().ToElements(); }
+                catch (Exception) { continue; }
                 var symbol = new BlockSymbol();
                 var project = SymbolGeometry.OnView(view);
                 var opts = new Options { View = view, ComputeReferences = false };
-                foreach (var e in elements)
+                foreach (var e in shown)
                 {
                     try
                     {
-                        if (e is CurveElement ce)
+                        if (e is SymbolicCurve || e is DetailCurve)
                         {
+                            var ce = (CurveElement)e;
                             if (ce.LineStyle != null && (ce.LineStyle.Name ?? "").StartsWith("<Invisible", StringComparison.OrdinalIgnoreCase)) continue;
                             var curve = ce.GeometryCurve;
                             if (curve == null) continue;
-                            SymbolGeometry.CollectCurve(curve, Transform.Identity, symbol, project, circles: true);
+                            if (!SymbolGeometry.CollectCurve(curve, Transform.Identity, symbol, project, circles: true)) break;
                         }
                         else if (e is FamilyInstance || e is ImportInstance)
-                            SymbolGeometry.Collect(e.get_Geometry(opts), Transform.Identity, symbol, project, skip, circles: true);
+                        {
+                            if (!SymbolGeometry.Collect(e.get_Geometry(opts), Transform.Identity, symbol, project, skip, circles: true)) break;
+                        }
                     }
                     catch (Exception) { /* unreadable element: the rest still counts */ }
                 }
@@ -186,7 +192,7 @@ namespace SmartHostMEP.Revit
                     }
                     catch (Exception) { }
                 }
-                if (!symbol.IsEmpty) return SymbolSignature.From(symbol, view.Name + " (3D)");
+                if (!symbol.IsEmpty) return SymbolSignature.From(symbol, view.Name + SymbolSignature.Outline3DSuffix);
             }
             return new SymbolSignature();
         }

@@ -135,7 +135,7 @@ namespace SmartHostMEP.UI
         }
 
         /// <summary>Signature of the block symbol (built on first use).</summary>
-        public SymbolSignature Signature => _signature ?? (_signature = SymbolSignature.From(Symbol));
+        public SymbolSignature Signature => _signature ?? (_signature = SymbolSignature.FromBlock(Symbol));
         SymbolSignature _signature;
 
         public string FamilyLabel => _family.Label;
@@ -379,7 +379,7 @@ namespace SmartHostMEP.UI
             var labels = nameCandidates.ConvertAll(o => o.Label);
             // Families without a drawn 2D symbol can also be matched by name (an outline of their 3D
             // geometry is a weak signature).
-            var withSymbol = new HashSet<string>(families.Where(f => !(f.Signature.View ?? "").EndsWith("(3D)")).Select(f => f.Family), StringComparer.OrdinalIgnoreCase);
+            var withSymbol = new HashSet<string>(families.Where(f => !f.Signature.IsOutline3D).Select(f => f.Family), StringComparer.OrdinalIgnoreCase);
             var noSymbol = nameCandidates.Where(o => !withSymbol.Contains(o.Family)).ToList();
             var noSymbolLabels = noSymbol.ConvertAll(o => o.Label);
             foreach (var row in Rows)
@@ -427,8 +427,9 @@ namespace SmartHostMEP.UI
                     var opt = d.Chosen == null ? null : ResolveLabel(d.Chosen.Label);
                     if (opt == null)
                     {
-                        if (d.Best != null) summary.Suggested++;
-                        else if (ByName(row, noSymbol, noSymbolLabels)) summary.ByName++;
+                        // Families without a drawn symbol (or only a 3D outline) can still match by name.
+                        if (ByName(row, noSymbol, noSymbolLabels)) summary.ByName++;
+                        else if (d.Best != null) summary.Suggested++;
                         continue;
                     }
                     row.Family = opt;

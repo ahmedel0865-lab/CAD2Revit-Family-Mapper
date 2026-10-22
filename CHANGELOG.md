@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0] - 2026-10-22
+### Fixed: family 2D symbols were not found (every family fell back to its 3D outline)
+- Symbolic lines in a family are not owned by one view (they show in every parallel view), so 0.32 and 0.33 never saw them. The view is now asked what it shows: symbolic and detail lines, and the curves of detail components, annotation symbols, **nested families** (their symbolic lines and annotations) and imported CAD. Solids are left out, so the 3D body no longer mixes into the symbol.
+- A **3D outline** (`... (3D)`, families with no 2D symbol at all) is only offered in *Top 3 Candidates*, never selected automatically: many devices are plain boxes in 3D and all look alike. Those families can still be matched by name.
+- Blocks larger than **6000 mm** (a whole plan or xref drawn as a block) get no symbol and are matched by name only.
+- The symbol cache is rebuilt once (new format).
+
 ## [0.33.0] - 2026-10-22
 ### Fixed: symbol Auto-match found no symbol for most families
 - **More families have a symbol:**
