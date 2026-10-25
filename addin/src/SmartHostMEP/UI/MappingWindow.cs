@@ -71,6 +71,7 @@ namespace SmartHostMEP.UI
             Add(root, BuildSummaryRow(), 5);
             Add(root, BuildAdvanced(), 6);
             Add(root, BuildFooter(), 7);
+            SetFamilyCategory(_category);   // the selection bar exists now
             Content = root;
 
             PreviewKeyDown += OnWindowKey;
@@ -222,6 +223,7 @@ namespace SmartHostMEP.UI
                 ApplyFilter();
             };
             left.Children.Add(searchHost);
+            left.Children.Add(BuildFamilyCategory());
             var chipStyle = Theme.Named(this, "Sh.Chip");
             foreach (var (chip, which, tip) in new[]
             {
@@ -251,6 +253,77 @@ namespace SmartHostMEP.UI
             DockPanel.SetDock(right, Dock.Right);
             bar.Children.Add(right);
             return bar;
+        }
+
+        // ---- Family category filter (limits every Revit Family dropdown) ------------------
+
+        const string AllCategories = "All family categories";
+        readonly ComboBox _familyCategory = new ComboBox { Width = 230, Margin = new Thickness(0, 0, 2 * S, 0), VerticalAlignment = VerticalAlignment.Center };
+        string _category = "";
+
+        UIElement BuildFamilyCategory()
+        {
+            _familyCategory.ToolTip = "Show only family types of this Revit category in the Revit Family dropdowns (and the selection bar). (Skip) and each row's current family stay in the list.";
+            _familyCategory.DisplayMemberPath = nameof(CategoryItem.Text);
+            _familyCategory.SelectionChanged += (o, e) =>
+            {
+                if (_filling || !(_familyCategory.SelectedItem is CategoryItem c)) return;
+                SetFamilyCategory(c.Name);
+                _settings.FamilyCategory = c.Name;
+                Settings.TrySave(_settings);
+            };
+            FillFamilyCategories();
+            var saved = _settings.FamilyCategory ?? "";
+            SetFamilyCategory(_categoryItems.Any(c => c.Name.Equals(saved, StringComparison.OrdinalIgnoreCase)) ? saved : "");
+            // Types added on demand (Load..., Auto-match) can bring new categories.
+            _s.Options.CollectionChanged += (o, e) => Dispatcher.BeginInvoke(new Action(FillFamilyCategories), DispatcherPriority.Background);
+            return _familyCategory;
+        }
+
+        public class CategoryItem
+        {
+            public string Name { get; set; }
+            public string Text { get; set; }
+        }
+
+        List<CategoryItem> _categoryItems = new List<CategoryItem>();
+        bool _filling;
+
+        void FillFamilyCategories()
+        {
+            var types = _s.Options.Where(o => !o.IsSkip).ToList();
+            _categoryItems = new List<CategoryItem> { new CategoryItem { Name = "", Text = $"{AllCategories}  ({types.Count})" } };
+            _categoryItems.AddRange(types.GroupBy(o => o.Category ?? "", StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Key.Length > 0).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new CategoryItem { Name = g.Key, Text = $"{g.Key}  ({g.Count()})" }));
+            _filling = true;
+            try
+            {
+                _familyCategory.ItemsSource = _categoryItems;
+                _familyCategory.SelectedItem = _categoryItems.FirstOrDefault(c => c.Name.Equals(_category, StringComparison.OrdinalIgnoreCase)) ?? _categoryItems[0];
+            }
+            finally { _filling = false; }
+        }
+
+        void SetFamilyCategory(string category)
+        {
+            CommitEdits();
+            _category = category ?? "";
+            foreach (var r in _s.Rows) r.FamilyCategory = _category;
+            if (_selFamily != null)
+            {
+                Predicate<object> f = _category.Length == 0 ? null : (Predicate<object>)(o =>
+                    o is FamilyOption fo && (ReferenceEquals(fo, KeepFamily) || fo.IsSkip ||
+                                             string.Equals(fo.Category, _category, StringComparison.OrdinalIgnoreCase)));
+                _selFamily.BaseFilter = f;
+                if (_selFamily.ItemsSource is System.ComponentModel.ICollectionView v) v.Filter = f;
+            }
+            var match = _categoryItems.FirstOrDefault(c => c.Name.Equals(_category, StringComparison.OrdinalIgnoreCase));
+            if (match != null && !ReferenceEquals(_familyCategory.SelectedItem, match))
+            {
+                _filling = true;
+                try { _familyCategory.SelectedItem = match; } finally { _filling = false; }
+            }
         }
 
         // ---- 3b. Selection bar (2+ rows selected): Family / Host / Elevation for all -------

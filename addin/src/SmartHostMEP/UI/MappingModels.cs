@@ -64,6 +64,23 @@ namespace SmartHostMEP.UI
         public int Count { get; }
         public string Display => $"{BlockName} ({Count})";
         public ICollectionView Options { get; }
+
+        /// <summary>Revit category the Family dropdown is limited to ("" = all). (Skip) and the
+        /// row's own family always stay in the list.</summary>
+        public string FamilyCategory
+        {
+            get => _familyCategory;
+            set
+            {
+                _familyCategory = value ?? "";
+                OptionFilter = _familyCategory.Length == 0 ? null : (Predicate<object>)(o =>
+                    o is FamilyOption f && (f.IsSkip || ReferenceEquals(f, _family) ||
+                                            string.Equals(f.Category, _familyCategory, StringComparison.OrdinalIgnoreCase)));
+                if (Options.Filter != OptionFilter) Options.Filter = OptionFilter;
+            }
+        }
+        string _familyCategory = "";
+        public Predicate<object> OptionFilter { get; private set; }
         public bool AutoMatched { get; set; }
 
         public FamilyOption Family
@@ -73,6 +90,8 @@ namespace SmartHostMEP.UI
             {
                 if (value == null || value == _family) return;   // null = transient state while filtering
                 _family = value;
+                // A family outside the category filter (bulk edit, Load...) must still show in this row.
+                if (OptionFilter != null && !OptionFilter(value)) Options.Refresh();
                 AutoMatched = false;
                 MatchReview = "";
                 DetectedHost = "";

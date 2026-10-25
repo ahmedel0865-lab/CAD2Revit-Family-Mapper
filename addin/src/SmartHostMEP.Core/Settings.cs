@@ -47,6 +47,7 @@ namespace SmartHostMEP.Core
         public string GridColumns = "";                // column key:width;...
         public string ShownColumns = "";               // optional columns shown (Columns menu)
         public bool AdvancedOpen = false;
+        public string FamilyCategory = "";            // Family category filter of the mapping window ("" = all)
 
         public static string DefaultPath =>
             Path.Combine(AppStorage.Root, "settings.ini");
@@ -119,6 +120,7 @@ namespace SmartHostMEP.Core
                 case "gridcolumns": GridColumns = val; break;
                 case "showncolumns": ShownColumns = val; break;
                 case "advancedopen": AdvancedOpen = B(AdvancedOpen); break;
+                case "familycategory": FamilyCategory = val; break;
             }
         }
 
@@ -197,6 +199,7 @@ namespace SmartHostMEP.Core
             sb.AppendLine("GridColumns = " + GridColumns);
             sb.AppendLine("ShownColumns = " + ShownColumns);
             sb.AppendLine("AdvancedOpen = " + Bo(AdvancedOpen));
+            sb.AppendLine("FamilyCategory = " + FamilyCategory);
             return sb.ToString();
         }
 

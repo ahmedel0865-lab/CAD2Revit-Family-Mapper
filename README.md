@@ -48,6 +48,7 @@ flowchart LR
 - **Follows Revit's light or dark theme** (Revit 2024+). Remembers its size, position, column widths, shown columns and whether Advanced is open.
 - **2D symbol preview** (*Columns > Symbol preview panel*): hover over or select a block to see its CAD symbol, size and count. Hovering the block name shows it as a tooltip too.
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
+- **Family category filter**: limit every Revit Family dropdown to one Revit category (e.g. *Lighting Fixtures*), then type to search inside it.
 - **Search** (Ctrl+F) and **All / Mapped / Unmapped** filter chips. Skipped rows are greyed out.
 - Grid columns: **Block** (name and count), **Revit Family : Type**, **Host**, **Elevation (mm)**. Rotation, Facing, Level, Category, Place At, Score, Source View, Top 3 Candidates and Detected Host are under **Columns**.
 - **Inline validation**: an invalid elevation or rotation gets a red cell with the reason as tooltip; Preview and Run stay disabled until it is fixed.

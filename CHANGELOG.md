@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.0] - 2026-10-25
+### Added: Family category filter
+- A **Family category** dropdown in the toolbar (next to the search box) limits every *Revit Family : Type* dropdown, and the Family field of the selection bar, to one Revit category, e.g. *Lighting Fixtures* or *Fire Alarm Devices*. Each category shows how many types it has; *All family categories* shows everything.
+- Typing in a family dropdown searches inside the chosen category. `(Skip)` and each row's current family always stay in the list, so nothing already picked disappears.
+- The choice is remembered (settings.ini `FamilyCategory`).
+
 ## [0.35.0] - 2026-10-25
 ### Changed: the mapping window is redesigned
 Placement itself is unchanged; only the windows are new.

@@ -32,6 +32,12 @@ namespace SmartHostMEP.UI
 
         ICollectionView View => ItemsSource as ICollectionView;
 
+        /// <summary>Filter that always applies (the Family category filter), also while typing.
+        /// Null: the row's <see cref="BlockRow.OptionFilter"/>, if this box is in a grid row.</summary>
+        public Predicate<object> BaseFilter { get; set; }
+
+        Predicate<object> Base => BaseFilter ?? (DataContext as BlockRow)?.OptionFilter;
+
         public override void OnApplyTemplate()
         {
             base.OnApplyTemplate();
@@ -54,8 +60,10 @@ namespace SmartHostMEP.UI
             try
             {
                 int caret = _editor.CaretIndex;
-                View.Filter = terms.Length == 0 ? null : (Predicate<object>)(o =>
+                var baseFilter = Base;
+                View.Filter = terms.Length == 0 ? baseFilter : (Predicate<object>)(o =>
                 {
+                    if (baseFilter != null && !baseFilter(o)) return false;
                     var s = o?.ToString() ?? "";
                     return terms.All(t => s.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
                 });
@@ -107,7 +115,8 @@ namespace SmartHostMEP.UI
 
         void ClearFilter()
         {
-            if (View != null && View.Filter != null) View.Filter = null;
+            var baseFilter = Base;
+            if (View != null && View.Filter != baseFilter) View.Filter = baseFilter;
         }
 
         /// <summary>Remove the filter and show the row's actual value again.</summary>
