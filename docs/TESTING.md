@@ -97,6 +97,7 @@ Run **Place Families** > pick the DWG > mapping window > **Preview**, then **Run
 | 12ad | Learned | Pick another family by hand for a block, Preview. Clear All Families, Auto-match: the block gets your family, Score *Learned* |
 | 12ad2 | 3D-only family / report | A light family with no symbolic lines (only 3D geometry): Source View `Ref. Level (3D)`. Open the report after Auto-match: every family has a line (view used, or why none), every block its top 3 |
 | 12ae | Only loadable families | A project with an in-place family in the dropdown categories: Auto-match does not open it (the message says it was skipped) |
+| 12af | Stair light under a landing | Stair core: the Level 2 slab has the stair opening, the stair above has a landing over the light. Stair light on Level 1, Host *Slab (above)*, range covers the landing. Preview: *Detected Host* = `Stairs ...` (not the fallback plane). Run: the light sits on the landing underside, facing down; under a flight it follows the flight slope. Note says `stair` |
 | 13 | Other level | Select all rows, set Level = Level 2 with *Apply to selected rows*, run: 10 placed on Level 2 (the Level 1 elements are not treated as duplicates) |
 
 If everything passes, run it on one real floor, check a few devices of each type, and only then do the whole building.

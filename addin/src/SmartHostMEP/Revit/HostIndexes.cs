@@ -143,7 +143,10 @@ namespace SmartHostMEP.Revit
             [Floors] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs },   // sloped slabs are often roofs
             [Ceilings] = new[] { BuiltInCategory.OST_Ceilings },
             // Slab (above): nearest bottom face of a slab or a beam (a drop beam under the slab wins).
-            [SlabsAndBeams] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
+            // Stairs too: in a stair core the floor slab has an opening, so what is above a stair
+            // light is the landing or flight of the stair above.
+            [SlabsAndBeams] = new[] { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming,
+                                      BuiltInCategory.OST_Stairs, BuiltInCategory.OST_StairsRuns, BuiltInCategory.OST_StairsLandings },
             [AnyFace] = new[] { BuiltInCategory.OST_Ceilings, BuiltInCategory.OST_Floors,
                                 BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming },
         };
@@ -346,7 +349,8 @@ namespace SmartHostMEP.Revit
         /// Slab (above): the underside of the first floor slab straight above (x, y), searching
         /// up from the level - i.e. the slab of the level above. Slab (below): the top face of the
         /// slab at the level, searching down from just above it. Floors and Roofs count, plus beams
-        /// (Structural Framing) for Slab (above): the nearest bottom face straight above the point wins,
+        /// (Structural Framing) and stairs (landings and flights, e.g. above a stair light where the
+        /// slab has the stair opening) for Slab (above): the nearest bottom face straight above the point wins,
         /// so a beam is only used where the point is under its bottom face. In this model and in Revit links. Faces pointing the wrong
         /// way (e.g. the top of this level's own slab) are skipped. Null = no slab within maxDistFt
         /// (no slab, or the point is under an opening).

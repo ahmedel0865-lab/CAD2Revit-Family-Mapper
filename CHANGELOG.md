@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.37.0] - 2026-10-25
+### Fixed: Slab (above) did not find the slab over stair lights
+- In a stair core the floor slab has the stair opening, so straight above a stair light there is no Floor - only the landing or flight of the stair above. Slab (above) only looked at floors, roofs and beams, so it found nothing in range and used the fallback plane.
+- Slab (above) now also hosts on **stairs** (Stairs, Stair Runs, Stair Landings), in this model and in Revit links: the nearest underside straight above the block wins, as before. Under a landing the family sits flat; under a flight it follows the slope of the flight.
+- The note says "stair" when the host is a stair.
+
 ## [0.36.0] - 2026-10-25
 ### Added: Family category filter
 - A **Family category** dropdown in the toolbar (next to the search box) limits every *Revit Family : Type* dropdown, and the Family field of the selection bar, to one Revit category, e.g. *Lighting Fixtures* or *Fire Alarm Devices*. Each category shows how many types it has; *All family categories* shows everything.

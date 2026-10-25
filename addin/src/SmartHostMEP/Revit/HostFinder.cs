@@ -91,7 +91,8 @@ namespace SmartHostMEP.Revit
         static void ShowHostsAndLinks(Document doc, View3D view)
         {
             foreach (var bic in new[] { BuiltInCategory.OST_RvtLinks, BuiltInCategory.OST_Floors, BuiltInCategory.OST_Ceilings,
-                                        BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming, BuiltInCategory.OST_Walls })
+                                        BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming, BuiltInCategory.OST_Walls,
+                                        BuiltInCategory.OST_Stairs })
             {
                 try
                 {
@@ -123,7 +124,8 @@ namespace SmartHostMEP.Revit
             var cats = mode == HostMode.Wall
                 ? new List<BuiltInCategory> { BuiltInCategory.OST_Walls }
                 : mode == HostMode.SlabAbove
-                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming }
+                    ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_StructuralFraming,
+                                                  BuiltInCategory.OST_Stairs, BuiltInCategory.OST_StairsRuns, BuiltInCategory.OST_StairsLandings }
                 : mode == HostMode.SlabBelow
                     ? new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs }   // slabs (sloped ones are often roofs)
                 : mode == HostMode.Ceiling

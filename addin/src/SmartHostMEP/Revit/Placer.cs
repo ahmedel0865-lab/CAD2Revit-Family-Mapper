@@ -477,7 +477,8 @@ namespace SmartHostMEP.Revit
                 double rangeMm = _slab.SearchRangeMm, planeMm = _slab.FallbackPlaneMm;
                 hit = finder.FindUnderside(row.Host, x, y, levelZ, SlabSearch.RangeFt(rangeMm));
                 string what = ceiling ? "ceiling"
-                            : hit != null && Compat.IsCategory(hit.Element, BuiltInCategory.OST_StructuralFraming) ? "beam" : "slab";
+                            : hit != null && Compat.IsCategory(hit.Element, BuiltInCategory.OST_StructuralFraming) ? "beam"
+                            : hit != null && IsStair(hit.Element) ? "stair" : "slab";
                 if (hit != null && hit.IsLinked && ptype == FamilyPlacementType.OneLevelBasedHosted)
                     { plan.Fail(Result(b, row, Status.Failed,
                         Notes($"{what} is in a Revit link; legacy hosted families can only be hosted in this model - " +
@@ -1011,6 +1012,10 @@ namespace SmartHostMEP.Revit
         }
 
         static V3 V(XYZ p) => new V3(p.X, p.Y, p.Z);
+
+        static bool IsStair(Element e) =>
+            Compat.IsCategory(e, BuiltInCategory.OST_Stairs) || Compat.IsCategory(e, BuiltInCategory.OST_StairsRuns) ||
+            Compat.IsCategory(e, BuiltInCategory.OST_StairsLandings);
         ImportInstance _dwg;      // the DWG being placed (for its wall/column line work)
         EdgeFinder _edges;        // vertical plane orientation (built on first use)
         bool _blocksAdded;        // vertical blocks registered with the line scorer (continuity)
