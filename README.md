@@ -15,8 +15,8 @@ Instead of placing hundreds of light fixtures, sockets and detectors by hand ove
 
 ```mermaid
 flowchart LR
-    A[Link the DWG] --> B[Place Families<br/>pick the DWG]
-    B --> C[Mapping window<br/>one row per block<br/>family · level · elevation · host]
+    A[Link the DWG] --> B[Place Families]
+    B --> C[Mapping window<br/>DWG · Level · Host default<br/>one row per block: family · host · elevation]
     C --> D[Preview<br/>nothing is changed]
     D -->|adjust| C
     D --> E[Run<br/>one Ctrl+Z undoes it]
@@ -44,14 +44,19 @@ flowchart LR
 ## Features
 
 **Mapping window**
-- **2D symbol preview**: hover over or select a block to see its CAD symbol, size and count before you pick a family.
+- **One window, top to bottom**: header (DWG, level, block types and instances), setup row (**DWG**, **Level**, **Host default**), search box with **All / Mapped / Unmapped** chips, the grid, a live summary (*12 mapped, 6 skipped, 590 elements will be placed*), a collapsible **Advanced** section and the footer (Load / Save; **Preview**, **Run**, Cancel). Preview and Run show their progress bar and Cancel inside the window.
+- **Follows Revit's light or dark theme** (Revit 2024+). Remembers its size, position, column widths, shown columns and whether Advanced is open.
+- **2D symbol preview** (*Columns > Symbol preview panel*): hover over or select a block to see its CAD symbol, size and count. Hovering the block name shows it as a tooltip too.
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
-- **Find** box and **Show** filter; **Skip shown rows** hides e.g. all architectural blocks in one click.
+- **Search** (Ctrl+F) and **All / Mapped / Unmapped** filter chips. Skipped rows are greyed out.
+- Grid columns: **Block** (name and count), **Revit Family : Type**, **Host**, **Elevation (mm)**. Rotation, Facing, Level, Category, Place At, Score, Source View, Top 3 Candidates and Detected Host are under **Columns**.
+- **Inline validation**: an invalid elevation or rotation gets a red cell with the reason as tooltip; Preview and Run stay disabled until it is fixed.
+- Keys: **Enter** = Preview, **Ctrl+Enter** = Run, **Esc** = Cancel, **Ctrl+F** = search, **Del** = skip the selected rows.
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.
 - **Revit Family starts at `(Skip)`** every time the tool opens, so you pick the families for this run yourself. **Clear All Families** sets every row back to `(Skip)`.
 - **Auto-match by symbol**: compares each block's 2D symbol with the symbol of every loaded family (its plan view, *Front* or *Back* view, or the outline of its 3D geometry), at any size, rotated or mirrored, and selects the family scoring 80 or more. The grid shows the **Score**, the **Source View** and the **Top 3 Candidates** to choose from. Close calls are selected and listed in Needs Review as *Ambiguous symbol match*. Families you pick by hand are remembered and used first next time. Only loadable families are opened, and their symbols are cached in `%TEMP%\SmartHostMEP\SymbolCache`. Blocks without line work are still matched by name (`SMOKE-DET` → *Smoke Detector*).
 - **Level + elevation per row**: different blocks can go on different levels in one run.
-- **Edit many rows at once**: select rows with **Ctrl+click** (add/remove one row) or **Shift+click** (a range), anywhere on the row, even over the dropdowns, or **Ctrl+A**. Then change any cell in one of the selected rows: Revit Family, Level, Elevation, Rotation, Host Type, Facing, Place At or Category is set on **all selected rows**. The bar above the grid can also set several fields at once.
+- **Edit many rows at once**: select rows with **Ctrl+click** (add/remove one row), **Shift+click** (a range) or **Ctrl+A**. A bar appears above the grid to set **Family**, **Host** and **Elevation** on all of them, or change a cell in one selected row to change them all. Right-click: *Apply this row to selected*, *Skip selected*, *Copy settings from this row*, *Paste settings to selected*.
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
 - **Remembers per project** Elevation From Level, Host Type, Rotation, Facing, Level and the Slab (above) / Ceiling search range and fallback height, but not the families. Load / Save mappings as **.xlsx or .csv**; **Load...** is the only way families are filled in from a file.
 
@@ -107,9 +112,15 @@ Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USA
 
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
-2. **SmartHost MEP > Place Families** > pick the DWG from the list (every DWG link and import in the project, with its level or view) or click **Pick in view...** and click it in the drawing > **Next**. A DWG already selected in Revit, or the one used last time, is pre-selected.
-3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select families with the same symbol, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use *Apply to selected rows*; and leave `(Skip)` for blocks you don't want.
-4. **Preview** > check the result and the *Detected Host* column > **Run**. One Ctrl+Z undoes it all.
+2. **SmartHost MEP > Place Families**. The mapping window opens straight away with a DWG already chosen: the one selected in Revit, else the one used last time. Change it with the **DWG** dropdown or **Pick in view**, and set the **Level** and **Host default** on the same row.
+3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select families with the same symbol, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use the bar that appears above the grid, or right-click. Leave `(Skip)` for blocks you don't want.
+4. **Preview** (Enter) > check the result and the *Detected Host* column > **Run** (Ctrl+Enter). One Ctrl+Z undoes it all.
+
+<!-- Screenshots: replace the placeholders below with real captures (docs/images/). -->
+| Mapping window (light) | Mapping window (dark) |
+|---|---|
+| ![Mapping window, light theme](docs/images/mapping-window-light.png) | ![Mapping window, dark theme](docs/images/mapping-window-dark.png) |
+| ![Bulk edit of selected rows](docs/images/mapping-window-bulk-edit.png) | ![Result and Needs Review](docs/images/result-needs-review.png) |
 
 Next time in the same project, the mapping window remembers elevations, host types, rotation, facing and levels. Every Revit Family starts at `(Skip)`, so you only re-pick the families (or use **Load...**).
 

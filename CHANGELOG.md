@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.35.0] - 2026-10-25
+### Changed: the mapping window is redesigned
+Placement itself is unchanged; only the windows are new.
+
+**One window instead of three.** *Place Families* opens the mapping window straight away. The DWG and level pop-up is gone: **DWG**, **Level** and **Host default** are dropdowns on one setup row. Preview and Run show their progress bar and Cancel inside the window, and the "already placed" question is a themed dialog over it.
+
+**Layout, top to bottom:**
+1. Header: SmartHost MEP, the version, and `DWG: X | Level: Y | 18 block types, 642 instances`.
+2. Setup row: DWG (with *Pick in view*), Level, Host default.
+3. Toolbar: search box, **All / Mapped / Unmapped** chips with counts, Auto-match, **Columns**.
+4. Grid: **Block** (name and count badge), **Revit Family : Type** (searchable, `(Skip)` by default), **Host**, **Elevation (mm)**. Rotation, Facing, Level, Category, Place At, Score, Source View, Top 3 and Detected Host are optional columns (Score/Top 3 appear after Auto-match, Detected Host after Preview). Skipped rows are greyed out.
+5. Live summary: `12 mapped, 6 skipped, 590 elements will be placed`; during Preview/Run it becomes the progress bar.
+6. **Advanced** (collapsible, closed by default): search ranges, fallback plane height, snap to face, distance check, show detection, include nested blocks.
+7. Footer: Load / Save mapping on the left; Preview, **Run** and Cancel on the right.
+
+**Easier to use:**
+- Selecting two or more rows shows a bar to set **Family**, **Host** and **Elevation** on all of them.
+- Right-click: *Apply this row to selected*, *Skip selected*, *Copy settings from this row*, *Paste settings to selected*, *Select all shown*, *Clear all families*.
+- Inline validation: an invalid elevation or rotation turns its cell red with the reason as tooltip; Preview and Run are disabled while there are errors (a note says why).
+- Tooltips on every column header and Advanced field.
+- Keys: Enter = Preview, Ctrl+Enter = Run, Esc = Cancel, Ctrl+F = search, Del = skip selected, Ctrl+C / Ctrl+V = copy / paste row settings.
+- Remembers the window size and position, column widths, shown columns and whether Advanced is open (settings.ini, *Remembered automatically*).
+
+**Look:** one modern style on an 8 px grid with one accent colour and rounded corners. It follows Revit's light or dark theme (Revit 2024+). The window is resizable with a minimum size. The result window and **Needs Review** use the same style (both were WinForms).
+
+### Audit of the old window
+| Item | Decision |
+|---|---|
+| CAD Block, Revit Family, Host Type, Elevation columns | KEEP (main grid) |
+| Rotation, Facing, Level, Category, Place At, Score, Source View, Top 3, Detected Host columns | MOVE to optional columns (*Columns* menu) |
+| Symbol preview side panel | MOVE to *Columns > Symbol preview panel* (block tooltip still shows the symbol) |
+| Step 1 DWG dialog (DWG list, Pick in view, Include nested) | MOVE into the window: DWG dropdown + Pick in view in the setup row, Include nested in Advanced |
+| Level per run (was the DWG's level only) | KEEP as the Level dropdown in the setup row |
+| Slab/ceiling search range, fallback plane height, wall search, vertical plane search and position, DWG line search, review distance, Show detection | MOVE TO ADVANCED |
+| Find box | KEEP as the search box (also matches family names) |
+| Show (category) filter and *Skip shown rows* | REMOVE (replaced by search, chips and *Skip selected*; rows are still grouped by category) |
+| Header stat chips | REMOVE (replaced by the header status line and the live summary) |
+| "2 · Edit selected rows" bar (Host, Level, Elevation, Facing, Category) | KEEP as the selection bar with Family, Host, Elevation; Level/Facing/Category via grid edit of selected rows or *Paste settings* |
+| *Reference planes for all rows* checkbox | REMOVE (Host default, or select all + Host) |
+| Auto-match, Clear All Families | KEEP (Auto-match in the toolbar, Clear all families in the right-click menu) |
+| Load / Save mapping, Preview, Run, Cancel | KEEP |
+| Progress pop-up window | REMOVE (progress bar inside the window) |
+| Wall/column layer fields, Pick wall/column line buttons, Block back side, parallel-pair / closed-shape ranges | Already removed in 0.31; the old mapping columns `DWG_Wall_Layers` / `DWG_All_Layers` are still ignored when loading |
+| Unused code: PlaceDialog, Pickers, ProgressWindow, WinForms result and Needs Review forms | REMOVE |
+| settings.ini keys | KEEP (all still used); new: `DefaultHost`, `WindowPlacement`, `GridColumns`, `ShownColumns`, `AdvancedOpen` |
+
 ## [0.34.0] - 2026-10-22
 ### Fixed: family 2D symbols were not found (every family fell back to its 3D outline)
 - Symbolic lines in a family are not owned by one view (they show in every parallel view), so 0.32 and 0.33 never saw them. The view is now asked what it shows: symbolic and detail lines, and the curves of detail components, annotation symbols, **nested families** (their symbolic lines and annotations) and imported CAD. Solids are left out, so the 3D body no longer mixes into the symbol.

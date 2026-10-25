@@ -152,7 +152,7 @@ namespace SmartHostMEP.UI
             {
                 if (!_symbolRendered)
                 {
-                    _symbolImage = SymbolRenderer.Render(Symbol, Color.FromRgb(20, 40, 70));
+                    _symbolImage = SymbolRenderer.Render(Symbol, Theme.ColorOf("Sh.Text"));
                     _symbolRendered = true;
                 }
                 return _symbolImage;
@@ -172,8 +172,17 @@ namespace SmartHostMEP.UI
             }
         }
 
-        /// <summary>The level picked in step 1 (used when Level is left at the default).</summary>
-        public string DefaultLevel { get; }
+        /// <summary>The window's Level (rows left on it follow when it changes).</summary>
+        public string DefaultLevel { get; private set; }
+
+        /// <summary>The window's Level changed: rows still on the old one move to the new one.</summary>
+        public void SetDefaultLevel(string level)
+        {
+            level = level ?? "";
+            bool follow = string.Equals(_level, DefaultLevel, StringComparison.OrdinalIgnoreCase);
+            DefaultLevel = level;
+            if (follow) Level = level;
+        }
         /// <summary>Level this block is placed on; Elevation is measured from it.</summary>
         public string Level { get => _level; set { var v = value ?? DefaultLevel; if (v != _level) DetectedHost = ""; _level = v; Changed(nameof(Level)); } }
 
@@ -193,8 +202,14 @@ namespace SmartHostMEP.UI
         /// <summary>True while the category is still the automatic guess.</summary>
         public bool CategoryIsAuto { get; set; } = true;
 
-        public string Elevation { get => _elevation; set { _elevation = value; Changed(nameof(Elevation)); } }
-        public string Rotation { get => _rotation; set { _rotation = value; Changed(nameof(Rotation)); } }
+        public string Elevation { get => _elevation; set { _elevation = value; Changed(nameof(Elevation)); Changed(nameof(ElevationError)); Changed(nameof(ElevationInvalid)); Changed(nameof(HasError)); } }
+        public string Rotation { get => _rotation; set { _rotation = value; Changed(nameof(Rotation)); Changed(nameof(RotationError)); Changed(nameof(RotationInvalid)); Changed(nameof(HasError)); } }
+        /// <summary>Inline validation (red border + tooltip in the grid); null when valid.</summary>
+        public string ElevationError => this[nameof(Elevation)];
+        public string RotationError => this[nameof(Rotation)];
+        public bool HasError => Error != null;
+        public bool ElevationInvalid => ElevationError != null;
+        public bool RotationInvalid => RotationError != null;
         public string Host { get => _host; set { if (value != _host) DetectedHost = ""; _host = value; Changed(nameof(Host)); } }
 
         string _detectedHost = "";
@@ -280,7 +295,22 @@ namespace SmartHostMEP.UI
         /// <summary>All level names in the model (Level dropdown), lowest first.</summary>
         public List<string> LevelNames = new List<string>();
         public Settings Settings;
-        /// <summary>Slab (above) search range and fallback plane height (top of the mapping window).</summary>
+        /// <summary>Add-in version shown in the window header.</summary>
+        public string Version = "";
+        /// <summary>DWG links/imports of the project (setup row) and the one these rows come from.</summary>
+        public List<string> DwgNames = new List<string>();
+        public int DwgIndex;
+        /// <summary>The DWG these rows were read from (DwgIndex changes when another one is chosen).</summary>
+        public int PreviousDwgIndex;
+        /// <summary>Blocks nested inside other blocks were read (Advanced).</summary>
+        public bool IncludeNested;
+        /// <summary>Preview (true) or Run (false) from inside the window, with the window's progress bar:
+        /// progress(done, total) returns false to stop. Returns true when the window should close (Run done).</summary>
+        public Func<bool, Func<int, int, bool>, bool> Place;
+        /// <summary>One line shown under the grid after Preview (set by <see cref="Place"/>).</summary>
+        public string Message;
+        public bool MessageIsWarning;
+        /// <summary>Search ranges and fallback plane height (Advanced).</summary>
         public SlabOptions Slab = new SlabOptions();
 
         /// <summary>Find a family type by name; adds non-electrical types to the dropdown on demand.</summary>

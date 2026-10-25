@@ -8,15 +8,15 @@ using Autodesk.Revit.UI;
 using SmartHostMEP.Core;
 using SmartHostMEP.Revit;
 using SmartHostMEP.UI;
-using DialogResult = System.Windows.Forms.DialogResult;
 using TaskDialog = Autodesk.Revit.UI.TaskDialog;
 
 namespace SmartHostMEP.Commands
 {
     /// <summary>
-    /// 1. Pick DWG + level.  2. Mapping window (one row per block name).
-    /// 3. Preview (rolled back, then back to the mapping window) or Run.
-    /// 4. Summary window + CSV log. The grid is remembered per project.
+    /// Opens the mapping window straight away (DWG, Level and Host default are on its setup row).
+    /// Preview and Run happen inside the window; after Run the result and Needs Review windows
+    /// follow. Changing the DWG (or Include nested blocks) reads the blocks again and keeps the
+    /// families picked for blocks of the same name. The grid is remembered per project.
     /// </summary>
     [Transaction(TransactionMode.Manual)]
     public class PlaceFamiliesCommand : IExternalCommand
@@ -24,177 +24,130 @@ namespace SmartHostMEP.Commands
         public Result Execute(ExternalCommandData data, ref string message, ElementSet elements)
         {
             var uiapp = data.Application;
-            var doc = uiapp.ActiveUIDocument.Document;
+            var uidoc = uiapp.ActiveUIDocument;
+            var doc = uidoc.Document;
             RevitOwner.MainHandle = uiapp.MainWindowHandle;
+#if REVIT2024_OR_GREATER
+            try { Theme.Dark = UIThemeManager.CurrentTheme == UITheme.Dark; } catch (Exception) { Theme.Dark = false; }
+#endif
             try
             {
                 var settings = Core.Settings.Load();
-                if (Items.Imports(doc).Count == 0)
+                var imports = Items.Imports(doc);
+                if (imports.Count == 0)
                 {
                     TaskDialog.Show("SmartHost MEP", "No linked or imported DWG found in this project.");
                     return Result.Cancelled;
                 }
-
-                // 1. DWG (the starting level comes from the DWG; rows can change it).
-                // The DWG comes from the list, or is clicked in the view ("Pick in view"); a DWG
-                // already selected in Revit is pre-selected.
-                PlaceOptions opts;
-                var uidocPick = uiapp.ActiveUIDocument;
-                ElementId pre = uidocPick.Selection.GetElementIds().FirstOrDefault(id => doc.GetElement(id) is ImportInstance);
-                bool? nested = null;
-                while (true)
-                {
-                    using (var dlg = new PlaceDialog(doc, settings, pre, nested))
-                    {
-                        var shown = dlg.ShowDialog(RevitOwner.Win32);
-                        if (dlg.PickRequested)
-                        {
-                            nested = dlg.IncludeNested;
-                            try
-                            {
-                                var picked = uidocPick.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
-                                    new ImportSelectionFilter(), "SmartHost MEP: click a DWG link or import in the view (Esc = back to the list)");
-                                if (picked != null) pre = picked.ElementId;
-                            }
-                            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc: back to the dialog */ }
-                            continue;
-                        }
-                        if (shown != DialogResult.OK || dlg.Result == null) return Result.Cancelled;
-                        opts = dlg.Result;
-                        break;
-                    }
-                }
-                settings.LastDwg = Items.DwgName(doc, opts.Import);
-                Core.Settings.TrySave(settings);
-                if (opts.Level == null)
+                if (Items.Levels(doc).Count == 0)
                 {
                     TaskDialog.Show("SmartHost MEP", "This model has no levels.");
                     return Result.Cancelled;
                 }
 
-                // 2. Blocks from the DWG.
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                var blocks = DwgReader.Read(doc, opts.Import, opts.IncludeNested);
-                if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
-                var readDwgTime = sw.Elapsed;
-                if (blocks.Count == 0)
-                {
-                    TaskDialog.Show("SmartHost MEP", "No blocks found in the selected DWG.\n\n" +
-                        "If the drawing was exploded before linking, it contains no blocks.");
-                    return Result.Cancelled;
-                }
+                // The DWG: selected in Revit, else the one used last time, else the first.
+                var pre = uidoc.Selection.GetElementIds().FirstOrDefault(id => doc.GetElement(id) is ImportInstance);
+                int index = pre != null ? imports.FindIndex(i => i.Element.Id == pre) : -1;
+                if (index < 0 && !string.IsNullOrEmpty(settings.LastDwg))
+                    index = imports.FindIndex(i => string.Equals(Items.DwgName(doc, i.Element), settings.LastDwg, StringComparison.OrdinalIgnoreCase));
+                index = Math.Max(index, 0);
+                bool nested = settings.IncludeNestedBlocks;
+                string version = typeof(PlaceFamiliesCommand).Assembly.GetName().Version is Version v ? $"{v.Major}.{v.Minor}.{v.Build}" : "";
 
-                sw.Restart();
-                var session = BuildSession(doc, opts, blocks, settings);
-                var setupTime = sw.Elapsed;
-
-                // 3. Mapping window -> Preview / Run loop.
+                MappingSession previous = null;
+                Level keepLevel = null;   // Include nested toggled: the level picked stays
                 while (true)
                 {
-                    var win = new MappingWindow(session);
+                    var import = imports[index].Element;
+                    settings.LastDwg = Items.DwgName(doc, import);
+                    Core.Settings.TrySave(settings);
+                    var level = keepLevel ?? Items.DefaultLevel(doc, import);
+
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var blocks = DwgReader.Read(doc, import, nested);
+                    if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
+                    var readDwgTime = sw.Elapsed;
+                    if (blocks.Count == 0)
+                    {
+                        TaskDialog.Show("SmartHost MEP", $"No blocks found in {Items.DwgName(doc, import)}.\n\n" +
+                            "If the drawing was exploded before linking, it contains no blocks." +
+                            (previous != null ? "\n\nBack to the previous DWG." : ""));
+                        if (previous == null) return Result.Cancelled;
+                        index = previous.DwgIndex = previous.PreviousDwgIndex;
+                        continue;
+                    }
+
+                    sw.Restart();
+                    var session = BuildSession(doc, import, level, blocks, settings);
+                    if (previous != null) session.Apply(previous.ToMapping(), families: true);
+                    session.Version = version;
+                    session.DwgNames = imports.Select(i => i.Name).ToList();
+                    session.DwgIndex = session.PreviousDwgIndex = index;
+                    session.IncludeNested = nested;
+                    var setupTime = sw.Elapsed;
+
+                    MappingWindow win = null;
+                    List<PlacementResult> runResults = null;
+                    SimpleReport runReport = null;
+                    string runDetails = null, runLog = null;
+                    session.Place = (preview, progress) =>
+                    {
+                        var outcome = RunOnce(doc, session, blocks, import, settings, preview, progress, readDwgTime, setupTime, win);
+                        if (outcome == null) return false;
+                        if (preview)
+                        {
+                            new ResultWindow(outcome.Report, outcome.Details, outcome.LogPath,
+                                "Close this window to go back to the mapping, then click Run to place the families.", win).ShowDialog();
+                            session.Message = outcome.Report.Headline + "  (preview: nothing was changed)";
+                            session.MessageIsWarning = !outcome.Report.AllPlaced;
+                            return false;
+                        }
+                        runResults = outcome.Results;
+                        runReport = outcome.Report;
+                        runDetails = outcome.Details;
+                        runLog = outcome.LogPath;
+                        return true;
+                    };
+
+                    win = new MappingWindow(session);
                     RevitOwner.Attach(win);
                     win.ShowDialog();
-                    if (win.Action == MappingAction.Cancel)
-                        return Result.Cancelled;
-                    bool preview = win.Action == MappingAction.Preview;
-
-                    // Remember the families picked by hand for the next Auto-match.
-                    try { session.Learn(); } catch (Exception) { }
-                    // Remember this grid for the project (next time it is pre-filled).
-                    try
+                    switch (win.Action)
                     {
-                        Directory.CreateDirectory(ProjectStore.Folder);
-                        Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()), session.Slab);
-                    }
-                    catch (Exception) { /* remembering is a convenience only */ }
-
-                    // Timings of this Preview/Run (DWG reading and window setup happened once, at the start).
-                    var timer = new PhaseTimer();
-                    timer.Add(Phases.ReadDwg, readDwgTime);
-                    timer.Add(Phases.Setup, setupTime);
-                    var total = System.Diagnostics.Stopwatch.StartNew();
-                    MappingResult mapping;
-                    Dictionary<MapRow, FamilySymbol> symbols;
-                    var errors = new List<string>();
-                    using (timer.Time(Phases.LoadMapping))
-                    {
-                        mapping = session.ToMapping();
-                        symbols = Placer.ResolveSymbols(doc, mapping, errors);
-                    }
-                    // Run: warn when elements were already placed at these locations.
-                    var placer = new Placer(doc, settings);
-                    if (!preview)
-                    {
-                        int existing;
-                        using (timer.Time(Phases.DupIndex)) existing = placer.CountExisting(blocks, mapping, symbols, opts.Level);
-                        if (existing > 0)
-                        {
-                            var choice = AskExisting(existing);
-                            if (choice == ExistingChoice.Cancel) continue;   // back to the mapping window
-                            placer.CheckDuplicates = choice == ExistingChoice.Skip;
-                        }
-                    }
-                    List<PlacementResult> results;
-                    try
-                    {
-                        using (var progress = new ProgressWindow(preview ? "SmartHost MEP - Preview" : "SmartHost MEP - Placing families",
-                                                                 uiapp.MainWindowHandle))
-                            results = placer.PlaceAll(blocks, mapping, symbols, opts.Level, preview,
-                                                                         progress.Report, DwgExtents(opts.Import), timer, opts.Import);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        TaskDialog.Show("SmartHost MEP", "Cancelled. Everything was rolled back - nothing was changed in the model.");
-                        continue;   // back to the mapping window
-                    }
-                    // Show detection: the line chosen for each vertical-plane block, as detail lines
-                    // (own transaction, so they stay after a Preview). The previous ones are always removed.
-                    try
-                    {
-                        var view = doc.ActiveView is ViewPlan vp && Detection.CanDraw(vp) ? (View)vp
-                            : new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
-                                .FirstOrDefault(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == opts.Level.Id);
-                        Detection.Show(doc, view, settings.ShowDetection ? placer.Detections : null);
-                    }
-                    catch (Exception) { /* review aid only */ }
-                    string logPath;
-                    total.Stop();
-                    timer.Add(Phases.Total, total.Elapsed + readDwgTime + setupTime);
-                    using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
-                    if (preview) session.SetDetectedHosts(results);
-
-                    // Details (behind "Show details"): the full technical summary, timings and log path.
-                    var summary = Report.Summarize(results);
-                    var text = Report.SummaryText(summary, preview);
-                    if (errors.Count > 0)
-                        text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
-                    text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
-                    text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
-
-                    var simple = SimpleReport.From(results, preview);
-                    string footnote = preview
-                        ? "Close this window to return to the mapping, then click Run to place the families."
-                        : summary.Get(Status.Placed) > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
-
-                    using (var form = new ResultForm(simple, text, logPath, footnote))
-                        form.ShowDialog(RevitOwner.Win32);
-                    if (!preview)
-                    {
-                        // Slab (above) blocks that found no slab/beam: list them so they can be fixed.
-                        var review = NeedsReview.From(results);
-                        if (review.Count > 0)
-                        {
-                            var uidoc = uiapp.ActiveUIDocument;
-                            using (var form = new NeedsReviewForm(review, ids =>
+                        case MappingAction.Cancel:
+                            return Result.Cancelled;
+                        case MappingAction.Reload:
+                            keepLevel = session.DwgIndex == index ? LevelByName(doc, session.LevelName) : null;
+                            index = session.DwgIndex;
+                            nested = session.IncludeNested;
+                            previous = session;
+                            continue;
+                        case MappingAction.PickDwg:
+                            try
                             {
-                                var elementIds = ids.Select(Compat.ToId).ToList();
-                                uidoc.Selection.SetElementIds(elementIds);
-                                uidoc.ShowElements(elementIds);
-                            }))
-                                form.ShowDialog(RevitOwner.Win32);
-                        }
-                        return Result.Succeeded;
+                                var picked = uidoc.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
+                                    new ImportSelectionFilter(), "SmartHost MEP: click a DWG link or import in the view (Esc = back to the mapping)");
+                                int at = picked != null ? imports.FindIndex(i => i.Element.Id == picked.ElementId) : -1;
+                                if (at >= 0) index = at;
+                            }
+                            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc: same DWG */ }
+                            keepLevel = index == session.DwgIndex ? LevelByName(doc, session.LevelName) : null;
+                            previous = session;
+                            continue;
                     }
+
+                    // Run finished: the summary, then the elements to check.
+                    string footnote = runReport.Placed > 0 ? "Undo the whole run with a single Ctrl+Z." : null;
+                    new ResultWindow(runReport, runDetails, runLog, footnote).ShowDialog();
+                    var review = NeedsReview.From(runResults);
+                    if (review.Count > 0)
+                        new NeedsReviewWindow(review, ids =>
+                        {
+                            var elementIds = ids.Select(Compat.ToId).ToList();
+                            uidoc.Selection.SetElementIds(elementIds);
+                            uidoc.ShowElements(elementIds);
+                        }).ShowDialog();
+                    return Result.Succeeded;
                 }
             }
             catch (Exception ex)
@@ -203,6 +156,97 @@ namespace SmartHostMEP.Commands
                 TaskDialog.Show("SmartHost MEP - error", ex.ToString());
                 return Result.Failed;
             }
+        }
+
+        static Level LevelByName(Document doc, string name) =>
+            new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().FirstOrDefault(l => l.Name == name);
+
+        class Outcome
+        {
+            public List<PlacementResult> Results;
+            public SimpleReport Report;
+            public string Details, LogPath;
+        }
+
+        /// <summary>One Preview (placed and rolled back) or Run, with the mapping window's progress bar.
+        /// Null when it was cancelled (the window shows why).</summary>
+        static Outcome RunOnce(Document doc, MappingSession session, List<BlockRef> blocks, ImportInstance import, Core.Settings settings,
+                               bool preview, Func<int, int, bool> progress, TimeSpan readDwgTime, TimeSpan setupTime, System.Windows.Window owner)
+        {
+            session.Message = "";
+            session.MessageIsWarning = false;
+            // Remember the families picked by hand for the next Auto-match.
+            try { session.Learn(); } catch (Exception) { }
+            // Remember this grid for the project (next time it is pre-filled).
+            try
+            {
+                Directory.CreateDirectory(ProjectStore.Folder);
+                Mapping.Save(session.ProjectMappingPath, session.Rows.Select(r => r.ToMapRow()), session.Slab);
+            }
+            catch (Exception) { /* remembering is a convenience only */ }
+
+            var level = LevelByName(doc, session.LevelName) ?? Items.DefaultLevel(doc, import);
+            // Timings of this Preview/Run (DWG reading and window setup happened once, at the start).
+            var timer = new PhaseTimer();
+            timer.Add(Phases.ReadDwg, readDwgTime);
+            timer.Add(Phases.Setup, setupTime);
+            var total = System.Diagnostics.Stopwatch.StartNew();
+            MappingResult mapping;
+            Dictionary<MapRow, FamilySymbol> symbols;
+            var errors = new List<string>();
+            using (timer.Time(Phases.LoadMapping))
+            {
+                mapping = session.ToMapping();
+                symbols = Placer.ResolveSymbols(doc, mapping, errors);
+            }
+            // Run: ask when elements were already placed at these locations.
+            var placer = new Placer(doc, settings);
+            if (!preview)
+            {
+                int existing;
+                using (timer.Time(Phases.DupIndex)) existing = placer.CountExisting(blocks, mapping, symbols, level);
+                if (existing > 0)
+                {
+                    var choice = AskExisting(existing, owner);
+                    if (choice == ExistingChoice.Cancel) return null;
+                    placer.CheckDuplicates = choice == ExistingChoice.Skip;
+                }
+            }
+            List<PlacementResult> results;
+            try
+            {
+                results = placer.PlaceAll(blocks, mapping, symbols, level, preview, progress, DwgExtents(import), timer, import);
+            }
+            catch (OperationCanceledException)
+            {
+                session.Message = "Cancelled. Everything was rolled back: nothing was changed in the model.";
+                session.MessageIsWarning = true;
+                return null;
+            }
+            // Show detection: the line chosen for each vertical-plane block, as detail lines
+            // (own transaction, so they stay after a Preview). The previous ones are always removed.
+            try
+            {
+                var view = doc.ActiveView is ViewPlan vp && Detection.CanDraw(vp) ? (View)vp
+                    : new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+                        .FirstOrDefault(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == level.Id);
+                Detection.Show(doc, view, settings.ShowDetection ? placer.Detections : null);
+            }
+            catch (Exception) { /* review aid only */ }
+            total.Stop();
+            timer.Add(Phases.Total, total.Elapsed + readDwgTime + setupTime);
+            string logPath;
+            using (timer.Time(Phases.WriteLog)) logPath = WriteLog(doc, results, preview, timer);
+            if (preview) session.SetDetectedHosts(results);
+
+            // Details (behind "Show details"): the full technical summary, timings and log path.
+            var summary = Report.Summarize(results);
+            var text = Report.SummaryText(summary, preview);
+            if (errors.Count > 0)
+                text = "Warnings:\r\n  - " + string.Join("\r\n  - ", errors) + "\r\n\r\n" + text;
+            text += "\r\n\r\nTimings (where the time goes):\r\n" + timer.Format();
+            text += "\r\n\r\n" + (logPath != null ? "Log saved: " + logPath : "Could not write the log file.");
+            return new Outcome { Results = results, Report = SimpleReport.From(results, preview), Details = text, LogPath = logPath };
         }
 
         /// <summary>Only DWG links / imports can be clicked when picking the DWG in the view.</summary>
@@ -215,37 +259,30 @@ namespace SmartHostMEP.Commands
         enum ExistingChoice { Skip, PlaceAnyway, Cancel }
 
         /// <summary>"X elements already exist at these locations": Skip them (default) / Place anyway / Cancel.</summary>
-        static ExistingChoice AskExisting(int count)
+        static ExistingChoice AskExisting(int count, System.Windows.Window owner)
         {
-            var td = new TaskDialog("SmartHost MEP - already placed")
-            {
-                MainInstruction = ExistingIndex.Warning(count),
-                MainContent = "An element of the same family, or one whose Comments say \"SmartHost: <block>\" (or the older \"CAD: <block>\"), is already " +
-                              "at these block locations (probably from an earlier run).",
-                AllowCancellation = true,
-                CommonButtons = TaskDialogCommonButtons.None,
-            };
-            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Skip them", "Place only the blocks that are not in the model yet (recommended)");
-            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Place anyway", "Place every block, even where an element already exists");
-            td.AddCommandLink(TaskDialogCommandLinkId.CommandLink3, "Cancel", "Go back to the mapping window");
-            // Only after the command links exist: Revit throws "Corresponding button not found"
-            // when DefaultButton names a button the dialog does not have yet.
-            td.DefaultButton = TaskDialogResult.CommandLink1;
-            var r = td.Show();
-            return r == TaskDialogResult.CommandLink1 ? ExistingChoice.Skip
-                 : r == TaskDialogResult.CommandLink2 ? ExistingChoice.PlaceAnyway
-                 : ExistingChoice.Cancel;
+            var dlg = new ChoiceDialog("SmartHost MEP - already placed", ExistingIndex.Warning(count),
+                "An element of the same family, or one whose Comments say \"SmartHost: <block>\" (or the older \"CAD: <block>\"), is already " +
+                "at these block locations (probably from an earlier run).",
+                new[]
+                {
+                    ("Skip them", "Place only the blocks that are not in the model yet (recommended)"),
+                    ("Place anyway", "Place every block, even where an element already exists"),
+                    ("Cancel", "Go back to the mapping window"),
+                }, owner);
+            dlg.ShowDialog();
+            return dlg.Choice == 0 ? ExistingChoice.Skip : dlg.Choice == 1 ? ExistingChoice.PlaceAnyway : ExistingChoice.Cancel;
         }
 
         /// <summary>One grid row per unique block name. The project's last mapping restores
         /// Elevation, Host Type, Rotation, Facing, Level and the Slab / Ceiling options, but every
         /// Revit Family starts at (Skip): families are picked again, or come from Load... / Auto-match.</summary>
-        static MappingSession BuildSession(Document doc, PlaceOptions opts, List<BlockRef> blocks, Core.Settings settings)
+        static MappingSession BuildSession(Document doc, ImportInstance import, Level level, List<BlockRef> blocks, Core.Settings settings)
         {
             var session = new MappingSession
             {
-                DwgName = doc.GetElement(opts.Import.GetTypeId())?.Name ?? "DWG",
-                LevelName = opts.Level.Name,
+                DwgName = Items.DwgName(doc, import),
+                LevelName = level.Name,
                 InstanceCount = blocks.Count,
                 Settings = settings,
                 ProjectMappingPath = ProjectStore.MappingPathFor(ProjectStore.KeyFor(ModelPath(doc), doc.Title)),
@@ -269,8 +306,9 @@ namespace SmartHostMEP.Commands
                 return list;
             };
             foreach (var kv in DwgReader.CountByName(blocks).OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, opts.Level.Name)
+                session.Rows.Add(new BlockRow(kv.Key, kv.Value, session.Options, level.Name)
                 {
+                    Host = BlockRow.HostChoices.Contains(settings.DefaultHost) ? settings.DefaultHost : BlockRow.HostChoices[0],
                     Symbol = symbols.TryGetValue(kv.Key, out var sym) ? sym : null,
                 });
 

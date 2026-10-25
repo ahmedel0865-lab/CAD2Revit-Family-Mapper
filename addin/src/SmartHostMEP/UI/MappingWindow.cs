@@ -1,273 +1,426 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Threading;
 using System.Windows.Media;
+using System.Windows.Threading;
 using SmartHostMEP.Core;
 using Microsoft.Win32;
 
 namespace SmartHostMEP.UI
 {
-    public enum MappingAction { Cancel, Preview, Run }
+    /// <summary>How the mapping window was closed.</summary>
+    public enum MappingAction
+    {
+        Cancel,
+        /// <summary>Run finished inside the window.</summary>
+        Done,
+        /// <summary>Another DWG (or Include nested blocks) was chosen: read the blocks again.</summary>
+        Reload,
+        /// <summary>"Pick in view": click the DWG in Revit, then open the window again.</summary>
+        PickDwg,
+    }
 
     /// <summary>
-    /// The mapping window: one row per unique CAD block name, with a searchable
-    /// "Revit Family" dropdown, elevation, rotation and host type.
-    /// Built in code (no XAML) so the add-in compiles on any .NET SDK.
+    /// The mapping window, top to bottom: header (name, version, what is loaded), setup row (DWG,
+    /// Level, Host default), toolbar (search, All / Mapped / Unmapped, Auto-match, Columns), the grid
+    /// (one row per unique CAD block), live summary or progress bar, Advanced (closed by default) and
+    /// the footer (Load / Save; Preview, Run, Cancel). Preview and Run happen inside the window with
+    /// its own progress bar. Built in code (styles in <see cref="Theme"/>), so it compiles on any SDK.
     /// </summary>
     public class MappingWindow : Window
     {
         readonly MappingSession _s;
+        readonly Settings _settings;
         readonly DataGrid _grid = new DataGrid();
-        readonly TextBlock _status = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
 
         public MappingAction Action { get; private set; } = MappingAction.Cancel;
 
-        // Colours shared by the window (match the ribbon icons).
-        static readonly SolidColorBrush Accent = Frozen(Color.FromRgb(32, 96, 176));
-        static readonly SolidColorBrush AccentLight = Frozen(Color.FromRgb(232, 238, 247));
-        static readonly SolidColorBrush Panel = Frozen(Color.FromRgb(246, 248, 251));
-        static readonly SolidColorBrush PanelBorder = Frozen(Color.FromRgb(214, 222, 234));
-        static readonly SolidColorBrush Muted = Frozen(Color.FromRgb(110, 118, 130));
-
-        static SolidColorBrush Frozen(Color c)
-        {
-            var b = new SolidColorBrush(c);
-            b.Freeze();
-            return b;
-        }
-
-        readonly TextBlock _statMapped = new TextBlock(), _statInstances = new TextBlock(), _statSkipped = new TextBlock(),
-                           _statErrors = new TextBlock();
+        const double S = Theme.Space;
+        static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
         public MappingWindow(MappingSession session)
         {
             _s = session;
-            Title = "SmartHost MEP - Map CAD blocks to Revit families";
-            Width = 1680;
-            Height = 760;
-            MinWidth = 1150;
-            MinHeight = 480;
+            _settings = session.Settings ?? new Settings();
+            Theme.Apply(this);
+            Title = "SmartHost MEP";
+            Width = 1320;
+            Height = 800;
+            MinWidth = 980;
+            MinHeight = 600;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ShowInTaskbar = false;
-            FontFamily = new FontFamily("Segoe UI");
-            FontSize = 12;
-            Background = Brushes.White;
+            RestorePlacement();
 
-            var root = new DockPanel { Margin = new Thickness(14) };
-
-            // ---- Header card: what is being mapped + live counts ----------------------
-            var header = new Border
-            {
-                Background = AccentLight, CornerRadius = new CornerRadius(4), Padding = new Thickness(14, 10, 14, 10),
-                Margin = new Thickness(0, 0, 0, 10), BorderBrush = PanelBorder, BorderThickness = new Thickness(1),
-            };
-            var headerGrid = new DockPanel();
-            var titles = new StackPanel();
-            titles.Children.Add(new TextBlock { Text = "Map CAD blocks to Revit families", FontSize = 17, FontWeight = FontWeights.SemiBold, Foreground = Accent });
-            titles.Children.Add(new TextBlock
-            {
-                Text = $"DWG: {_s.DwgName}     Starting level: {_s.LevelName}     {_s.Rows.Count} unique blocks, {_s.InstanceCount} instances",
-                Foreground = Muted, Margin = new Thickness(0, 2, 0, 0),
-            });
-            titles.Children.Add(new TextBlock
-            {
-                Text = "Pick a Revit family for each block (type in the box to search). (Skip) = do not place. " +
-                       "Elevation is measured from the row's Level. Select several rows to edit them together.",
-                Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0),
-            });
-            titles.Children.Add(BuildSlabOptions());
-            var stats = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            stats.Children.Add(Chip("Mapped", _statMapped));
-            stats.Children.Add(Chip("Instances to place", _statInstances));
-            stats.Children.Add(Chip("Skipped", _statSkipped));
-            stats.Children.Add(Chip("Invalid", _statErrors));
-            DockPanel.SetDock(stats, Dock.Right);
-            headerGrid.Children.Add(stats);
-            headerGrid.Children.Add(titles);
-            header.Child = headerGrid;
-            DockPanel.SetDock(header, Dock.Top);
-            root.Children.Add(header);
-
-            // ---- Section 1: filter -----------------------------------------------------
-            var filterBar = new WrapPanel();
-            filterBar.Children.Add(BarLabel("Find"));
-            var find = new TextBox { Width = 300, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
-                                     ToolTip = "Show only rows whose block or family contains this text" };
-            find.TextChanged += (o, e) => { _findText = find.Text; ApplyFilter(); };
-            filterBar.Children.Add(find);
-            filterBar.Children.Add(BarLabel("Show"));
-            var show = new ComboBox { Width = 190, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
-            show.Items.Add(AllCategories);
-            foreach (var c in BlockCategories.All)
-            {
-                int n = _s.Rows.Count(r => r.Category == c);
-                if (n > 0) show.Items.Add(new ComboBoxItem { Content = $"{c} ({n})", Tag = c });
-            }
-            show.SelectedIndex = 0;
-            show.SelectionChanged += (o, e) =>
-            {
-                _showCategory = (show.SelectedItem as ComboBoxItem)?.Tag as string;
-                ApplyFilter();
-            };
-            filterBar.Children.Add(show);
-            var skipShown = MakeButton("Skip shown rows", (o, e) => SkipShownRows());
-            skipShown.ToolTip = "Set every row currently shown (after Find / Show) to (Skip), e.g. all Architectural blocks";
-            filterBar.Children.Add(skipShown);
-            var filterSection = Section("1 · Filter", filterBar);
-            DockPanel.SetDock(filterSection, Dock.Top);
-            root.Children.Add(filterSection);
-
-            // ---- Section 2: edit selected rows -----------------------------------------
-            var editSection = Section("2 · Edit selected rows", BuildBulkBar());
-            DockPanel.SetDock(editSection, Dock.Top);
-            root.Children.Add(editSection);
-
-            // ---- Footer: mapping file (left), actions (right) ---------------------------
-            var bottom = new DockPanel { Margin = new Thickness(0, 12, 0, 0), LastChildFill = false };
-            DockPanel.SetDock(bottom, Dock.Bottom);
-            var left = new StackPanel { Orientation = Orientation.Horizontal };
-            left.Children.Add(new TextBlock { Text = "Mapping file:", Foreground = Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-            left.Children.Add(MakeButton("Load...", (s, e) => LoadMapping(), "Load a mapping (XLSX or CSV) into the grid"));
-            left.Children.Add(MakeButton("Save...", (s, e) => SaveMapping(), "Save the grid as a mapping file (XLSX or CSV)"));
-            left.Children.Add(MakeButton("Auto-match", (s, e) => AutoMatch(), "Match blocks to loaded families by their symbol (lines, arcs, circles), then by earlier manual choices and names. Rows already mapped are not changed."));
-            left.Children.Add(MakeButton("Clear All Families", (s, e) => ClearFamilies(), "Set the Revit Family of every row back to (Skip); the other columns stay"));
-            left.Children.Add(_status);
-            DockPanel.SetDock(left, Dock.Left);
-            bottom.Children.Add(left);
-            var right = new StackPanel { Orientation = Orientation.Horizontal };
-            right.Children.Add(MakeButton("Preview", (s, e) => Finish(MappingAction.Preview),
-                "Run the placement and undo it: see exactly what Run would do, then come back here"));
-            var run = MakeButton("Run", (s, e) => Finish(MappingAction.Run), "Place the families (one Ctrl+Z undoes the whole run)", primary: true);
-            right.Children.Add(run);
-            var cancel = MakeButton("Cancel", (s, e) => { Action = MappingAction.Cancel; Close(); });
-            cancel.IsCancel = true;
-            right.Children.Add(cancel);
-            DockPanel.SetDock(right, Dock.Right);
-            bottom.Children.Add(right);
-            root.Children.Add(bottom);
-
-            // ---- Grid (grouped by category, Electrical first) ---------------------------
-            SetUpRowView();
-            BuildGrid();
-            var body = new DockPanel();
-            var preview = BuildPreviewPanel();
-            DockPanel.SetDock(preview, Dock.Right);
-            body.Children.Add(preview);
-            body.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = _grid });
-            root.Children.Add(body);
+            var root = new Grid { Margin = new Thickness(2 * S) };
+            for (int i = 0; i < 8; i++)
+                root.RowDefinitions.Add(new RowDefinition { Height = i == 4 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+            Add(root, BuildHeader(), 0);
+            Add(root, BuildSetupRow(), 1);
+            Add(root, BuildToolbar(), 2);
+            Add(root, BuildSelectionBar(), 3);
+            Add(root, BuildBody(), 4);
+            Add(root, BuildSummaryRow(), 5);
+            Add(root, BuildAdvanced(), 6);
+            Add(root, BuildFooter(), 7);
             Content = root;
 
+            PreviewKeyDown += OnWindowKey;
+            Closing += (o, e) =>
+            {
+                if (_busy) { e.Cancel = true; _cancelRequested = true; return; }
+                SavePlacement();
+            };
             foreach (var row in _s.Rows) row.PropertyChanged += OnRowChanged;
             Closed += (o, e) => { foreach (var row in _s.Rows) row.PropertyChanged -= OnRowChanged; };
+            Loaded += (o, e) => { _grid.Focus(); UpdateStatus(); };
             UpdateStatus();
         }
 
-        // ---- Symbol preview -----------------------------------------------------------
-        readonly Image _previewImage = new Image { Width = 210, Height = 210, Stretch = Stretch.Uniform };
-        readonly TextBlock _previewName = new TextBlock { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 2) };
-        readonly TextBlock _previewInfo = new TextBlock { Foreground = Muted, TextWrapping = TextWrapping.Wrap };
-        readonly TextBlock _previewEmpty = new TextBlock
+        static void Add(Grid g, UIElement child, int row)
         {
-            Foreground = Muted, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(12),
-        };
-
-        Border BuildPreviewPanel()
-        {
-            var frame = new Grid { Width = 220, Height = 220, Background = Brushes.White };
-            frame.Children.Add(_previewImage);
-            frame.Children.Add(_previewEmpty);
-            var stack = new StackPanel();
-            stack.Children.Add(new TextBlock { Text = "SYMBOL PREVIEW", FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = Muted, Margin = new Thickness(0, 0, 0, 6) });
-            stack.Children.Add(new Border { BorderBrush = PanelBorder, BorderThickness = new Thickness(1), Child = frame });
-            stack.Children.Add(_previewName);
-            stack.Children.Add(_previewInfo);
-            ShowPreview(null);
-            return new Border
-            {
-                Width = 246, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 8, 10, 8),
-                Background = Panel, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
-                Child = stack,
-            };
+            Grid.SetRow(child, row);
+            g.Children.Add(child);
         }
 
-        /// <summary>Show a row's symbol: the hovered row, else the selected row.</summary>
-        void ShowPreview(BlockRow row)
+        // ---- 1. Header ---------------------------------------------------------------------
+
+        readonly TextBlock _headerStatus = Theme.Text("", Theme.LabelSize, muted: true);
+
+        UIElement BuildHeader()
         {
-            row = row ?? _grid.SelectedItem as BlockRow;
-            if (row == null)
+            var title = new StackPanel { Orientation = Orientation.Horizontal };
+            title.Children.Add(Theme.Text("SmartHost MEP", Theme.TitleSize, bold: true));
+            if (!string.IsNullOrEmpty(_s.Version))
+                title.Children.Add(Badge("v" + _s.Version, accent: true, margin: new Thickness(S, 2, 0, 0)));
+            var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 1.5 * S) };
+            stack.Children.Add(title);
+            _headerStatus.Margin = new Thickness(0, S / 2, 0, 0);
+            stack.Children.Add(_headerStatus);
+            UpdateHeader();
+            return stack;
+        }
+
+        void UpdateHeader()
+        {
+            int instances = _s.Rows.Sum(r => r.Count);
+            _headerStatus.Text = $"DWG: {_s.DwgName}  |  Level: {_s.LevelName}  |  {_s.Rows.Count} block types, {instances:N0} instances";
+        }
+
+        /// <summary>Small rounded label ("v0.35.0", a block count).</summary>
+        static Border Badge(string text, bool accent = false, Thickness? margin = null)
+        {
+            var t = new TextBlock { Text = text, FontSize = Theme.SmallSize, VerticalAlignment = VerticalAlignment.Center };
+            t.SetResourceReference(TextBlock.ForegroundProperty, accent ? "Sh.Accent" : "Sh.Muted");
+            var b = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(7, 1, 7, 1), Child = t, VerticalAlignment = VerticalAlignment.Center };
+            b.SetResourceReference(Border.BackgroundProperty, accent ? "Sh.AccentSoft" : "Sh.Surface2");
+            if (margin.HasValue) b.Margin = margin.Value;
+            return b;
+        }
+
+        // ---- 2. Setup row: DWG, Level, Host default -----------------------------------------
+
+        readonly ComboBox _dwg = new ComboBox { Width = 380 };
+        readonly ComboBox _level = new ComboBox { Width = 200 };
+        readonly ComboBox _hostDefault = new ComboBox { Width = 220 };
+        bool _setupReady;
+
+        UIElement BuildSetupRow()
+        {
+            var bar = new WrapPanel();
+            bar.Children.Add(Field("DWG", _dwg, "The DWG link or import whose blocks are listed. Changing it reads the blocks of the other DWG (families picked for blocks with the same name are kept)."));
+            var pick = Theme.Button(this, "Pick in view", (o, e) => { Action = MappingAction.PickDwg; Close(); },
+                "Click the DWG in the Revit view instead of choosing it from the list (Esc in Revit comes back here)");
+            pick.VerticalAlignment = VerticalAlignment.Bottom;
+            pick.Margin = new Thickness(0, 0, 3 * S, 0);
+            bar.Children.Add(pick);
+            bar.Children.Add(Field("Level", _level, "Level the rows are placed on (Elevation is measured from it). Rows set to another level in the Level column keep theirs."));
+            bar.Children.Add(Field("Host default", _hostDefault, "Host Type of new rows. Changing it also changes every row that still has the previous default."));
+
+            foreach (var d in _s.DwgNames) _dwg.Items.Add(d);
+            if (_s.DwgNames.Count > 0) _dwg.SelectedIndex = Math.Max(0, Math.Min(_s.DwgIndex, _s.DwgNames.Count - 1));
+            _dwg.SelectionChanged += (o, e) =>
             {
-                _previewImage.Source = null;
-                _previewEmpty.Text = "Hover over or select a CAD block to see its 2D symbol.";
-                _previewEmpty.Visibility = Visibility.Visible;
-                _previewName.Text = "";
-                _previewInfo.Text = "";
+                if (!_setupReady || _dwg.SelectedIndex < 0 || _dwg.SelectedIndex == _s.DwgIndex) return;
+                _s.DwgIndex = _dwg.SelectedIndex;
+                Action = MappingAction.Reload;
+                Close();
+            };
+            foreach (var l in _s.LevelNames) _level.Items.Add(l);
+            _level.SelectedItem = _s.LevelName;
+            _level.SelectionChanged += (o, e) =>
+            {
+                if (!_setupReady || !(_level.SelectedItem is string lvl)) return;
+                CommitEdits();
+                _s.LevelName = lvl;
+                foreach (var r in _s.Rows) r.SetDefaultLevel(lvl);
+                UpdateHeader();
+            };
+            foreach (var h in BlockRow.HostChoices) _hostDefault.Items.Add(h);
+            _hostDefault.SelectedItem = HostDefault;
+            _hostDefault.SelectionChanged += (o, e) =>
+            {
+                if (!_setupReady || !(_hostDefault.SelectedItem is string host)) return;
+                CommitEdits();
+                var old = HostDefault;
+                foreach (var r in _s.Rows) if (r.Host == old) r.Host = host;
+                _settings.DefaultHost = host;
+                Settings.TrySave(_settings);
+            };
+            _setupReady = true;
+            var card = Theme.Card(bar, new Thickness(1.5 * S, S, 1.5 * S, S));
+            card.Margin = new Thickness(0, 0, 0, 1.5 * S);
+            return card;
+        }
+
+        string HostDefault =>
+            BlockRow.HostChoices.Contains(_settings.DefaultHost) ? _settings.DefaultHost : BlockRow.HostChoices[0];
+
+        /// <summary>Label above a control, both with the same tooltip.</summary>
+        static FrameworkElement Field(string label, FrameworkElement control, string tooltip, double right = 3 * S)
+        {
+            var stack = new StackPanel { Margin = new Thickness(0, 0, right, S / 2) };
+            var t = Theme.Text(label, Theme.SmallSize, muted: true);
+            t.Margin = new Thickness(0, 0, 0, S / 2);
+            t.ToolTip = tooltip;
+            control.ToolTip = tooltip;
+            stack.Children.Add(t);
+            stack.Children.Add(control);
+            return stack;
+        }
+
+        // ---- 3. Toolbar: search, chips, Auto-match, Columns ---------------------------------
+
+        readonly TextBox _search = new TextBox { Width = 280 };
+        readonly RadioButton _chipAll = new RadioButton { IsChecked = true }, _chipMapped = new RadioButton(), _chipUnmapped = new RadioButton();
+        enum RowFilter { All, Mapped, Unmapped }
+        RowFilter _show = RowFilter.All;
+
+        UIElement BuildToolbar()
+        {
+            var bar = new DockPanel { Margin = new Thickness(0, 0, 0, S), LastChildFill = false };
+            var left = new StackPanel { Orientation = Orientation.Horizontal };
+            // Search box with a placeholder.
+            var hint = Theme.Text("Search blocks   (Ctrl+F)", Theme.LabelSize, muted: true);
+            hint.IsHitTestVisible = false;
+            hint.Margin = new Thickness(S + 2, 0, 0, 0);
+            var searchHost = new Grid { Margin = new Thickness(0, 0, 2 * S, 0) };
+            searchHost.Children.Add(_search);
+            searchHost.Children.Add(hint);
+            _search.ToolTip = "Show only blocks whose name (or family) contains these words";
+            _search.TextChanged += (o, e) =>
+            {
+                hint.Visibility = _search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                ApplyFilter();
+            };
+            left.Children.Add(searchHost);
+            var chipStyle = Theme.Named(this, "Sh.Chip");
+            foreach (var (chip, which, tip) in new[]
+            {
+                (_chipAll, RowFilter.All, "Show every block"),
+                (_chipMapped, RowFilter.Mapped, "Show only blocks that have a family"),
+                (_chipUnmapped, RowFilter.Unmapped, "Show only blocks still on (Skip)"),
+            })
+            {
+                if (chipStyle != null) chip.Style = chipStyle;
+                chip.GroupName = "show";
+                chip.ToolTip = tip;
+                chip.VerticalAlignment = VerticalAlignment.Center;
+                var w = which;
+                chip.Checked += (o, e) => { _show = w; ApplyFilter(); };
+                left.Children.Add(chip);
+            }
+            DockPanel.SetDock(left, Dock.Left);
+            bar.Children.Add(left);
+
+            var right = new StackPanel { Orientation = Orientation.Horizontal };
+            right.Children.Add(Theme.Button(this, "Auto-match", (o, e) => AutoMatch(),
+                "Pick families for rows still on (Skip): your earlier manual choices first, then the family whose symbol looks the same, then the name. Rows already mapped are not changed."));
+            var columns = Theme.Button(this, "Columns ▾", null, "Show or hide the optional columns");
+            columns.Margin = new Thickness(0);
+            columns.Click += (o, e) => { var m = BuildColumnsMenu(); m.PlacementTarget = columns; m.Placement = PlacementMode.Bottom; m.IsOpen = true; };
+            right.Children.Add(columns);
+            DockPanel.SetDock(right, Dock.Right);
+            bar.Children.Add(right);
+            return bar;
+        }
+
+        // ---- 3b. Selection bar (2+ rows selected): Family / Host / Elevation for all -------
+
+        readonly Border _selectionBar = new Border();
+        readonly TextBlock _selCount = Theme.Text("", Theme.LabelSize, bold: true);
+        FilterComboBox _selFamily;
+        readonly ComboBox _selHost = new ComboBox { Width = 200 };
+        readonly TextBox _selElevation = new TextBox { Width = 90 };
+        const string Keep = "(keep)";
+        static readonly FamilyOption KeepFamily = new FamilyOption { Label = Keep };
+
+        UIElement BuildSelectionBar()
+        {
+            var keepFamilies = new System.Collections.ObjectModel.ObservableCollection<FamilyOption> { KeepFamily };
+            foreach (var o in _s.Options) keepFamilies.Add(o);
+            _s.Options.CollectionChanged += (o, e) =>
+            {
+                if (e.NewItems != null) foreach (FamilyOption f in e.NewItems) if (!keepFamilies.Contains(f)) keepFamilies.Add(f);
+            };
+            _selFamily = new FilterComboBox { Width = 340, ItemsSource = new ListCollectionView(keepFamilies), SelectedItem = KeepFamily };
+            _selHost.Items.Add(Keep);
+            foreach (var h in BlockRow.HostChoices) _selHost.Items.Add(h);
+            _selHost.SelectedIndex = 0;
+            _selElevation.ToolTip = "Elevation From Level (mm) for the selected rows; leave empty to keep each row's value";
+
+            var bar = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+            _selCount.Margin = new Thickness(0, 0, 2 * S, 0);
+            _selCount.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Accent");
+            bar.Children.Add(_selCount);
+            bar.Children.Add(Inline("Family", _selFamily));
+            bar.Children.Add(Inline("Host", _selHost));
+            bar.Children.Add(Inline("Elevation (mm)", _selElevation));
+            bar.Children.Add(Theme.Button(this, "Apply to selected", (o, e) => ApplySelectionBar(), "Set the chosen values on every selected row; (keep) fields are not changed", primary: true));
+            bar.Children.Add(Theme.Button(this, "Skip selected", (o, e) => SkipSelected(), "Set every selected row to (Skip)"));
+            _selectionBar.Child = bar;
+            _selectionBar.CornerRadius = new CornerRadius(6);
+            _selectionBar.Padding = new Thickness(1.5 * S, S, 1.5 * S, S);
+            _selectionBar.Margin = new Thickness(0, 0, 0, S);
+            _selectionBar.BorderThickness = new Thickness(1);
+            _selectionBar.SetResourceReference(Border.BackgroundProperty, "Sh.AccentSoft");
+            _selectionBar.SetResourceReference(Border.BorderBrushProperty, "Sh.Accent");
+            _selectionBar.Visibility = Visibility.Collapsed;
+            return _selectionBar;
+        }
+
+        static UIElement Inline(string label, FrameworkElement control)
+        {
+            var p = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 2 * S, 0) };
+            var t = Theme.Text(label, Theme.LabelSize, muted: true);
+            t.Margin = new Thickness(0, 0, S, 0);
+            p.Children.Add(t);
+            p.Children.Add(control);
+            return p;
+        }
+
+        void UpdateSelectionBar()
+        {
+            int n = _grid.SelectedItems.Count;
+            _selectionBar.Visibility = n >= 2 && !_busy ? Visibility.Visible : Visibility.Collapsed;
+            _selCount.Text = $"{n} rows selected";
+        }
+
+        void ApplySelectionBar()
+        {
+            CommitEdits();
+            var rows = _grid.SelectedItems.OfType<BlockRow>().ToList();
+            var family = _selFamily.SelectedItem as FamilyOption;
+            var host = _selHost.SelectedItem as string;
+            var elev = (_selElevation.Text ?? "").Trim();
+            if (elev.Length > 0 && Mapping.ParseNumber(elev) == null)
+            {
+                MarkInvalid(_selElevation, "Elevation must be a number (mm), or empty to keep each row's value");
                 return;
             }
-            var img = row.SymbolImage;
-            _previewImage.Source = img;
-            _previewEmpty.Text = "No line work to preview\n(the block may contain only text, hatches or solids).";
-            _previewEmpty.Visibility = img == null ? Visibility.Visible : Visibility.Collapsed;
-            _previewName.Text = row.BlockName;
-            var size = row.Symbol?.SizeText() ?? "";
-            _previewInfo.Text = $"{row.Count} instance(s)  ·  {row.Category}" +
-                                (size.Length > 0 ? $"\nSize: {size}" : "") +
-                                (row.IsSkipped ? "\nNot mapped (Skip)" : "\n" + row.FamilyLabel) +
-                                (row.Symbol != null && row.Symbol.Truncated ? "\n(large block: preview simplified)" : "");
-        }
-
-        /// <summary>A titled, lightly framed block of controls.</summary>
-        static Border Section(string title, UIElement content)
-        {
-            var stack = new StackPanel();
-            stack.Children.Add(new TextBlock { Text = title.ToUpperInvariant(), FontSize = 10.5, FontWeight = FontWeights.SemiBold,
-                                               Foreground = Muted, Margin = new Thickness(0, 0, 0, 6) });
-            stack.Children.Add(content);
-            return new Border
+            MarkInvalid(_selElevation, null);
+            foreach (var r in rows)
             {
-                Background = Panel, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 8), Child = stack,
-            };
-        }
-
-        /// <summary>Small statistic in the header: big number over a caption.</summary>
-        static Border Chip(string caption, TextBlock value)
-        {
-            value.FontSize = 18;
-            value.FontWeight = FontWeights.SemiBold;
-            value.HorizontalAlignment = HorizontalAlignment.Center;
-            var stack = new StackPanel();
-            stack.Children.Add(value);
-            stack.Children.Add(new TextBlock { Text = caption, FontSize = 10.5, Foreground = Muted, HorizontalAlignment = HorizontalAlignment.Center });
-            return new Border
-            {
-                Background = Brushes.White, BorderBrush = PanelBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(8, 0, 0, 0), MinWidth = 90, Child = stack,
-            };
-        }
-
-        static Button MakeButton(string text, RoutedEventHandler click, string tooltip = null, bool primary = false)
-        {
-            var b = new Button { Content = text, MinWidth = 90, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0) };
-            if (tooltip != null) b.ToolTip = tooltip;
-            if (primary)
-            {
-                b.Background = Accent;
-                b.Foreground = Brushes.White;
-                b.BorderBrush = Accent;
-                b.FontWeight = FontWeights.SemiBold;
-                b.MinWidth = 110;
+                if (family != null && family != KeepFamily) { r.Family = family; MappingSession.UseFamilyCategory(r); }
+                if (host != null && host != Keep) r.Host = host;
+                if (elev.Length > 0) r.Elevation = elev;
             }
-            b.Click += click;
-            return b;
+            _selFamily.SelectedItem = KeepFamily;
+            _selHost.SelectedIndex = 0;
+            _selElevation.Text = "";
+        }
+
+        void SkipSelected()
+        {
+            CommitEdits();
+            foreach (var r in _grid.SelectedItems.OfType<BlockRow>().ToList()) r.Family = FamilyOption.Skip;
+        }
+
+        // ---- 4. Body: grid (+ optional symbol preview) ---------------------------------------
+
+        readonly Dictionary<string, DataGridColumn> _cols = new Dictionary<string, DataGridColumn>();
+        /// <summary>Optional columns (Columns menu), hidden by default: key, menu text.</summary>
+        static readonly (string key, string text)[] Optional =
+        {
+            ("rotation", "Rotation"), ("facing", "Facing"), ("level", "Level"), ("category", "Category"), ("placeat", "Place At"),
+            ("score", "Auto-match score"), ("sourceview", "Source view"), ("top3", "Top 3 candidates"), ("detected", "Detected host (Preview)"),
+        };
+        readonly HashSet<string> _shown = new HashSet<string>();
+        Border _previewPanel;
+        bool _showPreviewPanel;
+
+        UIElement BuildBody()
+        {
+            foreach (var k in (_settings.ShownColumns ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) _shown.Add(k.Trim());
+            _showPreviewPanel = _shown.Contains("preview");
+            SetUpRowView();
+            BuildGrid();
+            var body = new DockPanel();
+            _previewPanel = BuildPreviewPanel();
+            _previewPanel.Visibility = _showPreviewPanel ? Visibility.Visible : Visibility.Collapsed;
+            DockPanel.SetDock(_previewPanel, Dock.Right);
+            body.Children.Add(_previewPanel);
+            var frame = new Border { CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Child = _grid, ClipToBounds = true };
+            frame.SetResourceReference(Border.BorderBrushProperty, "Sh.Border");
+            frame.SetResourceReference(Border.BackgroundProperty, "Sh.Bg");
+            body.Children.Add(frame);
+            return body;
+        }
+
+        ContextMenu BuildColumnsMenu()
+        {
+            var menu = new ContextMenu();
+            foreach (var (key, text) in Optional)
+            {
+                var k = key;
+                var item = new MenuItem { Header = text, IsCheckable = true, IsChecked = _shown.Contains(k) };
+                item.Click += (o, e) => SetColumnShown(k, item.IsChecked);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new Separator());
+            var preview = new MenuItem { Header = "Symbol preview panel", IsCheckable = true, IsChecked = _showPreviewPanel };
+            preview.Click += (o, e) =>
+            {
+                _showPreviewPanel = preview.IsChecked;
+                _previewPanel.Visibility = _showPreviewPanel ? Visibility.Visible : Visibility.Collapsed;
+                if (_showPreviewPanel) _shown.Add("preview"); else _shown.Remove("preview");
+                SaveShown();
+            };
+            menu.Items.Add(preview);
+            return menu;
+        }
+
+        void SetColumnShown(string key, bool shown)
+        {
+            if (shown) _shown.Add(key); else _shown.Remove(key);
+            if (_cols.TryGetValue(key, out var col)) col.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+            SaveShown();
+        }
+
+        void SaveShown()
+        {
+            _settings.ShownColumns = string.Join(",", _shown);
+            Settings.TrySave(_settings);
+        }
+
+        DataGridColumn Col(string key, DataGridColumn col, string tooltip)
+        {
+            var header = Theme.Text(col.Header as string ?? "", Theme.SmallSize);
+            header.FontWeight = FontWeights.SemiBold;
+            header.ToolTip = tooltip;
+            col.Header = header;
+            _cols[key] = col;
+            if (Optional.Any(o => o.key == key)) col.Visibility = _shown.Contains(key) ? Visibility.Visible : Visibility.Collapsed;
+            _grid.Columns.Add(col);
+            return col;
         }
 
         void BuildGrid()
@@ -276,329 +429,206 @@ namespace SmartHostMEP.UI
             _grid.CanUserAddRows = false;
             _grid.CanUserDeleteRows = false;
             _grid.CanUserReorderColumns = false;
-            // Several rows can be selected (Ctrl+click, Shift+click, Ctrl+A) and edited together.
+            _grid.CanUserResizeRows = false;
             _grid.SelectionMode = DataGridSelectionMode.Extended;
             _grid.SelectionUnit = DataGridSelectionUnit.FullRow;
-            _grid.SelectionChanged += (o, e) => { UpdateSelectionLabel(); ShowPreview(null); };
-            // Ctrl/Shift+click work anywhere on a row (also over the dropdowns), and a change made
-            // in one of several selected rows is applied to all of them.
+            _grid.SelectionChanged += (o, e) => { UpdateSelectionBar(); ShowPreview(null); };
             _grid.PreviewMouseLeftButtonDown += OnGridMouseDown;
+            _grid.PreviewMouseRightButtonDown += OnGridRightMouseDown;
             _grid.PreviewKeyDown += (o, e) => { if (e.Key == Key.Up || e.Key == Key.Down || e.Key == Key.PageUp || e.Key == Key.PageDown) _editGroup = null; };
+            _grid.BeginningEdit += (o, e) => _editing = true;
+            _grid.CellEditEnding += (o, e) => _editing = false;
             _grid.MouseLeave += (o, e) => ShowPreview(null);
-            _grid.HeadersVisibility = DataGridHeadersVisibility.Column;
-            _grid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
-            _grid.HorizontalGridLinesBrush = PanelBorder;
-            _grid.BorderThickness = new Thickness(0);
-            _grid.Background = Brushes.White;
-            _grid.RowBackground = Brushes.White;
-            _grid.AlternatingRowBackground = Panel;
-            _grid.RowHeight = 30;
-            _grid.ColumnHeaderStyle = HeaderStyle();
+            _grid.RowHeight = 36;
             _grid.RowStyle = RowStyle();
             _grid.EnableRowVirtualization = true;
+            _grid.ContextMenu = BuildRowMenu();
             VirtualizingPanel.SetVirtualizationMode(_grid, VirtualizationMode.Recycling);
             VirtualizingPanel.SetIsVirtualizingWhenGrouping(_grid, true);
             _grid.ItemsSource = _s.Rows;
             _grid.GroupStyle.Add(new GroupStyle { HeaderTemplate = GroupHeaderTemplate() });
 
-            // 1. CAD Block (read-only)
-            _grid.Columns.Add(new DataGridTextColumn
+            // Block: name + count badge (tooltip: full name and symbol).
+            var blockCell = new FrameworkElementFactory(typeof(DockPanel));
+            blockCell.SetValue(DockPanel.LastChildFillProperty, true);
+            blockCell.SetValue(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.SymbolToolTip)));
+            blockCell.SetValue(Panel.BackgroundProperty, Brushes.Transparent);
+            var badge = new FrameworkElementFactory(typeof(Border));
+            badge.SetValue(DockPanel.DockProperty, Dock.Right);
+            badge.SetValue(Border.CornerRadiusProperty, new CornerRadius(9));
+            badge.SetValue(Border.PaddingProperty, new Thickness(7, 0, 7, 1));
+            badge.SetValue(FrameworkElement.MarginProperty, new Thickness(S, 0, 0, 0));
+            badge.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            badge.SetResourceReference(Border.BackgroundProperty, "Sh.Surface2");
+            var count = new FrameworkElementFactory(typeof(TextBlock));
+            count.SetBinding(TextBlock.TextProperty, new Binding(nameof(BlockRow.Count)) { Mode = BindingMode.OneWay, StringFormat = "{0:N0}" });
+            count.SetValue(TextBlock.FontSizeProperty, Theme.SmallSize);
+            count.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Muted");
+            badge.AppendChild(count);
+            var name = new FrameworkElementFactory(typeof(TextBlock));
+            name.SetBinding(TextBlock.TextProperty, new Binding(nameof(BlockRow.BlockName)) { Mode = BindingMode.OneWay });
+            name.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis);
+            name.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            blockCell.AppendChild(badge);
+            blockCell.AppendChild(name);
+            Col("block", new DataGridTemplateColumn
             {
-                Header = "CAD Block",
-                Binding = new Binding(nameof(BlockRow.Display)) { Mode = BindingMode.OneWay },
-                IsReadOnly = true,
+                Header = "Block",
+                CellTemplate = new DataTemplate { VisualTree = blockCell },
                 SortMemberPath = nameof(BlockRow.BlockName),
-                // Takes the remaining width; long names end in "..." (full name in the tooltip).
+                IsReadOnly = true,
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star),
-                MinWidth = 200,
-                ElementStyle = TrimmedTextStyle(),
-            });
+                MinWidth = 220,
+            }, "CAD block name and how many times it is in the DWG. Hover to see its symbol.");
 
-            // Category (auto-detected from the block name; change it if the guess is wrong)
-            _grid.Columns.Add(new DataGridComboBoxColumn
-            {
-                Header = "Category",
-                ItemsSource = BlockCategories.All,
-                SelectedItemBinding = new Binding(nameof(BlockRow.Category)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                SortMemberPath = nameof(BlockRow.CategoryOrder),
-                Width = new DataGridLength(115),
-            });
-
-            // 2. Revit Family (searchable dropdown, always editable in the cell)
+            // Revit Family : Type (searchable).
             var combo = new FrameworkElementFactory(typeof(FilterComboBox));
             combo.SetBinding(ItemsControl.ItemsSourceProperty, new Binding(nameof(BlockRow.Options)) { Mode = BindingMode.OneWay });
-            combo.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(BlockRow.Family))
+            combo.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(BlockRow.Family)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
+            combo.SetValue(FrameworkElement.HeightProperty, 28.0);
+            combo.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 1, 0, 1));
+            Col("family", new DataGridTemplateColumn
             {
-                Mode = BindingMode.TwoWay,
-                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-            });
-            combo.SetValue(FrameworkElement.MarginProperty, new Thickness(1));
-            combo.SetValue(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center);
-            _grid.Columns.Add(new DataGridTemplateColumn
-            {
-                Header = "Revit Family  (Family : Type)",
+                Header = "Revit Family : Type",
                 CellTemplate = new DataTemplate { VisualTree = combo },
                 SortMemberPath = nameof(BlockRow.FamilyLabel),
-                // Fixed width so long block names can never squeeze the dropdown.
-                Width = new DataGridLength(400),
-                MinWidth = 250,
-            });
+                Width = new DataGridLength(420),
+                MinWidth = 260,
+            }, "The family type placed for this block. Type to search. (Skip) = not placed.");
 
-            // Auto-match by symbol geometry: score and source view of the selected family, and the
-            // top 3 families (picking one selects it; manual picks are remembered for next time).
-            var scoreStyle = new Style(typeof(TextBlock));
-            scoreStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            scoreStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
-            _grid.Columns.Add(new DataGridTextColumn
-            {
-                Header = new TextBlock { Text = "Score", ToolTip = "Symbol match score (0-100) of the selected family. (n) = best candidate, not selected (below the auto-match score). ? = ambiguous: Needs Review. Learned = your earlier manual match." },
-                Binding = new Binding(nameof(BlockRow.ScoreText)) { Mode = BindingMode.OneWay },
-                IsReadOnly = true,
-                Width = new DataGridLength(62),
-                ElementStyle = scoreStyle,
-            });
-            _grid.Columns.Add(new DataGridTextColumn
-            {
-                Header = new TextBlock { Text = "Source View", ToolTip = "The family view whose symbol was matched (Ref. Level, Front or Back)" },
-                Binding = new Binding(nameof(BlockRow.SourceView)) { Mode = BindingMode.OneWay },
-                IsReadOnly = true,
-                Width = new DataGridLength(90),
-                ElementStyle = TrimmedPlainStyle(),
-            });
+            Col("host", ComboColumn("Host", BlockRow.HostChoices, nameof(BlockRow.Host), 210),
+                "What the family is hosted on: none (level), ceiling, slab above/below, wall, reference plane, face or vertical plane.");
+            Col("elevation", NumberColumn("Elevation (mm)", nameof(BlockRow.Elevation), nameof(BlockRow.ElevationInvalid), nameof(BlockRow.ElevationError), 120),
+                "Height of the family above the row's level, in mm.");
+
+            Col("rotation", NumberColumn("Rotation (deg)", nameof(BlockRow.Rotation), nameof(BlockRow.RotationInvalid), nameof(BlockRow.RotationError), 110),
+                "Extra rotation added to the block's own rotation, in degrees.");
+            Col("facing", ComboColumn("Facing", BlockRow.FacingChoices, nameof(BlockRow.Facing), 90),
+                "Reference Plane host: Down for ceiling devices, Up for floor devices.");
+            Col("level", ComboColumn("Level", _s.LevelNames, nameof(BlockRow.Level), 150),
+                "Level of this row (the Level above, unless changed here).");
+            Col("category", ComboColumn("Category", BlockCategories.All, nameof(BlockRow.Category), 120),
+                "Discipline of the block, used for grouping (guessed from its name).");
+            Col("placeat", ComboColumn("Place At", BlockRow.PlaceAtChoices, nameof(BlockRow.PlaceAt), 120),
+                "Symbol centre (default) or the block's base point.");
+            Col("score", TextColumn("Score", nameof(BlockRow.ScoreText), 70, center: true),
+                "Auto-match score (0-100) of the selected family. (n) = best candidate, not selected. ? = ambiguous. Learned = your earlier choice.");
+            Col("sourceview", TextColumn("Source View", nameof(BlockRow.SourceView), 110),
+                "The family view whose symbol matched.");
             var top = new FrameworkElementFactory(typeof(ComboBox));
             top.SetBinding(ItemsControl.ItemsSourceProperty, new Binding(nameof(BlockRow.Candidates)) { Mode = BindingMode.OneWay });
-            top.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(BlockRow.SelectedCandidate))
-            {
-                Mode = BindingMode.TwoWay,
-                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-            });
+            top.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(BlockRow.SelectedCandidate)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
             top.SetValue(ItemsControl.DisplayMemberPathProperty, nameof(SymbolCandidate.Text));
-            top.SetValue(FrameworkElement.MarginProperty, new Thickness(1));
-            top.SetValue(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center);
-            _grid.Columns.Add(new DataGridTemplateColumn
+            top.SetValue(FrameworkElement.HeightProperty, 28.0);
+            Col("top3", new DataGridTemplateColumn
             {
-                Header = new TextBlock { Text = "Top 3 Candidates", ToolTip = "The best families by symbol after Auto-match (score  Family : Type). Pick one to use it." },
+                Header = "Top 3 Candidates",
                 CellTemplate = new DataTemplate { VisualTree = top },
-                Width = new DataGridLength(250),
-            });
-
-            // 3. Level + Elevation From Level (mm), validated
-            _grid.Columns.Add(new DataGridComboBoxColumn
-            {
-                Header = "Level",
-                ItemsSource = _s.LevelNames,
-                SelectedItemBinding = new Binding(nameof(BlockRow.Level)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                Width = new DataGridLength(140),
-            });
-            _grid.Columns.Add(NumberColumn("Elevation From Level (mm)", nameof(BlockRow.Elevation), 160));
-
-            // Optional extras at the end
-            _grid.Columns.Add(NumberColumn("Rotation (deg)", nameof(BlockRow.Rotation), 95));
-            _grid.Columns.Add(new DataGridComboBoxColumn
-            {
-                Header = "Host Type",
-                ItemsSource = BlockRow.HostChoices,
-                SelectedItemBinding = new Binding(nameof(BlockRow.Host)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                Width = new DataGridLength(200),
-            });
-            _grid.Columns.Add(new DataGridComboBoxColumn
-            {
-                Header = "Facing",
-                ItemsSource = BlockRow.FacingChoices,
-                SelectedItemBinding = new Binding(nameof(BlockRow.Facing)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                Width = new DataGridLength(70),
-            });
-            // Base point (block insertion point) or the centre of the drawn symbol, for blocks whose
-            // base point is away from the symbol (e.g. on the wall line).
-            _grid.Columns.Add(new DataGridComboBoxColumn
-            {
-                Header = "Place At",
-                ItemsSource = BlockRow.PlaceAtChoices,
-                SelectedItemBinding = new Binding(nameof(BlockRow.PlaceAt)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                Width = new DataGridLength(105),
-            });
-
-            // Filled by Preview: which host each block would use (check before Run).
-            var detectedStyle = new Style(typeof(TextBlock));
-            detectedStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
-            detectedStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            detectedStyle.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.DetectedHost))));
-            _grid.Columns.Add(new DataGridTextColumn
-            {
-                Header = "Detected Host (Preview)",
-                Binding = new Binding(nameof(BlockRow.DetectedHost)) { Mode = BindingMode.OneWay },
-                IsReadOnly = true,
-                Width = new DataGridLength(300),
-                ElementStyle = detectedStyle,
-            });
+                Width = new DataGridLength(260),
+            }, "The best families by symbol after Auto-match (score  Family : Type). Pick one to use it.");
+            Col("detected", TextColumn("Detected Host", nameof(BlockRow.DetectedHost), 280),
+                "Filled by Preview: the host each block would use.");
+            RestoreColumnWidths();
         }
 
-        static Style HeaderStyle()
+        DataGridColumn ComboColumn(string header, System.Collections.IEnumerable items, string property, double width)
         {
-            var style = new Style(typeof(DataGridColumnHeader));
-            style.Setters.Add(new Setter(Control.BackgroundProperty, AccentLight));
-            style.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
-            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 6, 6, 6)));
-            style.Setters.Add(new Setter(Control.BorderBrushProperty, PanelBorder));
-            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
-            return style;
+            var style = new Style(typeof(ComboBox), TryFindResource(typeof(ComboBox)) as Style);
+            style.Setters.Add(new Setter(FrameworkElement.HeightProperty, 28.0));
+            return new DataGridComboBoxColumn
+            {
+                Header = header,
+                ItemsSource = items,
+                SelectedItemBinding = new Binding(property) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = new DataGridLength(width),
+                EditingElementStyle = style,
+            };
         }
 
-        /// <summary>Skipped rows are greyed so the mapped ones stand out.</summary>
+        static DataGridColumn TextColumn(string header, string property, double width, bool center = false)
+        {
+            var style = new Style(typeof(TextBlock));
+            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            if (center) style.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
+            style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(property)));
+            return new DataGridTextColumn
+            {
+                Header = header,
+                Binding = new Binding(property) { Mode = BindingMode.OneWay },
+                IsReadOnly = true,
+                Width = new DataGridLength(width),
+                ElementStyle = style,
+            };
+        }
+
+        /// <summary>Number column with inline validation: red border and the problem as tooltip.</summary>
+        DataGridColumn NumberColumn(string header, string property, string invalidProperty, string errorProperty, double width)
+        {
+            var element = new Style(typeof(TextBlock));
+            element.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Right));
+            element.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            var editing = new Style(typeof(TextBox), TryFindResource(typeof(TextBox)) as Style);
+            editing.Setters.Add(new Setter(FrameworkElement.HeightProperty, 28.0));
+            editing.Setters.Add(new Setter(TextBox.TextAlignmentProperty, TextAlignment.Right));
+            var cell = new Style(typeof(DataGridCell), TryFindResource(typeof(DataGridCell)) as Style);
+            var bad = new DataTrigger { Binding = new Binding(invalidProperty), Value = true };
+            bad.Setters.Add(new Setter(Control.BorderBrushProperty, TryFindResource("Sh.Danger") ?? Brushes.Firebrick));
+            bad.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1.5)));
+            bad.Setters.Add(new Setter(Control.BackgroundProperty, TryFindResource("Sh.DangerSoft") ?? Brushes.MistyRose));
+            bad.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(errorProperty)));
+            cell.Triggers.Add(bad);
+            return new DataGridTextColumn
+            {
+                Header = header,
+                Binding = new Binding(property) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                ElementStyle = element,
+                EditingElementStyle = editing,
+                CellStyle = cell,
+                Width = new DataGridLength(width),
+            };
+        }
+
+        /// <summary>Selected rows highlighted; (Skip) rows greyed out; hovering shows the symbol in the preview panel.</summary>
         Style RowStyle()
         {
             var style = new Style(typeof(DataGridRow));
-            // Hovering a row shows its symbol in the preview panel.
-            style.Setters.Add(new EventSetter(UIElement.MouseEnterEvent, new System.Windows.Input.MouseEventHandler(
-                (o, e) => ShowPreview((o as DataGridRow)?.Item as BlockRow))));
+            style.Setters.Add(new EventSetter(UIElement.MouseEnterEvent, new MouseEventHandler((o, e) => ShowPreview((o as DataGridRow)?.Item as BlockRow))));
             var skipped = new DataTrigger { Binding = new Binding(nameof(BlockRow.IsSkipped)), Value = true };
-            skipped.Setters.Add(new Setter(Control.ForegroundProperty, Muted));
+            skipped.Setters.Add(new Setter(UIElement.OpacityProperty, 0.55));
             style.Triggers.Add(skipped);
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Control.BackgroundProperty, TryFindResource("Sh.Hover")));
+            style.Triggers.Add(hover);
+            var selected = new Trigger { Property = DataGridRow.IsSelectedProperty, Value = true };
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, TryFindResource("Sh.Selection")));
+            selected.Setters.Add(new Setter(UIElement.OpacityProperty, 1.0));
+            style.Triggers.Add(selected);
             return style;
         }
 
-        static Style TrimmedPlainStyle()
+        /// <summary>Group header: "ELECTRICAL  23".</summary>
+        static DataTemplate GroupHeaderTemplate()
         {
-            var style = new Style(typeof(TextBlock));
-            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
-            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            return style;
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetResourceReference(Border.BackgroundProperty, "Sh.Surface");
+            border.SetValue(Border.PaddingProperty, new Thickness(S, S / 2, S, S / 2));
+            var panel = new FrameworkElementFactory(typeof(StackPanel));
+            panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+            var name = new FrameworkElementFactory(typeof(TextBlock));
+            name.SetBinding(TextBlock.TextProperty, new Binding("Name"));
+            name.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
+            name.SetValue(TextBlock.FontSizeProperty, Theme.SmallSize);
+            name.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Accent");
+            var count = new FrameworkElementFactory(typeof(TextBlock));
+            count.SetBinding(TextBlock.TextProperty, new Binding("ItemCount") { StringFormat = "   {0} block type(s)" });
+            count.SetValue(TextBlock.FontSizeProperty, Theme.SmallSize);
+            count.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Muted");
+            panel.AppendChild(name);
+            panel.AppendChild(count);
+            border.AppendChild(panel);
+            return new DataTemplate { VisualTree = border };
         }
-
-        static Style TrimmedTextStyle()
-        {
-            var style = new Style(typeof(TextBlock));
-            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
-            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            style.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(BlockRow.SymbolToolTip))));
-            return style;
-        }
-
-        const string Keep = "(keep)";
-        readonly TextBlock _selectedLabel = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 10, 0) };
-        ComboBox _bulkHost, _bulkLevel, _bulkFacing, _bulkCategory;
-        TextBox _bulkElevation;
-
-        static ComboBox KeepCombo(IEnumerable<string> items, double width)
-        {
-            var cb = new ComboBox { Width = width, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
-            cb.Items.Add(Keep);
-            foreach (var i in items) cb.Items.Add(i);
-            cb.SelectedIndex = 0;
-            return cb;
-        }
-
-        static TextBlock BarLabel(string text) =>
-            new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
-
-        UIElement BuildBulkBar()
-        {
-            var bar = new WrapPanel();
-            _bulkHost = KeepCombo(BlockRow.HostChoices, 200);
-            _bulkLevel = KeepCombo(_s.LevelNames, 140);
-            _bulkElevation = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0),
-                                           ToolTip = "Leave empty to keep each row's elevation" };
-            _bulkFacing = KeepCombo(BlockRow.FacingChoices, 70);
-            _bulkCategory = KeepCombo(BlockCategories.All, 115);
-            var apply = MakeButton("Apply to selected rows", (o, e) => ApplyToSelected(),
-                "Set the chosen values on every selected row; '(keep)' fields are not changed", primary: true);
-            var selectAll = MakeButton("Select all shown", (o, e) => { _grid.Focus(); _grid.SelectAll(); },
-                "Select every row currently shown (same as Ctrl+A in the grid)");
-            // Global switch: every row -> Reference Plane (unticking restores each row's previous host).
-            var allPlanes = new CheckBox
-            {
-                Content = "Reference planes for all rows",
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(10, 0, 0, 0),
-                ToolTip = "Sets Host Type to 'Reference Plane (auto-create)' for every row. Untick to restore the previous Host Types.",
-                IsChecked = _s.Rows.Count > 0 && _s.Rows.All(r => r.Host == BlockRow.RefPlaneLabel),
-            };
-            allPlanes.Checked += (o, e) => SetAllReferencePlanes(true);
-            allPlanes.Unchecked += (o, e) => SetAllReferencePlanes(false);
-
-            bar.Children.Add(_selectedLabel);
-            bar.Children.Add(BarLabel("Host Type"));
-            bar.Children.Add(_bulkHost);
-            bar.Children.Add(BarLabel("Level"));
-            bar.Children.Add(_bulkLevel);
-            bar.Children.Add(BarLabel("Elevation (mm)"));
-            bar.Children.Add(_bulkElevation);
-            bar.Children.Add(BarLabel("Facing"));
-            bar.Children.Add(_bulkFacing);
-            bar.Children.Add(BarLabel("Category"));
-            bar.Children.Add(_bulkCategory);
-            bar.Children.Add(apply);
-            bar.Children.Add(selectAll);
-            bar.Children.Add(allPlanes);
-            UpdateSelectionLabel();
-            return bar;
-        }
-
-        void UpdateSelectionLabel()
-        {
-            int n = _grid.SelectedItems.Count;
-            _selectedLabel.Text = n == 0 ? "Select rows (Ctrl/Shift+click, Ctrl+A), then set:"
-                                : n == 1 ? "1 row selected - set:"
-                                : $"{n} rows selected - edit any of them to change all, or set:";
-        }
-
-        void ApplyToSelected()
-        {
-            CommitEdits();
-            var rows = _grid.SelectedItems.OfType<BlockRow>().ToList();
-            if (rows.Count == 0)
-            {
-                MessageBox.Show(this, "Select one or more rows first (Ctrl+click, Shift+click, or Ctrl+A for all shown rows).",
-                    "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            string host = _bulkHost.SelectedItem as string, level = _bulkLevel.SelectedItem as string,
-                   facing = _bulkFacing.SelectedItem as string, category = _bulkCategory.SelectedItem as string;
-            var elevText = (_bulkElevation.Text ?? "").Trim();
-            if (elevText.Length > 0 && Mapping.ParseNumber(elevText) == null)
-            {
-                MessageBox.Show(this, "Elevation must be a number (mm), or empty to keep each row's value.",
-                    "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            bool any = host != Keep || level != Keep || facing != Keep || category != Keep || elevText.Length > 0;
-            if (!any)
-            {
-                MessageBox.Show(this, "Choose at least one value to set (Host Type, Level, Elevation, Facing or Category).",
-                    "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            foreach (var r in rows)
-            {
-                if (host != Keep) { r.Host = host; r.HostBeforeAll = null; }
-                if (level != Keep) r.Level = level;
-                if (elevText.Length > 0) r.Elevation = elevText;
-                if (facing != Keep) r.Facing = facing;
-                if (category != Keep) r.Category = category;
-            }
-        }
-
-        void SetAllReferencePlanes(bool on)
-        {
-            CommitEdits();
-            foreach (var r in _s.Rows)
-            {
-                if (on)
-                {
-                    if (r.Host != BlockRow.RefPlaneLabel) r.HostBeforeAll = r.Host;
-                    r.Host = BlockRow.RefPlaneLabel;
-                }
-                else if (r.HostBeforeAll != null)
-                {
-                    r.Host = r.HostBeforeAll;
-                    r.HostBeforeAll = null;
-                }
-            }
-        }
-
-        const string AllCategories = "All categories";
-        string _findText = "";
-        string _showCategory;   // null = all
 
         void SetUpRowView()
         {
@@ -609,7 +639,6 @@ namespace SmartHostMEP.UI
             view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BlockRow.Category)));
             view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(BlockRow.CategoryOrder), System.ComponentModel.ListSortDirection.Ascending));
             view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(BlockRow.BlockName), System.ComponentModel.ListSortDirection.Ascending));
-            // Re-group / re-sort when a row's category is changed in the grid.
             if (view is System.ComponentModel.ICollectionViewLiveShaping live)
             {
                 if (live.CanChangeLiveGrouping)
@@ -624,82 +653,525 @@ namespace SmartHostMEP.UI
                     live.LiveSortingProperties.Add(nameof(BlockRow.CategoryOrder));
                     live.IsLiveSorting = true;
                 }
+                if (live.CanChangeLiveFiltering)
+                {
+                    // Mapped / Unmapped chips: a row leaves the view when its family changes.
+                    live.LiveFilteringProperties.Clear();
+                    live.LiveFilteringProperties.Add(nameof(BlockRow.IsSkipped));
+                }
             }
-        }
-
-        /// <summary>Group header: "Electrical  -  23 blocks".</summary>
-        static DataTemplate GroupHeaderTemplate()
-        {
-            var border = new FrameworkElementFactory(typeof(Border));
-            border.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(232, 238, 247)));
-            border.SetValue(Border.PaddingProperty, new Thickness(6, 3, 6, 3));
-            var panel = new FrameworkElementFactory(typeof(StackPanel));
-            panel.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
-            var name = new FrameworkElementFactory(typeof(TextBlock));
-            name.SetBinding(TextBlock.TextProperty, new Binding("Name"));
-            name.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
-            var count = new FrameworkElementFactory(typeof(TextBlock));
-            count.SetBinding(TextBlock.TextProperty, new Binding("ItemCount") { StringFormat = "   -   {0} block(s)" });
-            count.SetValue(TextBlock.ForegroundProperty, Brushes.DimGray);
-            panel.AppendChild(name);
-            panel.AppendChild(count);
-            border.AppendChild(panel);
-            return new DataTemplate { VisualTree = border };
         }
 
         void ApplyFilter()
         {
             CommitEdits();   // changing the filter during a cell edit throws
             var view = CollectionViewSource.GetDefaultView(_s.Rows);
-            var terms = (_findText ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            var cat = _showCategory;
-            view.Filter = terms.Length == 0 && cat == null ? null : (Predicate<object>)(o =>
+            var terms = (_search.Text ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var show = _show;
+            if (view is System.ComponentModel.ICollectionViewLiveShaping live && live.CanChangeLiveFiltering)
+                live.IsLiveFiltering = show != RowFilter.All;
+            view.Filter = terms.Length == 0 && show == RowFilter.All ? null : (Predicate<object>)(o =>
             {
                 var r = (BlockRow)o;
-                if (cat != null && r.Category != cat) return false;
+                if (show == RowFilter.Mapped && r.IsSkipped) return false;
+                if (show == RowFilter.Unmapped && !r.IsSkipped) return false;
                 var hay = r.BlockName + " " + r.FamilyLabel;
                 return terms.All(t => hay.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
             });
         }
 
-        void SkipShownRows()
+        // ---- Symbol preview panel (optional) ----------------------------------------------
+
+        readonly Image _previewImage = new Image { Width = 200, Height = 200, Stretch = Stretch.Uniform };
+        readonly TextBlock _previewName = new TextBlock { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, S, 0, 2) };
+        readonly TextBlock _previewInfo = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        readonly TextBlock _previewEmpty = new TextBlock
         {
-            CommitEdits();
-            var shown = CollectionViewSource.GetDefaultView(_s.Rows).Cast<BlockRow>().Where(r => !r.Family.IsSkip).ToList();
-            if (shown.Count == 0) return;
-            if (MessageBox.Show(this, $"Set {shown.Count} shown row(s) to (Skip)?", "SmartHost MEP",
-                    MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
-            foreach (var r in shown) r.Family = FamilyOption.Skip;
+            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(1.5 * S),
+        };
+
+        Border BuildPreviewPanel()
+        {
+            _previewInfo.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Muted");
+            _previewEmpty.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Muted");
+            var frame = new Grid { Width = 216, Height = 216 };
+            frame.Children.Add(_previewImage);
+            frame.Children.Add(_previewEmpty);
+            var framed = new Border { CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Child = frame };
+            framed.SetResourceReference(Border.BorderBrushProperty, "Sh.Border");
+            framed.SetResourceReference(Border.BackgroundProperty, "Sh.Bg");
+            var stack = new StackPanel();
+            stack.Children.Add(Theme.Text("SYMBOL PREVIEW", Theme.SmallSize, muted: true, bold: true));
+            framed.Margin = new Thickness(0, S, 0, 0);
+            stack.Children.Add(framed);
+            stack.Children.Add(_previewName);
+            stack.Children.Add(_previewInfo);
+            ShowPreview(null);
+            var card = Theme.Card(stack, new Thickness(1.5 * S));
+            card.Width = 252;
+            card.Margin = new Thickness(S, 0, 0, 0);
+            return card;
         }
 
-        static DataGridTextColumn NumberColumn(string header, string property, double width)
+        void ShowPreview(BlockRow row)
         {
-            var errorStyle = new Style(typeof(TextBlock));
-            errorStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Right));
-            errorStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-            var trigger = new Trigger { Property = Validation.HasErrorProperty, Value = true };
-            trigger.Setters.Add(new Setter(TextBlock.BackgroundProperty, new SolidColorBrush(Color.FromRgb(255, 220, 220))));
-            trigger.Setters.Add(new Setter(FrameworkElement.ToolTipProperty,
-                new Binding("(Validation.Errors)[0].ErrorContent") { RelativeSource = RelativeSource.Self }));
-            errorStyle.Triggers.Add(trigger);
-            return new DataGridTextColumn
+            if (!_showPreviewPanel) return;
+            row = row ?? _grid.SelectedItem as BlockRow;
+            if (row == null)
             {
-                Header = header,
-                Binding = new Binding(property)
-                {
-                    Mode = BindingMode.TwoWay,
-                    ValidatesOnDataErrors = true,
-                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
-                },
-                ElementStyle = errorStyle,
-                Width = new DataGridLength(width),
-            };
+                _previewImage.Source = null;
+                _previewEmpty.Text = "Hover over or select a block to see its 2D symbol.";
+                _previewEmpty.Visibility = Visibility.Visible;
+                _previewName.Text = "";
+                _previewInfo.Text = "";
+                return;
+            }
+            var img = row.SymbolImage;
+            _previewImage.Source = img;
+            _previewEmpty.Text = "No line work to preview\n(the block may contain only text, hatches or solids).";
+            _previewEmpty.Visibility = img == null ? Visibility.Visible : Visibility.Collapsed;
+            _previewName.Text = row.BlockName;
+            var size = row.Symbol?.SizeText() ?? "";
+            _previewInfo.Text = $"{row.Count} instance(s)  ·  {row.Category}" + (size.Length > 0 ? $"\nSize: {size}" : "") +
+                                (row.IsSkipped ? "\nNot mapped (Skip)" : "\n" + row.FamilyLabel);
         }
+
+        // ---- Right-click menu --------------------------------------------------------------
+
+        BlockRow _menuRow;
+        BlockRow _copied;
+        MenuItem _paste;
+
+        ContextMenu BuildRowMenu()
+        {
+            var menu = new ContextMenu();
+            MenuItem Item(string text, Action act, string gesture = null)
+            {
+                var m = new MenuItem { Header = text, InputGestureText = gesture ?? "" };
+                m.Click += (o, e) => { CommitEdits(); act(); };
+                menu.Items.Add(m);
+                return m;
+            }
+            Item("Apply this row to selected", () =>
+            {
+                if (_menuRow == null) return;
+                foreach (var r in _grid.SelectedItems.OfType<BlockRow>().ToList())
+                {
+                    if (ReferenceEquals(r, _menuRow)) continue;
+                    r.Family = _menuRow.Family;
+                    r.Host = _menuRow.Host;
+                    r.Elevation = _menuRow.Elevation;
+                    MappingSession.UseFamilyCategory(r);
+                }
+            });
+            Item("Skip selected", SkipSelected, "Del");
+            menu.Items.Add(new Separator());
+            Item("Copy settings from this row", () => { _copied = _menuRow; }, "Ctrl+C");
+            _paste = Item("Paste settings to selected", PasteSettings, "Ctrl+V");
+            menu.Items.Add(new Separator());
+            Item("Select all shown", () => { _grid.Focus(); _grid.SelectAll(); }, "Ctrl+A");
+            Item("Clear all families", ClearFamilies);
+            menu.Opened += (o, e) =>
+            {
+                _paste.IsEnabled = _copied != null;
+                _paste.Header = _copied != null ? $"Paste settings of '{Short(_copied.BlockName)}' to selected" : "Paste settings to selected";
+            };
+            return menu;
+        }
+
+        static string Short(string s) => s.Length > 30 ? s.Substring(0, 28) + "..." : s;
+
+        /// <summary>Host, Elevation, Rotation, Facing, Level and Place At of the copied row (not its family).</summary>
+        void PasteSettings()
+        {
+            if (_copied == null) return;
+            foreach (var r in _grid.SelectedItems.OfType<BlockRow>().ToList())
+            {
+                if (ReferenceEquals(r, _copied)) continue;
+                r.Host = _copied.Host;
+                r.Elevation = _copied.Elevation;
+                r.Rotation = _copied.Rotation;
+                r.Facing = _copied.Facing;
+                r.Level = _copied.Level;
+                r.PlaceAt = _copied.PlaceAt;
+            }
+        }
+
+        void OnGridRightMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            var rowEl = Ancestor<DataGridRow>(e.OriginalSource as DependencyObject);
+            _menuRow = rowEl?.Item as BlockRow;
+            if (_menuRow != null && !_grid.SelectedItems.Contains(_menuRow))
+            {
+                _grid.SelectedItems.Clear();
+                _grid.SelectedItems.Add(_menuRow);
+            }
+        }
+
+        // ---- 5. Summary / progress -----------------------------------------------------------
+
+        readonly TextBlock _summary = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        readonly TextBlock _message = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2 * S, 0, 0, 0) };
+        readonly Grid _summaryRow = new Grid { Margin = new Thickness(0, S, 0, S), MinHeight = 32 };
+        readonly DockPanel _summaryPanel = new DockPanel();
+        readonly DockPanel _progressPanel = new DockPanel { Visibility = Visibility.Collapsed };
+        readonly ProgressBar _bar = new ProgressBar { Minimum = 0, Maximum = 1000, VerticalAlignment = VerticalAlignment.Center };
+        readonly TextBlock _progressText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 2 * S, 0), MinWidth = 260 };
+        Button _progressCancel;
+
+        UIElement BuildSummaryRow()
+        {
+            _summaryPanel.Children.Add(_summary);
+            _summaryPanel.Children.Add(_message);
+            _progressCancel = Theme.Button(this, "Cancel", (o, e) => { _cancelRequested = true; _progressCancel.IsEnabled = false; _progressText.Text = "Stopping..."; },
+                "Stop: everything done so far is rolled back");
+            _progressCancel.Margin = new Thickness(2 * S, 0, 0, 0);
+            DockPanel.SetDock(_progressText, Dock.Left);
+            DockPanel.SetDock(_progressCancel, Dock.Right);
+            _progressPanel.Children.Add(_progressText);
+            _progressPanel.Children.Add(_progressCancel);
+            _progressPanel.Children.Add(_bar);
+            _summaryRow.Children.Add(_summaryPanel);
+            _summaryRow.Children.Add(_progressPanel);
+            return _summaryRow;
+        }
+
+        void UpdateStatus()
+        {
+            int mapped = _s.Rows.Count(r => !r.Family.IsSkip);
+            int skipped = _s.Rows.Count - mapped;
+            int elements = _s.Rows.Where(r => !r.Family.IsSkip).Sum(r => r.Count);
+            int bad = _s.Rows.Count(r => r.HasError);
+            _summary.Inlines.Clear();
+            _summary.Inlines.Add(new Run($"{mapped} mapped") { FontWeight = FontWeights.SemiBold });
+            _summary.Inlines.Add(new Run($", {skipped} skipped, "));
+            _summary.Inlines.Add(new Run($"{elements:N0} elements will be placed") { FontWeight = FontWeights.SemiBold });
+            if (bad > 0)
+            {
+                var r = new Run($"   ·   {bad} row(s) with an invalid number (red cells)");
+                r.SetResourceReference(TextElement.ForegroundProperty, "Sh.Danger");
+                _summary.Inlines.Add(r);
+            }
+            _chipAll.Content = $"All  {_s.Rows.Count}";
+            _chipMapped.Content = $"Mapped  {mapped}";
+            _chipUnmapped.Content = $"Unmapped  {skipped}";
+
+            var advancedProblem = ReadAdvanced();
+            string block = bad > 0 ? "Fix the red cells first."
+                         : mapped == 0 ? "Pick a family for at least one block."
+                         : advancedProblem;
+            if (_preview != null)
+            {
+                bool ok = block == null && !_busy;
+                _preview.IsEnabled = ok;
+                _run.IsEnabled = ok;
+                _footerHint.Text = block ?? "";
+            }
+        }
+
+        void ShowMessage(string text, string colorKey = "Sh.Muted")
+        {
+            _message.Text = text ?? "";
+            _message.SetResourceReference(TextBlock.ForegroundProperty, colorKey);
+        }
+
+        // ---- 6. Advanced ---------------------------------------------------------------------
+
+        readonly TextBox _slabRange = new TextBox { Width = 100 };
+        readonly TextBox _slabPlane = new TextBox { Width = 100 };
+        readonly TextBox _wallSearch = new TextBox { Width = 100 };
+        readonly TextBox _edgeSearch = new TextBox { Width = 100 };
+        readonly ComboBox _planePosition = new ComboBox { Width = 170, ItemsSource = new[] { "Snap to face", "Through block point" } };
+        readonly TextBox _lineSearch = new TextBox { Width = 100 };
+        readonly TextBox _reviewDistance = new TextBox { Width = 100 };
+        readonly CheckBox _showDetection = new CheckBox { Content = "Show detection" };
+        readonly CheckBox _nested = new CheckBox { Content = "Include nested blocks" };
+        Expander _advanced;
+
+        UIElement BuildAdvanced()
+        {
+            var wrap = new WrapPanel { Margin = new Thickness(0, S / 2, 0, 0) };
+            wrap.Children.Add(Field("Slab / ceiling search range (mm)", _slabRange,
+                "Slab (above) and Ceiling: look for a slab, beam or ceiling from the row's level up to this height."));
+            wrap.Children.Add(Field("Fallback plane height (mm)", _slabPlane,
+                "No slab or ceiling in range: the family goes on a reference plane at this height above the level (listed in Needs Review)."));
+            wrap.Children.Add(Field("Wall search (mm)", _wallSearch,
+                "Host Wall: the nearest wall within this plan distance of the block is used."));
+            wrap.Children.Add(Field("Vertical plane: wall/column search (mm)", _edgeSearch,
+                "Vertical plane: a Revit wall or column face within this distance of the block is used first."));
+            wrap.Children.Add(Field("Vertical plane position", _planePosition,
+                "Snap to face: the device sits on the wall face. Through block point: the plane stays at the block, parallel to the face."));
+            wrap.Children.Add(Field("DWG line search (mm)", _lineSearch,
+                "No Revit wall nearby: DWG lines within this distance of the block outline are scored and the best one is used."));
+            wrap.Children.Add(Field("Review if farther than (mm)", _reviewDistance,
+                "Distance check: any element placed farther than this from its CAD block is listed in Needs Review."));
+            var checks = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, S) };
+            _showDetection.ToolTip = "After Preview or Run, draw the line chosen for each vertical-plane block as magenta detail lines in the plan view.";
+            _nested.ToolTip = "Also list blocks nested inside other blocks. Changing it reads the DWG again.";
+            _nested.Margin = new Thickness(0, S, 0, 0);
+            checks.Children.Add(_showDetection);
+            checks.Children.Add(_nested);
+            wrap.Children.Add(checks);
+
+            ShowAdvanced();
+            foreach (var tb in new[] { _slabRange, _slabPlane, _wallSearch, _edgeSearch, _lineSearch, _reviewDistance })
+                tb.TextChanged += (o, e) => UpdateStatus();
+            _planePosition.SelectionChanged += (o, e) => UpdateStatus();
+            _showDetection.IsChecked = _settings.ShowDetection;
+            _showDetection.Checked += (o, e) => SetShowDetection(true);
+            _showDetection.Unchecked += (o, e) => SetShowDetection(false);
+            _nested.IsChecked = _s.IncludeNested;
+            _nested.Checked += (o, e) => ReloadNested(true);
+            _nested.Unchecked += (o, e) => ReloadNested(false);
+
+            _advanced = new Expander
+            {
+                Header = Theme.Text("Advanced", Theme.LabelSize, bold: true),
+                Content = wrap,
+                IsExpanded = _settings.AdvancedOpen,
+                Margin = new Thickness(0, 0, 0, 1.5 * S),
+                ToolTip = "Search ranges, fallback plane, snapping, distance check and detection lines",
+            };
+            _advanced.Expanded += (o, e) => { _settings.AdvancedOpen = true; Settings.TrySave(_settings); };
+            _advanced.Collapsed += (o, e) => { _settings.AdvancedOpen = false; Settings.TrySave(_settings); };
+            return _advanced;
+        }
+
+        void ReloadNested(bool on)
+        {
+            if (_s.IncludeNested == on) return;
+            _s.IncludeNested = on;
+            _settings.IncludeNestedBlocks = on;
+            Settings.TrySave(_settings);
+            Action = MappingAction.Reload;
+            Close();
+        }
+
+        void ShowAdvanced()
+        {
+            string F(double v) => v.ToString("0.#", Inv);
+            _slabRange.Text = F(_s.Slab.SearchRangeMm);
+            _slabPlane.Text = F(_s.Slab.FallbackPlaneMm);
+            _wallSearch.Text = F(_s.Slab.WallSearchMm);
+            _reviewDistance.Text = F(_s.Slab.ReviewDistanceMm);
+            _edgeSearch.Text = F(_s.Slab.EdgeSearchMm);
+            _planePosition.SelectedItem = Mapping.PlanePositionText(_s.Slab.PlanePosition);
+            _lineSearch.Text = F(_s.Slab.LineSearchMm);
+        }
+
+        /// <summary>Copies valid values into the session; invalid boxes get a red border and a tooltip.
+        /// Returns the first problem, or null.</summary>
+        string ReadAdvanced()
+        {
+            string problem = null;
+            double? Read(TextBox box, string what, bool positive)
+            {
+                var v = Mapping.ParseNumber(box.Text);
+                bool ok = v.HasValue && (box.Text ?? "").Trim().Length > 0 && (!positive || v.Value > 0);
+                var msg = ok ? null : $"{what} must be a number of mm{(positive ? " greater than 0" : "")}.";
+                MarkInvalid(box, msg);
+                if (!ok && problem == null) problem = "Advanced: " + msg;
+                return ok ? v : null;
+            }
+            var range = Read(_slabRange, "Slab / ceiling search range", true);
+            if (range.HasValue) _s.Slab.SearchRangeMm = range.Value;
+            var plane = Read(_slabPlane, "Fallback plane height", false);
+            if (plane.HasValue) _s.Slab.FallbackPlaneMm = plane.Value;
+            var wall = Read(_wallSearch, "Wall search", true);
+            if (wall.HasValue) _s.Slab.WallSearchMm = wall.Value;
+            var edge = Read(_edgeSearch, "Wall/column search", true);
+            if (edge.HasValue) _s.Slab.EdgeSearchMm = edge.Value;
+            var line = Read(_lineSearch, "DWG line search", true);
+            if (line.HasValue) _s.Slab.LineSearchMm = line.Value;
+            var review = Read(_reviewDistance, "Review distance", true);
+            if (review.HasValue) _s.Slab.ReviewDistanceMm = review.Value;
+            if (_planePosition.SelectedItem is string pos && Mapping.ParsePlanePosition(pos) is PlanePosition pp) _s.Slab.PlanePosition = pp;
+            if (problem != null && _advanced != null) _advanced.IsExpanded = true;
+            return problem;
+        }
+
+        void MarkInvalid(Control box, string error)
+        {
+            if (error == null)
+            {
+                box.SetResourceReference(Control.BorderBrushProperty, "Sh.Border");
+                box.ClearValue(Control.BorderThicknessProperty);
+            }
+            else
+            {
+                box.SetResourceReference(Control.BorderBrushProperty, "Sh.Danger");
+                box.BorderThickness = new Thickness(2);
+            }
+            var tip = box.Tag as string ?? box.ToolTip as string;
+            if (box.Tag == null) box.Tag = tip;   // the normal tooltip, kept to restore
+            box.ToolTip = error ?? tip;
+        }
+
+        void SetShowDetection(bool on)
+        {
+            _settings.ShowDetection = on;
+            Settings.TrySave(_settings);
+        }
+
+        // ---- 7. Footer -----------------------------------------------------------------------
+
+        Button _preview, _run, _cancel;
+        readonly TextBlock _footerHint = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 2 * S, 0) };
+
+        UIElement BuildFooter()
+        {
+            var bar = new DockPanel { LastChildFill = false };
+            var left = new StackPanel { Orientation = Orientation.Horizontal };
+            left.Children.Add(Theme.Button(this, "Load mapping...", (o, e) => LoadMapping(), "Load a saved mapping (XLSX or CSV) into the grid, families included"));
+            left.Children.Add(Theme.Button(this, "Save mapping...", (o, e) => SaveMapping(), "Save the grid as a mapping file (XLSX or CSV)"));
+            DockPanel.SetDock(left, Dock.Left);
+            bar.Children.Add(left);
+            var right = new StackPanel { Orientation = Orientation.Horizontal };
+            _footerHint.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Muted");
+            right.Children.Add(_footerHint);
+            _preview = Theme.Button(this, "Preview", (o, e) => Place(true), "Place and undo: see exactly what Run would do, nothing is changed  (Enter)");
+            _run = Theme.Button(this, "Run", (o, e) => Place(false), "Place the families. One Ctrl+Z in Revit undoes the whole run  (Ctrl+Enter)", primary: true);
+            _cancel = Theme.Button(this, "Cancel", (o, e) => { Action = MappingAction.Cancel; Close(); }, "Close without placing  (Esc)");
+            _cancel.Margin = new Thickness(0);
+            right.Children.Add(_preview);
+            right.Children.Add(_run);
+            right.Children.Add(_cancel);
+            DockPanel.SetDock(right, Dock.Right);
+            bar.Children.Add(right);
+            return bar;
+        }
+
+        // ---- Keyboard --------------------------------------------------------------------
+
+        bool _editing;
+
+        void OnWindowKey(object sender, KeyEventArgs e)
+        {
+            if (_busy)
+            {
+                if (e.Key == Key.Escape) { _cancelRequested = true; e.Handled = true; }
+                return;
+            }
+            var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+            var focus = Keyboard.FocusedElement as DependencyObject;
+            bool inText = focus is TextBox || Ancestor<ComboBox>(focus) != null;
+            bool dropDownOpen = Ancestor<ComboBox>(focus)?.IsDropDownOpen == true;
+            if (ctrl && e.Key == Key.F)
+            {
+                _search.Focus();
+                _search.SelectAll();
+                e.Handled = true;
+            }
+            else if (ctrl && e.Key == Key.Enter)
+            {
+                CommitEdits();
+                if (_run.IsEnabled) Place(false);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter && !ctrl && !_editing && !dropDownOpen && !(focus is TextBox && !ReferenceEquals(focus, _search)) && Ancestor<FilterComboBox>(focus) == null)
+            {
+                CommitEdits();
+                if (_preview.IsEnabled) Place(true);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape && !_editing && !dropDownOpen)
+            {
+                Action = MappingAction.Cancel;
+                Close();
+                e.Handled = true;
+            }
+            else if (!_editing && !inText && Ancestor<DataGrid>(focus) != null)
+            {
+                if (e.Key == Key.Delete) { SkipSelected(); e.Handled = true; }
+                else if (ctrl && e.Key == Key.C && _grid.SelectedItem is BlockRow r) { _copied = r; e.Handled = true; }
+                else if (ctrl && e.Key == Key.V && _copied != null) { PasteSettings(); e.Handled = true; }
+            }
+        }
+
+        // ---- Preview / Run inside the window -----------------------------------------------
+
+        bool _busy, _cancelRequested;
+        readonly System.Diagnostics.Stopwatch _clock = new System.Diagnostics.Stopwatch();
+        long _lastPump = -1000;
+
+        void Place(bool preview)
+        {
+            CommitEdits();
+            UpdateStatus();
+            if (!_run.IsEnabled || _s.Place == null) return;
+            ShowMessage("");
+            bool close = false;
+            SetBusy(true, preview ? "Preview: placing and undoing..." : "Placing families...");
+            try
+            {
+                close = _s.Place(preview, (done, total) => Report(done, total, $"{(preview ? "Preview" : "Placing")}: block {Math.Min(done + 1, total):N0} of {total:N0}"));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SetBusy(false, null);
+            }
+            if (close)
+            {
+                Action = MappingAction.Done;
+                Close();
+                return;
+            }
+            ShowMessage(_s.Message, _s.MessageIsWarning ? "Sh.Warn" : "Sh.Good");
+            if (_s.Rows.Any(r => r.DetectedHost.Length > 0) && !_shown.Contains("detected")) SetColumnShown("detected", true);
+            UpdateStatus();
+        }
+
+        void SetBusy(bool busy, string text)
+        {
+            _busy = busy;
+            _cancelRequested = false;
+            foreach (var child in ((Grid)Content).Children.OfType<UIElement>())
+                if (!ReferenceEquals(child, _summaryRow)) child.IsEnabled = !busy;
+            _summaryPanel.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
+            _progressPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            _progressCancel.IsEnabled = true;
+            _bar.Value = 0;
+            _progressText.Text = text ?? "";
+            _clock.Restart();
+            _lastPump = -1000;
+            UpdateSelectionBar();
+            if (busy) Pump();
+        }
+
+        /// <summary>Progress callback (placement, family symbols): updates the bar a few times a second
+        /// and keeps the window responsive. Returns false once Cancel was clicked.</summary>
+        bool Report(int done, int total, string text)
+        {
+            if (_cancelRequested) return false;
+            if (_clock.ElapsedMilliseconds - _lastPump < 120 && done < total) return true;
+            _bar.Value = total > 0 ? Math.Min(1000, 1000.0 * done / total) : 0;
+            var secs = _clock.Elapsed.TotalSeconds;
+            string eta = done > 0 && done < total ? $"  ·  about {Math.Max(1, secs / done * (total - done)):0} s left" : "";
+            _progressText.Text = text + eta;
+            Pump();
+            return !_cancelRequested;
+        }
+
+        void Pump()
+        {
+            _lastPump = _clock.ElapsedMilliseconds;
+            var frame = new DispatcherFrame();
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new DispatcherOperationCallback(f => { ((DispatcherFrame)f).Continue = false; return null; }), frame);
+            Dispatcher.PushFrame(frame);
+        }
+
+        // ---- Multi-row editing (edit one of several selected rows -> all of them) -----------
 
         void OnRowChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            UpdateStatus();
-            // Editing one of several selected rows: the same value goes to every selected row.
+            if (e.PropertyName == nameof(BlockRow.Family) || e.PropertyName == nameof(BlockRow.Elevation) ||
+                e.PropertyName == nameof(BlockRow.Rotation) || e.PropertyName == nameof(BlockRow.IsSkipped))
+                UpdateStatus();
             if (_propagating || _editGroup == null || !(sender is BlockRow src) || !_editGroup.Contains(src)) return;
             if (!GroupProps.Contains(e.PropertyName)) return;
             _propagating = true;
@@ -711,8 +1183,6 @@ namespace SmartHostMEP.UI
             finally { _propagating = false; }
         }
 
-        // ---- Multi-row selection and editing ----------------------------------------------
-        /// <summary>The rows selected when an edit started in one of them (null: single-row editing).</summary>
         List<BlockRow> _editGroup;
         bool _propagating;
         BlockRow _anchor;   // Shift+click range start
@@ -730,7 +1200,7 @@ namespace SmartHostMEP.UI
                 case nameof(BlockRow.Level): to.Level = from.Level; break;
                 case nameof(BlockRow.Elevation): to.Elevation = from.Elevation; break;
                 case nameof(BlockRow.Rotation): to.Rotation = from.Rotation; break;
-                case nameof(BlockRow.Host): to.Host = from.Host; to.HostBeforeAll = null; break;
+                case nameof(BlockRow.Host): to.Host = from.Host; break;
                 case nameof(BlockRow.Facing): to.Facing = from.Facing; break;
                 case nameof(BlockRow.PlaceAt): to.PlaceAt = from.PlaceAt; break;
                 case nameof(BlockRow.Category): to.Category = from.Category; break;
@@ -776,8 +1246,7 @@ namespace SmartHostMEP.UI
             }
             _anchor = item;
             // Plain click in an editable cell of a row that is part of a multi-selection: keep the
-            // selection, and apply what is changed in this row to all selected rows. A click on the
-            // CAD Block name (read-only) selects just that row, as usual.
+            // selection and apply what is changed in this row to all selected rows.
             var cell = Ancestor<DataGridCell>(src);
             var sel = _grid.SelectedItems.OfType<BlockRow>().ToList();
             if (sel.Count > 1 && sel.Contains(item) && cell != null && !cell.Column.IsReadOnly)
@@ -793,174 +1262,54 @@ namespace SmartHostMEP.UI
             else _editGroup = null;
         }
 
-        void UpdateStatus()
-        {
-            int mapped = _s.Rows.Count(r => !r.Family.IsSkip);
-            int instances = _s.Rows.Where(r => !r.Family.IsSkip).Sum(r => r.Count);
-            int bad = _s.Rows.Count(r => r.Error != null);
-            _statMapped.Text = $"{mapped} / {_s.Rows.Count}";
-            _statMapped.Foreground = Accent;
-            _statInstances.Text = instances.ToString();
-            _statSkipped.Text = (_s.Rows.Count - mapped).ToString();
-            _statSkipped.Foreground = Muted;
-            _statErrors.Text = bad.ToString();
-            _statErrors.Foreground = bad > 0 ? Brushes.Firebrick : Muted;
-            _status.Text = bad > 0 ? $"{bad} row(s) have invalid numbers (red cells)" : "";
-            _status.Foreground = Brushes.Firebrick;
-        }
-
         void CommitEdits()
         {
             _grid.CommitEdit(DataGridEditingUnit.Cell, true);
             _grid.CommitEdit(DataGridEditingUnit.Row, true);
+            _editing = false;
             _editGroup = null;   // buttons (Apply, Auto-match, Load...) change rows themselves
         }
 
-        // ---- Slab (above) options ------------------------------------------------------
-        readonly TextBox _slabRange = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
-            ToolTip = "Slab (above) and Ceiling: look for a slab/beam or ceiling from the row's level up to this height (mm). Higher hosts are ignored." };
-        readonly TextBox _slabPlane = new TextBox { Width = 70, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Slab (above) / Ceiling with no host in range: host on the reference plane SmartHost_<Level>_+<height>mm, facing down " +
-                      "(level-based families: this Elevation From Level)." };
+        // ---- Window size, position and column widths ------------------------------------
 
-        readonly TextBox _wallSearch = new TextBox { Width = 60, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Host Type Wall: use the nearest wall (this model or a link) within this plan distance (mm) of the CAD point, " +
-                      "on the side the block is drawn. No wall in range: vertical/reference plane fallback, listed in Needs Review." };
-
-        readonly TextBox _reviewDistance = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "All host types: after placing, any element farther than this (mm, in plan) from its CAD block is listed in Needs Review." };
-
-        readonly TextBox _edgeSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "Vertical planes: a Revit wall or column face (this model and links) within this distance (mm) of the block is used first. " +
-                      "Otherwise the best-scoring DWG line (see DWG line search), otherwise the block rotation (Needs Review)." };
-        readonly ComboBox _planePosition = new ComboBox { Width = 140, ItemsSource = new[] { "Snap to face", "Through block point" },
-            ToolTip = "Snap to face: the plane is on the wall/column face and the device sits on it (block point projected onto the face). " +
-                      "Through block point: the plane passes through the block point, parallel to the face." };
-        readonly TextBox _lineSearch = new TextBox { Width = 50, VerticalContentAlignment = VerticalAlignment.Center,
-            ToolTip = "No Revit wall/column near the block: DWG lines on any layer, longer than 300 mm and within this distance (mm) " +
-                      "of the block outline, are scored (touching, distance, length, other blocks on the same line). The best one wins. " +
-                      "Weights are in settings.ini (LineScore...)." };
-        readonly CheckBox _showDetection = new CheckBox { Content = "Show detection", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
-            ToolTip = "After Preview/Run, draw the line chosen for each vertical-plane block as magenta detail lines in the plan view " +
-                      "(line style 'SmartHost Detection'). They are removed at the next Preview/Run." };
-
-        UIElement BuildSlabOptions()
+        void RestorePlacement()
         {
-            var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-            bar.Children.Add(new TextBlock { Text = "Slab (above) and Ceiling:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
-            bar.Children.Add(new TextBlock { Text = "Search range (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            bar.Children.Add(_slabRange);
-            bar.Children.Add(new TextBlock { Text = "Fallback reference plane height (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            bar.Children.Add(_slabPlane);
-            bar.Children.Add(new TextBlock { Text = "Wall:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 10, 0) });
-            bar.Children.Add(new TextBlock { Text = "Search distance (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            bar.Children.Add(_wallSearch);
-            bar.Children.Add(new TextBlock { Text = "Vertical planes:", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 10, 0) });
-            bar.Children.Add(new TextBlock { Text = "Wall/column search (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            bar.Children.Add(_edgeSearch);
-            bar.Children.Add(new TextBlock { Text = "Position", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
-            bar.Children.Add(_planePosition);
-            bar.Children.Add(new TextBlock { Text = "DWG line search (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 6, 0) });
-            bar.Children.Add(_lineSearch);
-            bar.Children.Add(_showDetection);
-            bar.Children.Add(new TextBlock { Text = "Review if farther than (mm)", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(22, 0, 6, 0) });
-            bar.Children.Add(_reviewDistance);
-            ShowSlabOptions();
-            _slabRange.TextChanged += (o, e) => ReadSlabOptions();
-            _slabPlane.TextChanged += (o, e) => ReadSlabOptions();
-            _wallSearch.TextChanged += (o, e) => ReadSlabOptions();
-            _reviewDistance.TextChanged += (o, e) => ReadSlabOptions();
-            _edgeSearch.TextChanged += (o, e) => ReadSlabOptions();
-            _planePosition.SelectionChanged += (o, e) => ReadSlabOptions();
-            _lineSearch.TextChanged += (o, e) => ReadSlabOptions();
-            _showDetection.IsChecked = _s.Settings?.ShowDetection == true;
-            _showDetection.Checked += (o, e) => SetShowDetection(true);
-            _showDetection.Unchecked += (o, e) => SetShowDetection(false);
-            return bar;
+            var p = (_settings.WindowPlacement ?? "").Split(',');
+            if (p.Length < 5) return;
+            if (!double.TryParse(p[0], NumberStyles.Float, Inv, out var l) || !double.TryParse(p[1], NumberStyles.Float, Inv, out var t) ||
+                !double.TryParse(p[2], NumberStyles.Float, Inv, out var w) || !double.TryParse(p[3], NumberStyles.Float, Inv, out var h)) return;
+            // Only when it is still on a screen.
+            var screen = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                                  SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+            if (w < MinWidth || h < MinHeight || !screen.IntersectsWith(new Rect(l + 50, t + 10, Math.Max(1, w - 100), 40))) return;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = l; Top = t; Width = w; Height = h;
+            if (p[4] == "1") Loaded += (o, e) => WindowState = WindowState.Maximized;
         }
 
-        void ShowSlabOptions()
+        void SavePlacement()
         {
-            _slabRange.Text = _s.Slab.SearchRangeMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _slabPlane.Text = _s.Slab.FallbackPlaneMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _wallSearch.Text = _s.Slab.WallSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _reviewDistance.Text = _s.Slab.ReviewDistanceMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _edgeSearch.Text = _s.Slab.EdgeSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-            _planePosition.SelectedItem = Mapping.PlanePositionText(_s.Slab.PlanePosition);
-            _lineSearch.Text = _s.Slab.LineSearchMm.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+            if (r.IsEmpty || double.IsNaN(r.Width)) return;
+            _settings.WindowPlacement = string.Join(",", r.Left.ToString("0", Inv), r.Top.ToString("0", Inv), r.Width.ToString("0", Inv),
+                                                    r.Height.ToString("0", Inv), WindowState == WindowState.Maximized ? "1" : "0");
+            _settings.GridColumns = string.Join(";", _cols.Where(kv => !kv.Value.Width.IsStar)
+                .Select(kv => kv.Key + ":" + kv.Value.ActualWidth.ToString("0", Inv)));
+            Settings.TrySave(_settings);
         }
 
-        /// <summary>Copies valid values into the session; invalid boxes turn red. Returns the problem, or null.</summary>
-        string ReadSlabOptions()
+        void RestoreColumnWidths()
         {
-            var range = Mapping.ParseNumber(_slabRange.Text);
-            var plane = Mapping.ParseNumber(_slabPlane.Text);
-            bool rangeOk = range.HasValue && range.Value > 0 && _slabRange.Text.Trim().Length > 0;
-            bool planeOk = plane.HasValue && _slabPlane.Text.Trim().Length > 0;
-            if (rangeOk) _s.Slab.SearchRangeMm = range.Value;
-            if (planeOk) _s.Slab.FallbackPlaneMm = plane.Value;
-            var wall = Mapping.ParseNumber(_wallSearch.Text);
-            bool wallOk = wall.HasValue && wall.Value > 0 && _wallSearch.Text.Trim().Length > 0;
-            if (wallOk) _s.Slab.WallSearchMm = wall.Value;
-            _wallSearch.BorderBrush = wallOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            var review = Mapping.ParseNumber(_reviewDistance.Text);
-            bool reviewOk = review.HasValue && review.Value > 0 && _reviewDistance.Text.Trim().Length > 0;
-            if (reviewOk) _s.Slab.ReviewDistanceMm = review.Value;
-            _reviewDistance.BorderBrush = reviewOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            var edge = Mapping.ParseNumber(_edgeSearch.Text);
-            bool edgeOk = edge.HasValue && edge.Value > 0 && _edgeSearch.Text.Trim().Length > 0;
-            if (edgeOk) _s.Slab.EdgeSearchMm = edge.Value;
-            _edgeSearch.BorderBrush = edgeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            if (_planePosition.SelectedItem is string pos && Mapping.ParsePlanePosition(pos) is PlanePosition pp) _s.Slab.PlanePosition = pp;
-            var lineSearch = Mapping.ParseNumber(_lineSearch.Text);
-            bool lineOk = lineSearch.HasValue && lineSearch.Value > 0 && _lineSearch.Text.Trim().Length > 0;
-            if (lineOk) _s.Slab.LineSearchMm = lineSearch.Value;
-            _lineSearch.BorderBrush = lineOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            _slabRange.BorderBrush = rangeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            _slabPlane.BorderBrush = planeOk ? SystemColors.ControlDarkBrush : Brushes.Firebrick;
-            return !rangeOk ? "Slab search range must be a number of mm greater than 0."
-                 : !planeOk ? "Fallback reference plane height must be a number of mm."
-                 : !wallOk ? "Wall search distance must be a number of mm greater than 0."
-                 : !reviewOk ? "Review distance must be a number of mm greater than 0."
-                 : !edgeOk ? "Vertical plane wall/column search must be a number of mm greater than 0."
-                 : !lineOk ? "DWG line search must be a number of mm greater than 0."
-                 : null;
-        }
-
-        void SetShowDetection(bool on)
-        {
-            if (_s.Settings == null) return;
-            _s.Settings.ShowDetection = on;
-            Settings.TrySave(_s.Settings);
-        }
-
-        void Finish(MappingAction action)
-        {
-            CommitEdits();
-            var slabProblem = ReadSlabOptions();
-            if (slabProblem != null)
+            foreach (var part in (_settings.GridColumns ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                MessageBox.Show(this, slabProblem, "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                var kv = part.Split(':');
+                if (kv.Length == 2 && _cols.TryGetValue(kv[0], out var col) && !col.Width.IsStar &&
+                    double.TryParse(kv[1], NumberStyles.Float, Inv, out var w) && w >= 40 && w <= 1200)
+                    col.Width = new DataGridLength(w);
             }
-            var bad = _s.Rows.Where(r => r.Error != null).ToList();
-            if (bad.Count > 0)
-            {
-                MessageBox.Show(this, "Fix the numbers in these rows first:\n\n" +
-                    string.Join("\n", bad.Take(15).Select(r => $"{r.BlockName}: {r.Error}")),
-                    "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Warning);
-                _grid.ScrollIntoView(bad[0]);
-                return;
-            }
-            if (_s.Rows.All(r => r.Family.IsSkip))
-            {
-                MessageBox.Show(this, "Every block is set to (Skip). Pick a family for at least one block.",
-                    "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            Action = action;
-            Close();
         }
+
+        // ---- Load / Save / Auto-match ---------------------------------------------------------
 
         void LoadMapping()
         {
@@ -974,15 +1323,15 @@ namespace SmartHostMEP.UI
             if (dlg.ShowDialog(this) != true) return;
             var mapping = Mapping.Load(dlg.FileName);
             var (applied, messages) = _s.Apply(mapping);
-            ShowSlabOptions();
+            ShowAdvanced();
             RememberFolder(dlg.FileName);
             UpdateStatus();
             var text = $"Applied {applied} of {_s.Rows.Count} blocks from\n{dlg.FileName}";
             int notInDwg = mapping.Rows.Keys.Count(k => !_s.Rows.Any(r => r.BlockName.Equals(k, StringComparison.OrdinalIgnoreCase)));
             if (notInDwg > 0) text += $"\n\n{notInDwg} mapped block(s) in the file are not in this DWG (ignored).";
             if (messages.Count > 0) text += "\n\n" + string.Join("\n", messages.Take(20)) + (messages.Count > 20 ? "\n..." : "");
-            MessageBox.Show(this, text, "SmartHost MEP", MessageBoxButton.OK,
-                messages.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            if (messages.Count > 0) MessageBox.Show(this, text, "SmartHost MEP", MessageBoxButton.OK, MessageBoxImage.Warning);
+            else ShowMessage($"Loaded {applied} block(s) from {Path.GetFileName(dlg.FileName)}.", "Sh.Good");
         }
 
         void SaveMapping()
@@ -1000,7 +1349,7 @@ namespace SmartHostMEP.UI
             {
                 Mapping.Save(dlg.FileName, _s.Rows.Select(r => r.ToMapRow()), _s.Slab);
                 RememberFolder(dlg.FileName);
-                MessageBox.Show(this, "Mapping saved:\n" + dlg.FileName, "SmartHost MEP");
+                ShowMessage("Mapping saved: " + dlg.FileName, "Sh.Good");
             }
             catch (Exception ex)
             {
@@ -1014,21 +1363,25 @@ namespace SmartHostMEP.UI
             List<FamilySymbolEntry> families = null;
             if (_s.LoadFamilySymbols != null)
             {
+                SetBusy(true, "Reading family symbols...");
                 try
                 {
-                    var handle = new WindowInteropHelper(this).Handle;
-                    using (var progress = new ProgressWindow("SmartHost MEP - Reading family symbols", handle) { CancelText = "Stopping..." })
-                        families = _s.LoadFamilySymbols((done, total, name) =>
-                            progress.Report(done, total, total == 0 ? "" : $"Reading family {Math.Min(done + 1, total):N0} of {total:N0}: {name}"));
+                    families = _s.LoadFamilySymbols((done, total, name) =>
+                        Report(done, total, total == 0 ? "" : $"Reading family {Math.Min(done + 1, total):N0} of {total:N0}: {name}"));
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show(this, "Could not read the family symbols - matching by name only.\n\n" + ex.Message, "SmartHost MEP",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
-                Activate();
+                finally
+                {
+                    SetBusy(false, null);
+                }
             }
             var r = _s.AutoMatch(families);
+            if (!_shown.Contains("score")) SetColumnShown("score", true);
+            if (!_shown.Contains("top3")) SetColumnShown("top3", true);
             UpdateStatus();
             var w = _s.Settings?.SymbolScore ?? new SymbolScoreWeights();
             var lines = new List<string>
@@ -1089,7 +1442,7 @@ namespace SmartHostMEP.UI
         {
             try
             {
-                var last = _s.Settings?.LastMappingPath;
+                var last = _settings.LastMappingPath;
                 if (!string.IsNullOrEmpty(last) && Directory.Exists(Path.GetDirectoryName(last)))
                     dlg.InitialDirectory = Path.GetDirectoryName(last);
             }
@@ -1098,9 +1451,8 @@ namespace SmartHostMEP.UI
 
         void RememberFolder(string path)
         {
-            if (_s.Settings == null) return;
-            _s.Settings.LastMappingPath = path;
-            Settings.TrySave(_s.Settings);
+            _settings.LastMappingPath = path;
+            Settings.TrySave(_settings);
         }
     }
 }

@@ -41,6 +41,12 @@ namespace SmartHostMEP.Core
         // Remembered between runs
         public string LastMappingPath = "";
         public string LastDwg = "";                    // DWG (link type name) picked last time: pre-selected next time
+        // Mapping window (remembered)
+        public string DefaultHost = "";                // Host default of the setup row ("" = None)
+        public string WindowPlacement = "";            // left,top,width,height,maximized
+        public string GridColumns = "";                // column key:width;...
+        public string ShownColumns = "";               // optional columns shown (Columns menu)
+        public bool AdvancedOpen = false;
 
         public static string DefaultPath =>
             Path.Combine(AppStorage.Root, "settings.ini");
@@ -108,6 +114,11 @@ namespace SmartHostMEP.Core
                 case "writecomments": WriteComments = B(WriteComments); break;
                 case "lastmappingpath": LastMappingPath = val; break;
                 case "lastdwg": LastDwg = val; break;
+                case "defaulthost": DefaultHost = val; break;
+                case "windowplacement": WindowPlacement = val; break;
+                case "gridcolumns": GridColumns = val; break;
+                case "showncolumns": ShownColumns = val; break;
+                case "advancedopen": AdvancedOpen = B(AdvancedOpen); break;
             }
         }
 
@@ -181,6 +192,11 @@ namespace SmartHostMEP.Core
             sb.AppendLine("# Remembered automatically.");
             sb.AppendLine("LastMappingPath = " + LastMappingPath);
             sb.AppendLine("LastDwg = " + LastDwg);
+            sb.AppendLine("DefaultHost = " + DefaultHost);
+            sb.AppendLine("WindowPlacement = " + WindowPlacement);
+            sb.AppendLine("GridColumns = " + GridColumns);
+            sb.AppendLine("ShownColumns = " + ShownColumns);
+            sb.AppendLine("AdvancedOpen = " + Bo(AdvancedOpen));
             return sb.ToString();
         }
 
