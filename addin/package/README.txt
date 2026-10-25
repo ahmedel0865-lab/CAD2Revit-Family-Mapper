@@ -1,20 +1,20 @@
-SmartHost MEP - standalone Revit add-in (no pyRevit needed)
+DMC Remapper - standalone Revit add-in (no pyRevit needed)
 =====================================================================
 
 INSTALL
   1. Close Revit.
   2. Unzip this folder anywhere (e.g. Downloads).
   3. Double-click Install.bat.
-     It installs SmartHost MEP for every Revit 2022 / 2023 / 2024 / 2025 / 2026 found
+     It installs DMC Remapper for every Revit 2022 / 2023 / 2024 / 2025 / 2026 found
      on this PC, for your Windows user only (no administrator rights needed).
   4. Start Revit. When Revit asks about loading an unsigned add-in
-     ("SmartHost MEP"), click "Always Load".
-  5. A new "SmartHost MEP" tab appears with "Place Families".
+     ("DMC Remapper"), click "Always Load".
+  5. A new "DMC Remapper" tab appears with "Place Families".
 
   Manual install (if Install.bat is blocked by IT policy):
-    Copy  <version>\SmartHostMEP.addin  and the folder  <version>\SmartHostMEP
+    Copy  <version>\DMCRemapper.addin  and the folder  <version>\DMCRemapper
     into  %AppData%\Autodesk\Revit\Addins\<version>\
-    then right-click SmartHostMEP\SmartHostMEP.dll > Properties > tick "Unblock".
+    then right-click DMCRemapper\DMCRemapper.dll > Properties > tick "Unblock".
 
 UNINSTALL
   Double-click Uninstall.bat (close Revit first).
@@ -22,7 +22,7 @@ UNINSTALL
 USE
   1. Load your families (face-based for ceiling/wall devices) and link the DWG
      in the floor plan of the target level.
-  2. SmartHost MEP > Place Families > choose the DWG > Next.
+  2. DMC Remapper > Place Families > choose the DWG > Next.
   3. Mapping window: one row per CAD block name. Pick the Revit family for
      each block (type in the box to search; close matches are pre-selected),
      set Elevation From Level (mm), optionally Rotation and Host Type.
@@ -31,9 +31,9 @@ USE
      then Run. One Ctrl+Z undoes the whole run.
   5. The grid is remembered per project. Load/Save Mapping reads and writes
      xlsx/csv files (example: templates\mapping_template.xlsx).
-  6. Logs: Documents\SmartHostMEP\Logs\<project>\
+  6. Logs: Documents\DMCRemapper\Logs\<project>\
 
 SETTINGS
-  %AppData%\SmartHostMEP\settings.ini  (created on first run; open in Notepad)
+  %AppData%\DMCRemapper\settings.ini  (created on first run; open in Notepad)
 
 Full guide: https://github.com/ahmedel0865-lab/SmartHost-MEP

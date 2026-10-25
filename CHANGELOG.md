@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.38.0] - 2026-10-25
+### Changed: renamed to DMC Remapper
+- The tool is now **DMC Remapper** - *CAD blocks → hosted Revit families* (formerly SmartHost MEP, and before that CAD2Revit). Placement is unchanged.
+- Ribbon tab, window titles and dialogs say **DMC Remapper**; the mapping window header shows the tagline. Code, project and DLL: `DMCRemapper`. The add-in keeps the same AddInId.
+- New elements use the `DMC_` prefix: reference planes `DMC_<Level>_+2800mm`, vertical planes `DMC_V_<Level>_<n>`, Comments tag `DMC: <block>` (only when `WriteComments` is on), Needs Review mark `DMC: Host = Reference Plane`, detection line style `DMC Detection`.
+- **Models made with older versions keep working:** `SmartHost_` and `CAD2Revit_` reference planes and vertical planes are still found and reused (no duplicates, plane numbers continue), and `SmartHost:` / `CAD:` / `CAD2Revit:` Comments still count for the "already placed" check. Fix Host Line also removes the old Needs Review marks.
+- Settings and saved mappings move to `%AppData%\DMCRemapper`: copied once from `%AppData%\SmartHostMEP` (or `%AppData%\CAD2Revit`); the old folder is left untouched. Logs go to `Documents\DMCRemapper\Logs` (`dmc_log_<date>.csv`).
+- The installer removes the old `SmartHostMEP` and `CAD2Revit` add-ins, so two versions are never loaded together. Package and CI artifact: `DMCRemapper-<version>`.
+
 ## [0.37.0] - 2026-10-25
 ### Fixed: Slab (above) did not find the slab over stair lights
 - In a stair core the floor slab has the stair opening, so straight above a stair light there is no Floor - only the landing or flight of the stair above. Slab (above) only looked at floors, roofs and beams, so it found nothing in range and used the fallback plane.

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Builds the add-in for Revit 2022-2026, runs the unit tests and creates
-#   dist/SmartHostMEP-<version>.zip
+#   dist/DMCRemapper-<version>.zip
 # Usage (from the addin folder):  bash tools/package.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)
-NAME="SmartHostMEP-$VERSION"
+NAME="DMCRemapper-$VERSION"
 OUT="dist/$NAME"
 
-dotnet test tests/SmartHostMEP.Core.Tests -c Release -nologo -v q
+dotnet test tests/DMCRemapper.Core.Tests -c Release -nologo -v q
 rm -rf dist && mkdir -p "$OUT/templates"
 for v in 2022 2023 2024 2025 2026; do
-  dotnet build src/SmartHostMEP -c Release -p:RevitVersion=$v -nologo -v q -warnaserror
-  mkdir -p "$OUT/$v/SmartHostMEP"
-  cp "src/SmartHostMEP/bin/Release/$v/SmartHostMEP.dll" "$OUT/$v/SmartHostMEP/"
-  cp package/SmartHostMEP.addin "$OUT/$v/"
+  dotnet build src/DMCRemapper -c Release -p:RevitVersion=$v -nologo -v q -warnaserror
+  mkdir -p "$OUT/$v/DMCRemapper"
+  cp "src/DMCRemapper/bin/Release/$v/DMCRemapper.dll" "$OUT/$v/DMCRemapper/"
+  cp package/DMCRemapper.addin "$OUT/$v/"
 done
 cp package/install.ps1 package/Install.bat package/Uninstall.bat package/README.txt "$OUT/"
 cp ../templates/mapping_template.xlsx ../templates/mapping_template.csv "$OUT/templates/"

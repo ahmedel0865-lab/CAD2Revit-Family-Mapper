@@ -1,8 +1,10 @@
-# SmartHost MEP
+# DMC Remapper
+
+**CAD blocks → hosted Revit families**
 
 Smart Revit add-in that converts AutoCAD blocks into hosted MEP families (slab, ceiling, wall, beam, reference plane) with automatic host detection.
 
-> Formerly **CAD2Revit Family Mapper**. Installing SmartHost MEP removes the old add-in, and models made with it keep working (its reference planes and Comments are still recognised).
+> Formerly **SmartHost MEP** (and before that **CAD2Revit Family Mapper**). Installing DMC Remapper removes the old add-in, and models made with an older version keep working (their reference planes and Comments are still recognised).
 
 [![Build](https://github.com/ahmedel0865-lab/SmartHost-MEP/actions/workflows/build.yml/badge.svg)](https://github.com/ahmedel0865-lab/SmartHost-MEP/actions/workflows/build.yml)
 ![Revit 2022-2026](https://img.shields.io/badge/Revit-2022%E2%80%932026-2060B0)
@@ -24,7 +26,7 @@ flowchart LR
 ```
 
 ## Contents
-- [The SmartHost MEP ribbon](#the-smarthost-mep-ribbon)
+- [The DMC Remapper ribbon](#the-dmc-remapper-ribbon)
 - [Features](#features)
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)
@@ -32,7 +34,7 @@ flowchart LR
 - [Performance](#performance) · [Limitations](#limitations-short) · [Roadmap](#roadmap)
 - Guides: [Usage](docs/USAGE.md) · [Testing on a sample](docs/TESTING.md) · [Limitations](docs/LIMITATIONS.md) · [Changelog](CHANGELOG.md)
 
-## The SmartHost MEP ribbon
+## The DMC Remapper ribbon
 
 | Panel | Button | What it does |
 |---|---|---|
@@ -55,7 +57,7 @@ flowchart LR
 - Keys: **Enter** = Preview, **Ctrl+Enter** = Run, **Esc** = Cancel, **Ctrl+F** = search, **Del** = skip the selected rows.
 - **Searchable family dropdown** (electrical categories): type part of a name to filter.
 - **Revit Family starts at `(Skip)`** every time the tool opens, so you pick the families for this run yourself. **Clear All Families** sets every row back to `(Skip)`.
-- **Auto-match by symbol**: compares each block's 2D symbol with the symbol of every loaded family (its plan view, *Front* or *Back* view, or the outline of its 3D geometry), at any size, rotated or mirrored, and selects the family scoring 80 or more. The grid shows the **Score**, the **Source View** and the **Top 3 Candidates** to choose from. Close calls are selected and listed in Needs Review as *Ambiguous symbol match*. Families you pick by hand are remembered and used first next time. Only loadable families are opened, and their symbols are cached in `%TEMP%\SmartHostMEP\SymbolCache`. Blocks without line work are still matched by name (`SMOKE-DET` → *Smoke Detector*).
+- **Auto-match by symbol**: compares each block's 2D symbol with the symbol of every loaded family (its plan view, *Front* or *Back* view, or the outline of its 3D geometry), at any size, rotated or mirrored, and selects the family scoring 80 or more. The grid shows the **Score**, the **Source View** and the **Top 3 Candidates** to choose from. Close calls are selected and listed in Needs Review as *Ambiguous symbol match*. Families you pick by hand are remembered and used first next time. Only loadable families are opened, and their symbols are cached in `%TEMP%\DMCRemapper\SymbolCache`. Blocks without line work are still matched by name (`SMOKE-DET` → *Smoke Detector*).
 - **Level + elevation per row**: different blocks can go on different levels in one run.
 - **Edit many rows at once**: select rows with **Ctrl+click** (add/remove one row), **Shift+click** (a range) or **Ctrl+A**. A bar appears above the grid to set **Family**, **Host** and **Elevation** on all of them, or change a cell in one selected row to change them all. Right-click: *Apply this row to selected*, *Skip selected*, *Copy settings from this row*, *Paste settings to selected*.
 - Groups the per-instance block names of **DWGs exported from Revit** (`Family - Type-<id>-<view>`) into one row per type.
@@ -77,19 +79,19 @@ flowchart LR
   3. Otherwise, the **block rotation**, listed in Needs Review as "No wall line found".
   - **The plane** is on the chosen line and runs along it. The block point is projected onto it, and the family faces away from the line, toward the block side.
   - **Position** (set in the window): **Snap to face** (default) puts the device on the face, at the block point projected onto it. **Through block point** keeps the block point. A snap of more than 200 mm is listed in Needs Review.
-  - Planes are named `SmartHost_V_<Level>_<n>`, drawn from the level up to level + 3000 mm. Elements on the same line share one plane (within 5 mm and 0.5°). Walls, columns and DWG lines are read once and indexed in a grid, all in the run's single transaction.
+  - Planes are named `DMC_V_<Level>_<n>`, drawn from the level up to level + 3000 mm. Elements on the same line share one plane (within 5 mm and 0.5°). Walls, columns and DWG lines are read once and indexed in a grid, all in the run's single transaction.
   - **Detected Host** (Preview) says where each plane came from: `Vertical plane: Revit wall (linked)`, `Touching line (layer: A-WALL)`, `Nearest line (score 74)` or `Block rotation`.
-  - **Show detection** (checkbox in the window): after Preview or Run, the line chosen for each block is drawn as magenta detail lines in the plan view (line style `SmartHost Detection`), with a short line from the block to where it went. The next Preview or Run removes them.
+  - **Show detection** (checkbox in the window): after Preview or Run, the line chosen for each block is drawn as magenta detail lines in the plan view (line style `DMC Detection`), with a short line from the block to where it went. The next Preview or Run removes them.
   - **Fix Host Line** (ribbon): click a placed element, then the DWG line it should sit on. The element moves onto a plane on that line (an existing one is reused), facing away from the line toward its CAD block, and its Needs Review mark in Comments is removed. Tick *Apply to all elements of the same block on this line* to move the others too. Repeat, then Esc to finish; Ctrl+Z undoes one fix.
   - The family goes on the block point at level + elevation, facing the block. If it lands more than 10 mm off, it is moved back. If it still can't be corrected, it is listed in **Needs Review**.
 - **Place At** (per row): **Symbol centre** (the centre of the drawn symbol, default) or **Base point** (the block's insertion point). Symbol centre suits blocks drawn away from their base point, for example a wall light whose base point is on the wall line and whose circle is in the room. Pick Base point when the insertion point is the exact location. With Base point, blocks whose base point is far from the symbol are flagged in **Needs Review** ("Block base point is N mm from its symbol"). **Mirrored blocks** face the side their symbol is drawn on.
 - **Final distance check, all host types**: any element placed farther than the **review distance** (50 mm, set in the window) from its **intended point** is listed in **Needs Review** with its Element ID. The intended point is the CAD block, or the face point it was snapped to.
-- **Slab (above)**: hosts on the **bottom face of the nearest slab or beam above** each block, facing down, keeping the CAD rotation (sloped slabs included). Floors, roofs (sloped slabs are often modelled as roofs), Structural Framing (beams) and stairs (landings and flights, e.g. over stair lights, where the slab has the stair opening) count, in this model and in linked models; ceilings and ducts are ignored. Whichever bottom face is closest above the point wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. The search goes from the row's level up to the **Slab search range** (default 5000 mm), never higher, even if the level above is higher. **No slab or beam in range** (open area, slab opening, missing structural link): the family goes on one reference plane per level, `SmartHost_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). Level-based families are placed level-based at that Elevation From Level. Both values are at the top of the mapping window and are saved with the mapping. A level-based family under a slab or beam is placed level-based at its underside height.
-- **Ceiling**: works the same way as Slab (above) and uses the same search code. It hosts on the **bottom face of the nearest ceiling above** each block, in this model and in linked (architectural) models, within the same search range. With no ceiling in range (no ceiling there, an opening, a missing architectural link), it uses the same fallback plane `SmartHost_<Level>_+3000mm`, or level-based at that height, logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm`. The two values at the top of the mapping window (*Search range* and *Fallback reference plane height*) apply to both Slab (above) and Ceiling.
+- **Slab (above)**: hosts on the **bottom face of the nearest slab or beam above** each block, facing down, keeping the CAD rotation (sloped slabs included). Floors, roofs (sloped slabs are often modelled as roofs), Structural Framing (beams) and stairs (landings and flights, e.g. over stair lights, where the slab has the stair opening) count, in this model and in linked models; ceilings and ducts are ignored. Whichever bottom face is closest above the point wins, so a drop beam under the slab is chosen over the slab. A beam is only used where the point is under its bottom face; otherwise the next host up is used. The search goes from the row's level up to the **Slab search range** (default 5000 mm), never higher, even if the level above is higher. **No slab or beam in range** (open area, slab opening, missing structural link): the family goes on one reference plane per level, `DMC_<Level>_+3000mm`, facing down, at the **Fallback reference plane height** (default 3000 mm). Level-based families are placed level-based at that Elevation From Level. Both values are at the top of the mapping window and are saved with the mapping. A level-based family under a slab or beam is placed level-based at its underside height.
+- **Ceiling**: works the same way as Slab (above) and uses the same search code. It hosts on the **bottom face of the nearest ceiling above** each block, in this model and in linked (architectural) models, within the same search range. With no ceiling in range (no ceiling there, an opening, a missing architectural link), it uses the same fallback plane `DMC_<Level>_+3000mm`, or level-based at that height, logged as `No ceiling within 5000 mm - placed on reference plane at +3000 mm`. The two values at the top of the mapping window (*Search range* and *Fallback reference plane height*) apply to both Slab (above) and Ceiling.
 - **Counts**: Preview and the result window show how many Slab (above) blocks were hosted on a slab, hosted on a beam, put on the reference plane, or placed level-based, and how many Ceiling blocks were hosted on a ceiling, put on the reference plane, or placed level-based.
 - **Needs Review** window: after a run, every Slab (above) and Ceiling element that went on the fallback plane (or level-based fallback) is listed with Element ID, Family : Type, CAD Block, X, Y (mm) and Reason. Clicking a row selects the element in Revit and zooms to it. **Select All in Revit**, **Copy IDs** (comma-separated, for Manage > Select by ID) and **Export to Excel** are there too. **Slab (below)**: hosts on the **top of the slab** at the level, facing up (floor boxes). Where a block sits over a slab opening, the family goes on a reference plane at the slab's height, with a warning.
 - **Detected Host (Preview)** column: after Preview, every row shows the host it would use, e.g. `Floor: 250mm RC Slab - Third Floor (linked: STR.rvt)`.
-- **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `SmartHost_Level 1_+2800mm`), shared per elevation, facing Down or Up.
+- **Reference Plane (auto-create)**: named horizontal planes at level + elevation (e.g. `DMC_Level 1_+2800mm`), shared per elevation, facing Down or Up.
 - If no host is found, falls back to unhosted placement (or reports a failure, your choice).
 
 **Safety and output**
@@ -98,22 +100,22 @@ flowchart LR
 - **One transaction**: a single Ctrl+Z undoes a whole run.
 - **Fast on big drawings**: hosts are found from face/wall indexes built once (not one ray per block), and level-based families are created in batches. A progress bar with **Cancel** is shown (Cancel rolls everything back), and a **Timings** table shows where the time went. See [Performance](#performance).
 - Summary per family type, unmapped blocks and failures with reasons; a **CSV log** of every block with Element ID, level, host, coordinates and rotation.
-- Leaves the **Comments** parameter empty. To have the block name written there (`SmartHost: <block>`), set `WriteComments = true` in settings.ini.
+- Leaves the **Comments** parameter empty. To have the block name written there (`DMC: <block>`), set `WriteComments = true` in settings.ini.
 
 ## Requirements
 - Autodesk Revit **2022, 2023, 2024, 2025 or 2026** on Windows
 - Nothing else: no pyRevit, no Dynamo, no Excel
 
 ## Installation
-1. Download **`SmartHostMEP-<version>.zip`** from the [download](download/) folder, the [Releases](https://github.com/ahmedel0865-lab/SmartHost-MEP/releases) page, or the latest run in the [Actions](https://github.com/ahmedel0865-lab/SmartHost-MEP/actions) tab (*Artifacts*).
+1. Download **`DMCRemapper-<version>.zip`** from the [download](download/) folder, the [Releases](https://github.com/ahmedel0865-lab/SmartHost-MEP/releases) page, or the latest run in the [Actions](https://github.com/ahmedel0865-lab/SmartHost-MEP/actions) tab (*Artifacts*).
 2. Close Revit, unzip, and double-click **`Install.bat`**. It installs for every Revit 2022–2026 on the PC, for the current user; no admin rights are needed.
-3. Start Revit and click **Always Load** when asked about the add-in. A **SmartHost MEP** tab appears.
+3. Start Revit and click **Always Load** when asked about the add-in. A **DMC Remapper** tab appears.
 
 Uninstall: `Uninstall.bat`. Manual install and details: [docs/USAGE.md](docs/USAGE.md#0-install-once).
 
 ## Quick start
 1. Load your families (face-based for hosted devices) and link the DWG in the target floor plan.
-2. **SmartHost MEP > Place Families**. The mapping window opens straight away with a DWG already chosen: the one selected in Revit, else the one used last time. Change it with the **DWG** dropdown or **Pick in view**, and set the **Level** and **Host default** on the same row.
+2. **DMC Remapper > Place Families**. The mapping window opens straight away with a DWG already chosen: the one selected in Revit, else the one used last time. Change it with the **DWG** dropdown or **Pick in view**, and set the **Level** and **Host default** on the same row.
 3. In the mapping window, pick a family for each CAD block (type to search; click **Auto-match** to pre-select families with the same symbol, or **Load...** a saved mapping), set the level, elevation and Host Type (see [Ceiling vs Slab vs Reference Plane](#ceiling-vs-slab-vs-reference-plane-which-host-to-use)). To set many rows at once, select them (Ctrl/Shift+click, Ctrl+A) and use the bar that appears above the grid, or right-click. Leave `(Skip)` for blocks you don't want.
 4. **Preview** (Enter) > check the result and the *Detected Host* column > **Run** (Ctrl+Enter). One Ctrl+Z undoes it all.
 
@@ -145,7 +147,7 @@ Notes:
 - All three need **face-based** (or work-plane-based) families. A level-based family set to Reference Plane is placed level-based at the elevation, with a warning in the log and the result window. On Slab (above) and Ceiling rows it is placed level-based at the host's underside height, or at the fallback height when there is no host. On Face / Slab (below) rows it is not placed ("family is not face-based").
 - For hosts in **linked models**, each placed instance is checked: *Host* must be the link, not a reference plane. Otherwise the block is reported as failed. Set `DebugHosting = true` in `settings.ini` to get a per-block DEBUG line (link, element, normal, final host) in the log.
 - Ceiling hosting looks straight up from each block for a ceiling within the search range (default 5000 mm). Anything without a ceiling above it goes on the fallback reference plane (default +3000 mm) and is listed in **Needs Review**.
-- Reference planes are named `SmartHost_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
+- Reference planes are named `DMC_<Level>_+<elevation>mm` (`..._Up` for up-facing ones). They cover the DWG extents and are reused by later runs. The planes created in a run are removed by the same Ctrl+Z.
 
 ## Mapping file
 The mapping window can **Load / Save** the mapping as a file, to reuse it across projects or share it with the team. Empty family = Skip:
@@ -165,14 +167,14 @@ Saved mappings also carry two columns, `Slab_Search_Range_mm` and `Slab_Fallback
 ## Project structure
 ```
 addin/                            standalone Revit add-in (C#)  <- main product
-  src/SmartHostMEP/                  Revit add-in
+  src/DMCRemapper/                  Revit add-in
     App.cs                        ribbon: Host Placement (Place Families, Fix Host Line), Tools (Settings, Help)
     Commands/                     the ribbon commands
     Revit/                        DWG reader, host finder, reference/vertical planes, placer
     UI/                           mapping window (WPF), step-1 dialog, result window
-  src/SmartHostMEP.Core/             Revit-free logic (unit tested): CSV/XLSX, mapping, name
+  src/DMCRemapper.Core/             Revit-free logic (unit tested): CSV/XLSX, mapping, name
                                   matching, block names & categories, report, settings
-  tests/SmartHostMEP.Core.Tests/     unit tests (run without Revit)
+  tests/DMCRemapper.Core.Tests/     unit tests (run without Revit)
   package/                        .addin manifest, Install.bat, install.ps1
   tools/package.sh                build all Revit versions + zip
 templates/                        mapping_template.xlsx / .csv
@@ -183,11 +185,11 @@ docs/                             USAGE.md, TESTING.md, LIMITATIONS.md
 Needs the .NET 8 SDK (Windows, macOS or Linux). Revit does not need to be installed; the Revit API reference assemblies come from the `Nice3point.Revit.Api` NuGet packages.
 ```
 cd addin
-dotnet test tests/SmartHostMEP.Core.Tests          # unit tests
-dotnet build src/SmartHostMEP -c Release -p:RevitVersion=2024   # one Revit version
-bash tools/package.sh                           # all versions -> dist/SmartHostMEP-<version>.zip
+dotnet test tests/DMCRemapper.Core.Tests          # unit tests
+dotnet build src/DMCRemapper -c Release -p:RevitVersion=2024   # one Revit version
+bash tools/package.sh                           # all versions -> dist/DMCRemapper-<version>.zip
 ```
-Or open `addin/SmartHostMEP.sln` in Visual Studio 2022. Pushing a tag like `v0.4.0` makes CI publish the zip as a GitHub Release.
+Or open `addin/DMCRemapper.sln` in Visual Studio 2022. Pushing a tag like `v0.4.0` makes CI publish the zip as a GitHub Release.
 
 ## Performance
 
@@ -204,7 +206,7 @@ What v0.12 changed, **for 1,000 blocks** (counts of Revit API work, from the cod
 | Duplicate grid | rebuilt from all instances for every level used | built **once** |
 | DWG geometry | Fine detail | Coarse detail |
 
-Measured without Revit (`addin/src/SmartHostMEP.Core`, .NET 8, 1,000 random block points):
+Measured without Revit (`addin/src/DMCRemapper.Core`, .NET 8, 1,000 random block points):
 - face index over 400 slab bays with openings: built in about 5–8 ms, and 1,000 lookups take about 3 ms;
 - duplicate grid of 20,000 existing instances: built in about 25–40 ms, and 1,000 queries take about 2 ms.
 
