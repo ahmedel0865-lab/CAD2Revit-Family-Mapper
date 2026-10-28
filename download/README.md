@@ -1,9 +1,9 @@
 # Download
 
-**[CAD2Revit-0.16.0.zip](CAD2Revit-0.16.0.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
+**[DMCRemapper-0.38.1.zip](DMCRemapper-0.38.1.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
 
 1. Click the zip above, then click **Download** (or the download icon) on the next page.
 2. Close Revit, unzip, double-click `Install.bat`.
-3. Start Revit and click **Always Load**. A **CAD2Revit** tab appears.
+3. Start Revit and click **Always Load**. A **DMC Remapper** tab appears.
 
 See [docs/USAGE.md](../docs/USAGE.md) for the full guide.

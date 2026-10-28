@@ -2,7 +2,7 @@
 Run from the addin folder:  python tools/make_icons.py"""
 import math, os, struct, zlib
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "src", "CAD2Revit", "Resources")
+OUT = os.path.join(os.path.dirname(__file__), "..", "src", "DMCRemapper", "Resources")
 BLUE, WHITE, AMBER = (32, 96, 176), (255, 255, 255), (245, 180, 40)
 
 
