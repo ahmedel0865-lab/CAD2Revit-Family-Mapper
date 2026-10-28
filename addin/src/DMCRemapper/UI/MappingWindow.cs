@@ -82,7 +82,12 @@ namespace DMCRemapper.UI
             };
             foreach (var row in _s.Rows) row.PropertyChanged += OnRowChanged;
             Closed += (o, e) => { foreach (var row in _s.Rows) row.PropertyChanged -= OnRowChanged; };
-            Loaded += (o, e) => { _grid.Focus(); UpdateStatus(); };
+            Loaded += (o, e) =>
+            {
+                _grid.Focus();
+                UpdateStatus();
+                if (!string.IsNullOrEmpty(_s.Message)) ShowMessage(_s.Message, _s.MessageIsWarning ? "Sh.Warn" : "Sh.Good");
+            };
             UpdateStatus();
         }
 

@@ -67,6 +67,27 @@ namespace DMCRemapper.Commands
                     var blocks = DwgReader.Read(doc, import, nested);
                     if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
                     var readDwgTime = sw.Elapsed;
+                    string skippedNote = null;
+                    if (blocks.Count == 0 && previous == null)
+                    {
+                        // First open: the DWG picked automatically is empty, so open on the first one that has blocks.
+                        string emptyName = Items.DwgName(doc, import);
+                        for (int i = 0; i < imports.Count && blocks.Count == 0; i++)
+                        {
+                            if (i == index) continue;
+                            var found = DwgReader.Read(doc, imports[i].Element, nested);
+                            if (found.Count == 0) continue;
+                            index = i;
+                            import = imports[i].Element;
+                            blocks = found;
+                            if (settings.SimplifyBlockNames) DwgReader.SimplifyNames(blocks);
+                            settings.LastDwg = Items.DwgName(doc, import);
+                            Core.Settings.TrySave(settings);
+                            level = Items.DefaultLevel(doc, import);
+                            skippedNote = $"No blocks found in {emptyName} (exploded or unloaded?), so {settings.LastDwg} is shown. Pick another DWG above.";
+                        }
+                        readDwgTime = sw.Elapsed;
+                    }
                     if (blocks.Count == 0)
                     {
                         TaskDialog.Show("DMC Remapper", $"No blocks found in {Items.DwgName(doc, import)}.\n\n" +
@@ -84,6 +105,11 @@ namespace DMCRemapper.Commands
                     session.DwgNames = imports.Select(i => i.Name).ToList();
                     session.DwgIndex = session.PreviousDwgIndex = index;
                     session.IncludeNested = nested;
+                    if (skippedNote != null)
+                    {
+                        session.Message = skippedNote;
+                        session.MessageIsWarning = true;
+                    }
                     var setupTime = sw.Elapsed;
 
                     MappingWindow win = null;

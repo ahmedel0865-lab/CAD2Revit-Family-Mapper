@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.38.1] - 2026-10-28
+### Fixed: Place Families closed when the remembered DWG had no blocks
+- *Place Families* picks the DWG on its own (the one selected in the view, else the last one used, else the first). When that DWG had no blocks (exploded before linking, or the link is unloaded) the tool showed "No blocks found" and closed, so another DWG could not be chosen.
+- Now it opens on the first DWG that has blocks, and the window says which DWG was empty. The "No blocks found" message only appears when no DWG in the project has blocks.
+
 ## [0.38.0] - 2026-10-25
 ### Changed: renamed to DMC Remapper
 - The tool is now **DMC Remapper** - *CAD blocks → hosted Revit families* (formerly SmartHost MEP, and before that CAD2Revit). Placement is unchanged.

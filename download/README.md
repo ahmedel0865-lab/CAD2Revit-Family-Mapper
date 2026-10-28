@@ -1,6 +1,6 @@
 # Download
 
-**[DMCRemapper-0.38.0.zip](DMCRemapper-0.38.0.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
+**[DMCRemapper-0.38.1.zip](DMCRemapper-0.38.1.zip)**: standalone Revit add-in for Revit 2022-2026 (no pyRevit needed).
 
 1. Click the zip above, then click **Download** (or the download icon) on the next page.
 2. Close Revit, unzip, double-click `Install.bat`.
