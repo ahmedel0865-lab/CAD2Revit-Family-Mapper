@@ -106,7 +106,7 @@ namespace DMCRemapper.UI
             var title = new StackPanel { Orientation = Orientation.Horizontal };
             title.Children.Add(Theme.Text("DMC Remapper", Theme.TitleSize, bold: true));
             if (!string.IsNullOrEmpty(_s.Version))
-                title.Children.Add(Badge("v" + _s.Version, accent: true, margin: new Thickness(S, 2, 0, 0)));
+                title.Children.Add(Badge("v" + _s.Version, margin: new Thickness(S, 2, 0, 0)));
             var tagline = Theme.Text(App.Tagline, Theme.LabelSize, muted: true);
             tagline.Margin = new Thickness(S, 3, 0, 0);
             title.Children.Add(tagline);
@@ -320,11 +320,12 @@ namespace DMCRemapper.UI
             foreach (var r in _s.Rows) r.FamilyCategory = _category;
             if (_selFamily != null)
             {
-                Predicate<object> f = _category.Length == 0 ? null : (Predicate<object>)(o =>
+                string cat = _category;
+                Predicate<object> f = cat.Length == 0 ? null : (Predicate<object>)(o =>
                     o is FamilyOption fo && (ReferenceEquals(fo, KeepFamily) || fo.IsSkip ||
-                                             string.Equals(fo.Category, _category, StringComparison.OrdinalIgnoreCase)));
+                                             string.Equals(fo.Category, cat, StringComparison.OrdinalIgnoreCase)));
                 _selFamily.BaseFilter = f;
-                if (_selFamily.ItemsSource is System.ComponentModel.ICollectionView v) v.Filter = f;
+                if (_selFamily.ItemsSource is System.ComponentModel.ICollectionView v) { v.Filter = f; v.Refresh(); }
             }
             var match = _categoryItems.FirstOrDefault(c => c.Name.Equals(_category, StringComparison.OrdinalIgnoreCase));
             if (match != null && !ReferenceEquals(_familyCategory.SelectedItem, match))
@@ -654,9 +655,9 @@ namespace DMCRemapper.UI
             editing.Setters.Add(new Setter(TextBox.TextAlignmentProperty, TextAlignment.Right));
             var cell = new Style(typeof(DataGridCell), TryFindResource(typeof(DataGridCell)) as Style);
             var bad = new DataTrigger { Binding = new Binding(invalidProperty), Value = true };
-            bad.Setters.Add(new Setter(Control.BorderBrushProperty, TryFindResource("Sh.Danger") ?? Brushes.Firebrick));
+            bad.Setters.Add(new Setter(Control.BorderBrushProperty, TryFindResource("Sh.Danger") ?? Theme.Brush("Sh.Danger")));
             bad.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1.5)));
-            bad.Setters.Add(new Setter(Control.BackgroundProperty, TryFindResource("Sh.DangerSoft") ?? Brushes.MistyRose));
+            bad.Setters.Add(new Setter(Control.BackgroundProperty, TryFindResource("Sh.DangerSoft") ?? Theme.Brush("Sh.DangerSoft")));
             bad.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(errorProperty)));
             cell.Triggers.Add(bad);
             return new DataGridTextColumn
@@ -700,7 +701,7 @@ namespace DMCRemapper.UI
             name.SetBinding(TextBlock.TextProperty, new Binding("Name"));
             name.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
             name.SetValue(TextBlock.FontSizeProperty, Theme.SmallSize);
-            name.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Accent");
+            name.SetResourceReference(TextBlock.ForegroundProperty, "Sh.Text");
             var count = new FrameworkElementFactory(typeof(TextBlock));
             count.SetBinding(TextBlock.TextProperty, new Binding("ItemCount") { StringFormat = "   {0} block type(s)" });
             count.SetValue(TextBlock.FontSizeProperty, Theme.SmallSize);

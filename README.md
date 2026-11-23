@@ -47,7 +47,7 @@ flowchart LR
 
 **Mapping window**
 - **One window, top to bottom**: header (DWG, level, block types and instances), setup row (**DWG**, **Level**, **Host default**), search box with **All / Mapped / Unmapped** chips, the grid, a live summary (*12 mapped, 6 skipped, 590 elements will be placed*), a collapsible **Advanced** section and the footer (Load / Save; **Preview**, **Run**, Cancel). Preview and Run show their progress bar and Cancel inside the window.
-- **Follows Revit's light or dark theme** (Revit 2024+). Remembers its size, position, column widths, shown columns and whether Advanced is open.
+- **Follows Revit's light or dark theme** (Revit 2024+), with calm, eye-friendly colours: warm off-white or dark blue-grey backgrounds, one muted slate-blue accent, soft status colours, WCAG AA contrast. Remembers its size, position, column widths, shown columns and whether Advanced is open.
 - **2D symbol preview** (*Columns > Symbol preview panel*): hover over or select a block to see its CAD symbol, size and count. Hovering the block name shows it as a tooltip too.
 - One row per unique CAD block (e.g. `SMOKE-DET (42)`), **grouped by category**: Electrical, Mechanical, Plumbing, Architectural, Structural, Annotation, Other.
 - **Family category filter**: limit every Revit Family dropdown to one Revit category (e.g. *Lighting Fixtures*), then type to search inside it.

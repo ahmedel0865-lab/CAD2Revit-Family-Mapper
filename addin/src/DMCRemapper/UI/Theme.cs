@@ -23,35 +23,76 @@ namespace DMCRemapper.UI
 
         public static readonly FontFamily Font = new FontFamily("Segoe UI");
 
-        /// <summary>Colour name -> (light, dark).</summary>
-        static readonly (string key, string light, string dark)[] Palette =
+        // ---- colours ---------------------------------------------------------------------------
+        // Every colour of the add-in lives in these two tables, one per theme. Calm and easy on the
+        // eyes: warm off-white / soft grey in light, dark blue-grey (never pure black) in dark, one
+        // muted slate-blue accent for primary buttons and selection only, soft status colours.
+        // All text colours reach WCAG AA (4.5:1) on every background they are used on.
+
+        /// <summary>Light theme: warm off-white and soft warm greys, dark slate text (not pure black).</summary>
+        static readonly (string key, string hex)[] LightColors =
         {
-            ("Sh.Bg", "#FFFFFF", "#1F2329"),
-            ("Sh.Surface", "#F5F7FA", "#272C33"),
-            ("Sh.Surface2", "#EDF1F6", "#2F353D"),
-            ("Sh.Input", "#FFFFFF", "#1B1F24"),
-            ("Sh.Border", "#D3DAE4", "#3E4651"),
-            ("Sh.Text", "#1F2933", "#E7EAEE"),
-            ("Sh.Muted", "#687384", "#9BA4B0"),
-            ("Sh.Accent", "#2060B0", "#4C8DDB"),
-            ("Sh.AccentHover", "#1A4F92", "#6BA3E6"),
-            ("Sh.AccentSoft", "#E5EEF9", "#243A55"),
-            ("Sh.OnAccent", "#FFFFFF", "#FFFFFF"),
-            ("Sh.Hover", "#EEF3FA", "#323A45"),
-            ("Sh.Selection", "#D4E3F6", "#2C4868"),
-            ("Sh.RowAlt", "#F9FAFC", "#23282E"),
-            ("Sh.Danger", "#C62828", "#F07373"),
-            ("Sh.DangerSoft", "#FDECEC", "#4A2A2A"),
-            ("Sh.Good", "#2E7D32", "#7CC47F"),
-            ("Sh.GoodSoft", "#E8F5E9", "#24402A"),
-            ("Sh.Warn", "#A65F00", "#F0B35E"),
-            ("Sh.WarnSoft", "#FFF3E0", "#45361F"),
+            ("Sh.Bg", "#F6F5F2"),          // window background, warm off-white
+            ("Sh.Surface", "#EFEDE9"),     // cards, headers
+            ("Sh.Surface2", "#E6E3DE"),    // badges, tooltips, progress track
+            ("Sh.Input", "#FBFAF8"),       // text boxes, dropdowns
+            ("Sh.Border", "#D6D2CB"),      // light, low-contrast borders
+            ("Sh.Text", "#2F343A"),        // 11.5:1 on Bg
+            ("Sh.Muted", "#5A6169"),       // 5.7:1 on Bg
+            ("Sh.Accent", "#46658A"),      // muted slate blue
+            ("Sh.AccentHover", "#3A5676"),
+            ("Sh.AccentSoft", "#E1E7EE"),
+            ("Sh.OnAccent", "#F8F8F6"),    // text on the accent, 5.7:1
+            ("Sh.Hover", "#EAE7E2"),
+            ("Sh.Selection", "#DFE6ED"),
+            ("Sh.RowAlt", "#F2F0EC"),
+            ("Sh.Danger", "#9E4A42"),      // muted brick red
+            ("Sh.DangerSoft", "#F3E3E0"),
+            ("Sh.Good", "#436A48"),        // muted sage green
+            ("Sh.GoodSoft", "#E3ECE1"),
+            ("Sh.Warn", "#7A5E27"),        // muted ochre
+            ("Sh.WarnSoft", "#F2EAD8"),
         };
+
+        /// <summary>Dark theme: dark blue-grey (#1E2228), soft light-grey text (not pure white).</summary>
+        static readonly (string key, string hex)[] DarkColors =
+        {
+            ("Sh.Bg", "#1E2228"),
+            ("Sh.Surface", "#252A31"),
+            ("Sh.Surface2", "#2C323A"),
+            ("Sh.Input", "#1A1E23"),
+            ("Sh.Border", "#3A414B"),
+            ("Sh.Text", "#D5D9DE"),        // 11.3:1 on Bg
+            ("Sh.Muted", "#A5ACB5"),       // 7.0:1 on Bg
+            ("Sh.Accent", "#91ACCB"),      // soft slate blue
+            ("Sh.AccentHover", "#A3BAD5"),
+            ("Sh.AccentSoft", "#2B3847"),
+            ("Sh.OnAccent", "#1E2228"),    // dark text on the light accent, 7:1
+            ("Sh.Hover", "#2F353E"),
+            ("Sh.Selection", "#2F3E4F"),
+            ("Sh.RowAlt", "#22262C"),
+            ("Sh.Danger", "#DC9890"),
+            ("Sh.DangerSoft", "#3D2C2B"),
+            ("Sh.Good", "#95B898"),
+            ("Sh.GoodSoft", "#29362A"),
+            ("Sh.Warn", "#D3B477"),
+            ("Sh.WarnSoft", "#3A3324"),
+        };
+
+        static (string key, string hex)[] Palette => Dark ? DarkColors : LightColors;
+
+        /// <summary>The active theme's colours as one ResourceDictionary ("Sh.*" -> frozen brush).</summary>
+        public static ResourceDictionary ColorDictionary()
+        {
+            var d = new ResourceDictionary();
+            foreach (var p in Palette) d[p.key] = Brush(p.key);
+            return d;
+        }
 
         public static Color ColorOf(string key)
         {
             foreach (var p in Palette)
-                if (p.key == key) return (Color)ColorConverter.ConvertFromString(Dark ? p.dark : p.light);
+                if (p.key == key) return (Color)ColorConverter.ConvertFromString(p.hex);
             return Colors.Magenta;
         }
 
@@ -77,7 +118,8 @@ namespace DMCRemapper.UI
         {
             win.FontFamily = Font;
             win.FontSize = LabelSize;
-            foreach (var p in Palette) win.Resources[p.key] = Brush(p.key);
+            var colors = ColorDictionary();
+            foreach (var key in colors.Keys) win.Resources[key] = colors[key];
             win.Background = Brush("Sh.Bg");
             win.Foreground = Brush("Sh.Text");
             try
