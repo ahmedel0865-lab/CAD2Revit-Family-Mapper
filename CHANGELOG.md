@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.39.0] - 2026-11-23
+### Changed: calm, eye-friendly colours
+- **Light theme:** warm off-white background (`#F6F5F2`) with soft warm-grey cards and borders, dark slate text (`#2F343A`) instead of near-black on pure white.
+- **Dark theme:** dark blue-grey background (`#1E2228`), never pure black, with soft light-grey text (`#D5D9DE`), never pure white.
+- **One muted accent:** slate blue (`#46658A` light, `#91ACCB` dark), used only for primary buttons, selection, focus and checked states. Group headers and the version badge are now neutral.
+- **Muted status colours:** sage green (done), ochre (warning), brick red (error), each with a soft background.
+- Every text colour meets WCAG AA (at least 4.5:1) on every background it is used on.
+- All colours are in one table per theme in `UI/Theme.cs` (`LightColors`, `DarkColors`), served to the windows as one `ResourceDictionary`; no other file sets a colour. The last two hard-coded fallback colours in the mapping window now come from the theme.
+- Light/dark still follows Revit's theme. No change to placement or any other behaviour.
+
 ## [0.38.1] - 2026-10-28
 ### Fixed: Place Families closed when the remembered DWG had no blocks
 - *Place Families* picks the DWG on its own (the one selected in the view, else the last one used, else the first). When that DWG had no blocks (exploded before linking, or the link is unloaded) the tool showed "No blocks found" and closed, so another DWG could not be chosen.
