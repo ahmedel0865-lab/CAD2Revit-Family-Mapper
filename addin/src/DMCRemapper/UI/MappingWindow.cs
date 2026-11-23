@@ -320,11 +320,12 @@ namespace DMCRemapper.UI
             foreach (var r in _s.Rows) r.FamilyCategory = _category;
             if (_selFamily != null)
             {
-                Predicate<object> f = _category.Length == 0 ? null : (Predicate<object>)(o =>
+                string cat = _category;
+                Predicate<object> f = cat.Length == 0 ? null : (Predicate<object>)(o =>
                     o is FamilyOption fo && (ReferenceEquals(fo, KeepFamily) || fo.IsSkip ||
-                                             string.Equals(fo.Category, _category, StringComparison.OrdinalIgnoreCase)));
+                                             string.Equals(fo.Category, cat, StringComparison.OrdinalIgnoreCase)));
                 _selFamily.BaseFilter = f;
-                if (_selFamily.ItemsSource is System.ComponentModel.ICollectionView v) v.Filter = f;
+                if (_selFamily.ItemsSource is System.ComponentModel.ICollectionView v) { v.Filter = f; v.Refresh(); }
             }
             var match = _categoryItems.FirstOrDefault(c => c.Name.Equals(_category, StringComparison.OrdinalIgnoreCase));
             if (match != null && !ReferenceEquals(_familyCategory.SelectedItem, match))

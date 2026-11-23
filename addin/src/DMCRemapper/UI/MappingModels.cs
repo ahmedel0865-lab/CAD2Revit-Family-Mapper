@@ -73,10 +73,14 @@ namespace DMCRemapper.UI
             set
             {
                 _familyCategory = value ?? "";
-                OptionFilter = _familyCategory.Length == 0 ? null : (Predicate<object>)(o =>
+                // Capture the category in a local and always re-apply + refresh: otherwise switching
+                // e.g. Lighting Fixtures -> Lighting Devices left the dropdown on the old list.
+                string category = _familyCategory;
+                OptionFilter = category.Length == 0 ? null : (Predicate<object>)(o =>
                     o is FamilyOption f && (f.IsSkip || ReferenceEquals(f, _family) ||
-                                            string.Equals(f.Category, _familyCategory, StringComparison.OrdinalIgnoreCase)));
-                if (Options.Filter != OptionFilter) Options.Filter = OptionFilter;
+                                            string.Equals(f.Category, category, StringComparison.OrdinalIgnoreCase)));
+                Options.Filter = OptionFilter;
+                Options.Refresh();
             }
         }
         string _familyCategory = "";

@@ -10,6 +10,9 @@
 - All colours are in one table per theme in `UI/Theme.cs` (`LightColors`, `DarkColors`), served to the windows as one `ResourceDictionary`; no other file sets a colour. The last two hard-coded fallback colours in the mapping window now come from the theme.
 - Light/dark still follows Revit's theme. No change to placement or any other behaviour.
 
+### Fixed: family category filter did not change the list (from 0.38.2)
+- Switching the family category (e.g. *Lighting Fixtures* to *Lighting Devices*) now refreshes every Revit Family dropdown and the selection bar; before, they could keep showing the previous category.
+
 ## [0.38.1] - 2026-10-28
 ### Fixed: Place Families closed when the remembered DWG had no blocks
 - *Place Families* picks the DWG on its own (the one selected in the view, else the last one used, else the first). When that DWG had no blocks (exploded before linking, or the link is unloaded) the tool showed "No blocks found" and closed, so another DWG could not be chosen.
